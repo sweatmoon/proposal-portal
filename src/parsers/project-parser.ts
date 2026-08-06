@@ -11,7 +11,7 @@
  *   #9  → proposal_attachments_toc + proposal_template (제안서 생성)
  */
 
-import { parseHtmlTables, extractNumber, normalizeDate } from './html-table-parser'
+import { parseHtmlTables, extractNumber, normalizeDate } from './html-table-parser.js'
 
 // ─── 반환 타입 ────────────────────────────────────────────────
 export interface AuditProjectData {

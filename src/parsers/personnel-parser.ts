@@ -10,7 +10,7 @@
  *   #10 → personnel_certifications (자격증)
  */
 
-import { parseHtmlTables, extractNumber } from './html-table-parser'
+import { parseHtmlTables, extractNumber } from './html-table-parser.js'
 
 // ─── 반환 타입 ────────────────────────────────────────────────
 export interface PersonnelData {

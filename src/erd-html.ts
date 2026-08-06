@@ -793,4 +793,5 @@ const erdHtml = `<!DOCTYPE html>
 </body>
 </html>
 `;
+export { erdHtml };
 export default erdHtml;
