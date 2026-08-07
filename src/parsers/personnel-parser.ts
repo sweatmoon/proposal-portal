@@ -12,6 +12,11 @@
 
 import { parseHtmlTables, extractNumber } from './html-table-parser.js'
 
+// 이메일 형식 검증 (xxx@xxx.xxx 패턴)
+function isValidEmail(s: string): boolean {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s.trim())
+}
+
 // ─── 반환 타입 ────────────────────────────────────────────────
 export interface PersonnelData {
   name: string
@@ -136,12 +141,12 @@ export function parsePersonnelHtml(html: string): ParsedPersonnel {
 
     // 이메일 행 탐지: label이 이메일이거나 값에 "@" 포함
     if (label0.includes('이메일')) {
-      personnel.email = val1
+      personnel.email = isValidEmail(val1) ? val1 : ''
       personnel.phone = (row[2] ?? '').trim()
       personnel.birthdate = (row[4] ?? '').trim()
     }
     // "강신배" 값행 → email 열이 col[0]에 이메일 직접 있는 경우
-    if (!personnel.email && val1.includes('@')) personnel.email = val1
+    if (!personnel.email && isValidEmail(val1)) personnel.email = val1
 
     if (label0.includes('최종학교')) {
       personnel.school = val1
@@ -161,12 +166,13 @@ export function parsePersonnelHtml(html: string): ParsedPersonnel {
   // 이메일/연락처 재스캔 (행 구조가 다를 때 대비)
   for (const row of t4) {
     for (const cell of row) {
-      if (!personnel.email && cell.includes('@') && cell.includes('.')) {
+      if (!personnel.email && isValidEmail(cell)) {
         personnel.email = cell.trim()
       }
     }
     if (row[0]?.includes('이메일')) {
-      personnel.email = (row[1] ?? '').trim()
+      const candidate = (row[1] ?? '').trim()
+      personnel.email = isValidEmail(candidate) ? candidate : personnel.email
       personnel.phone = (row[2] ?? '').trim() || (row[3] ?? '').trim()
     }
   }

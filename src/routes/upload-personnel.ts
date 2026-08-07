@@ -39,6 +39,16 @@ app.post('/', async (c) => {
   // ── DB 저장 ──
   try {
     const result = await transaction(async (client: pg.PoolClient) => {
+      // email 중복 방지: 동일 email이 다른 인력에 이미 존재하면 NULL 처리
+      let safeEmail: string | null = personnel.email || null
+      if (safeEmail) {
+        const existing = await client.query(
+          `SELECT id FROM personnel WHERE email = $1 AND name != $2 LIMIT 1`,
+          [safeEmail, personnel.name]
+        )
+        if (existing.rows.length > 0) safeEmail = null
+      }
+
       // 1. personnel UPSERT (name 기준)
       const upsertRes = await client.query(`
         INSERT INTO personnel (
@@ -74,7 +84,7 @@ app.post('/', async (c) => {
         RETURNING id
       `, [
         personnel.name, personnel.position, personnel.is_fulltime, personnel.company,
-        personnel.email || null, personnel.phone, personnel.birthdate,
+        safeEmail, personnel.phone, personnel.birthdate,
         personnel.auditor_cert_no, personnel.auditor_grade, personnel.tech_grade,
         personnel.school, personnel.major, personnel.degree,
         personnel.career_summary, personnel.career_qualif, personnel.career_project, personnel.career_expert,
