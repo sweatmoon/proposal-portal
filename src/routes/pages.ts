@@ -246,7 +246,7 @@ app.get('/proposals/:id', async (c) => {
             'id', pa.id, 'person_name', pa.person_name, 'member_type', pa.member_type,
             'domain', pa.domain, 'pre_survey_md', pa.pre_survey_md,
             'audit_md', pa.audit_md, 'action_confirm_md', pa.action_confirm_md,
-            'total_md', pa.total_md, 'is_fulltime', pa.is_fulltime
+            'total_md', pa.total_md
           ) ORDER BY pa.id
         ) FILTER (WHERE pa.id IS NOT NULL), '[]'::json) AS assignments
       FROM audit_phases ph
@@ -280,7 +280,7 @@ app.get('/proposals/:id', async (c) => {
         <td class="px-3 py-2 text-center">${a.audit_md ?? 0}</td>
         <td class="px-3 py-2 text-center">${a.action_confirm_md ?? 0}</td>
         <td class="px-3 py-2 text-center font-semibold text-indigo-700">${a.total_md ?? 0}</td>
-        <td class="px-3 py-2 text-center text-slate-500">${a.is_fulltime ? '상근' : '비상근'}</td>
+        <td class="px-3 py-2 text-center text-slate-500">-</td>
       </tr>`).join('')
 
     return `
@@ -299,7 +299,6 @@ app.get('/proposals/:id', async (c) => {
             <th class="px-3 py-2 text-center">감리</th>
             <th class="px-3 py-2 text-center">조치확인</th>
             <th class="px-3 py-2 text-center">합계</th>
-            <th class="px-3 py-2 text-center">상근여부</th>
           </tr></thead>
           <tbody>${assignRows || '<tr><td colspan="8" class="px-3 py-3 text-center text-slate-400">배정 인력 없음</td></tr>'}</tbody>
         </table>
