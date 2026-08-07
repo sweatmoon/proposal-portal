@@ -124,6 +124,40 @@ app.post('/', async (c) => {
         `, values)
       }
 
+      // ── 감리경력 동적 계산 ──────────────────────────────────
+      // audit_history 중 가장 오래된 audit_yearmonth → auditor_start_date
+      // 현재까지 연수 = (현재년월 - 첫 감리년월) / 12
+      if (audit_history.length > 0) {
+        // "YYYY.MM" 또는 "YYYY년MM월" → 비교 가능 정렬 문자열로 변환
+        const toSortable = (ym: string): string => {
+          const m = ym.match(/(\d{4})[.\s년](\d{1,2})/)
+          if (m) return `${m[1]}.${m[2].padStart(2, '0')}`
+          return ym
+        }
+        const sorted = [...audit_history]
+          .map(h => toSortable(h.audit_yearmonth))
+          .filter(s => /^\d{4}\.\d{2}$/.test(s))
+          .sort()  // 사전순 = 시간순
+
+        if (sorted.length > 0) {
+          const earliest = sorted[0]  // ex) "2003.07"
+          const [startYear, startMonth] = earliest.split('.').map(Number)
+
+          const now = new Date()
+          const nowYear  = now.getFullYear()
+          const nowMonth = now.getMonth() + 1  // 1-indexed
+
+          const totalMonths = (nowYear - startYear) * 12 + (nowMonth - startMonth)
+          const careerYrs   = Math.max(0, Math.round(totalMonths / 12 * 10) / 10)
+
+          await client.query(`
+            UPDATE personnel
+            SET auditor_start_date = $1, auditor_career_yrs = $2
+            WHERE id = $3
+          `, [earliest, careerYrs, pid])
+        }
+      }
+
       // 5. IT 경력
       for (const career of it_career) {
         await client.query(`

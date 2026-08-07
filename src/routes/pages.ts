@@ -614,12 +614,35 @@ app.get('/personnel/:id', async (c) => {
       'SELECT * FROM personnel_certifications WHERE personnel_id = $1 ORDER BY cert_year DESC', [id]
     ),
     query<Record<string, unknown>>(
-      'SELECT * FROM personnel_audit_history WHERE personnel_id = $1 ORDER BY audit_yearmonth DESC', [id]
+      'SELECT * FROM personnel_audit_history WHERE personnel_id = $1 ORDER BY audit_yearmonth ASC', [id]
     ),
     query<Record<string, unknown>>(
       'SELECT * FROM personnel_it_career WHERE personnel_id = $1 ORDER BY period_start DESC', [id]
     ),
   ])
+
+  // 감리 실적 표시용 정렬: 최신순(DESC)
+  const auditHistoryDesc = [...auditHistory].reverse()
+  let dynamicCareerYrs: number | null = null
+  let dynamicStartDate: string | null = null
+  if (auditHistory.length > 0) {
+    const toSortable = (ym: string): string => {
+      const m = String(ym).match(/(\d{4})[.\s년](\d{1,2})/)
+      if (m) return `${m[1]}.${m[2].padStart(2, '0')}`
+      return String(ym)
+    }
+    const sorted = auditHistory
+      .map(h => toSortable(String(h.audit_yearmonth ?? '')))
+      .filter(s => /^\d{4}\.\d{2}$/.test(s))
+      .sort()
+    if (sorted.length > 0) {
+      dynamicStartDate = sorted[0]
+      const [sy, sm] = sorted[0].split('.').map(Number)
+      const now = new Date()
+      const totalMonths = (now.getFullYear() - sy) * 12 + (now.getMonth() + 1 - sm)
+      dynamicCareerYrs = Math.max(0, Math.round(totalMonths / 12 * 10) / 10)
+    }
+  }
 
   // 자격증 목록
   const certRows = certs.map(cert => `
@@ -636,7 +659,7 @@ app.get('/personnel/:id', async (c) => {
     </tr>`).join('')
 
   // 감리 실적 목록
-  const auditRows = auditHistory.map(h => `
+  const auditRows = auditHistoryDesc.map(h => `
     <tr class="border-t border-slate-100 hover:bg-slate-50">
       <td class="px-4 py-2.5 text-sm text-slate-600 text-center whitespace-nowrap">${h.audit_yearmonth ?? '-'}</td>
       <td class="px-4 py-2.5 text-sm font-medium text-slate-800 max-w-xs">
@@ -709,7 +732,7 @@ app.get('/personnel/:id', async (c) => {
         <!-- 감리 실적 -->
         <div class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
           <div class="px-5 py-3 bg-slate-700 text-white font-semibold text-sm flex items-center justify-between">
-            <span><i class="fas fa-history mr-2"></i>감리 실적 (${auditHistory.length}건)</span>
+            <span><i class="fas fa-history mr-2"></i>감리 실적 (${auditHistoryDesc.length}건)</span>
           </div>
           ${auditHistory.length > 0 ? `
           <div class="overflow-x-auto">
@@ -776,8 +799,8 @@ app.get('/personnel/:id', async (c) => {
             ${infoItem('감리자격번호', String(person.auditor_cert_no ?? '-'))}
             ${infoItem('감리등급', String(person.auditor_grade ?? '-'))}
             ${infoItem('기술등급', String(person.tech_grade ?? '-'))}
-            ${infoItem('감리경력', person.auditor_career_yrs != null ? Number(person.auditor_career_yrs).toFixed(1) + '년' : '-')}
-            ${infoItem('감리시작일', String(person.auditor_start_date ?? '-'))}
+            ${infoItem('감리경력', dynamicCareerYrs != null ? dynamicCareerYrs.toFixed(1) + '년' : (person.auditor_career_yrs != null ? Number(person.auditor_career_yrs).toFixed(1) + '년' : '-'))}
+            ${infoItem('감리시작일', dynamicStartDate ?? String(person.auditor_start_date ?? '-'))}
             ${infoItem('이메일', String(person.email ?? '-'))}
             ${infoItem('연락처', String(person.phone ?? '-'))}
             ${infoItem('생년월일', String(person.birthdate ?? '-'))}
