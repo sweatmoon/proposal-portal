@@ -463,7 +463,8 @@ export function parseProjectHtml(html: string): ParsedProject {
   // 헤더 구조 (HTML 종류에 따라 다름):
   //   A형 (11셀): 구분 | 담당분야 | 성명 | 정기 | 추가 | 검수 | 소계 | 상근 | 등급 | 감리원증 | 연락처 | 교육
   //   B형 (13셀): 구분 | 담당분야(colspan=2) | 성명 | 정기 | 추가 | 검수 | 소계 | 상근 | 등급 | 감리원증 | 연락처 | 교육
-  //   (B형에서 담당분야=분류+상세 2컬럼, 성명은 c[3])
+  //   C형 (14셀): 구분 | 대분류 | 소분류 | 성명 | 정기 | 추가 | 검수 | 소계 | 상근 | 등급 | 감리원증 | 연락처 | 교육
+  //   (전문가 그룹에서 분야가 2단계로 나뉘는 경우)
   let memberStart = 0
   for (let i = 0; i < t8.length; i++) {
     if (t8[i][0]?.includes('구분') || t8[i][0]?.includes('▶')) {
@@ -504,18 +505,27 @@ export function parseProjectHtml(html: string): ParsedProject {
     let domainIdx  = 1
     let startMdIdx = 3
 
-    if (nameRe.test(c[2])) {
+    // c[0]에 그룹명(전문가/감리팀)이 있는 rowspan 첫 행은 셀이 하나 더 많음
+    // → c[2]가 이름처럼 보여도 실제론 분야명일 수 있으므로 c[3]/c[4]부터 탐색
+    const hasGroupCell = c[0].includes('감리팀') || c[0].includes('전문가') || c[0].includes('테스터')
+
+    if (!hasGroupCell && nameRe.test(c[2])) {
       // A형: [구분] [담당분야] [성명] [정기] ...
       nameIdx = 2; domainIdx = 1; startMdIdx = 3
-    } else if (nameRe.test(c[1])) {
+    } else if (!hasGroupCell && nameRe.test(c[1])) {
       // 구분 없는 행: [담당분야] [성명] [정기] ...
       nameIdx = 1; domainIdx = 0; startMdIdx = 2
     } else if (nameRe.test(c[3])) {
-      // B형 (colspan=2): [구분] [분류] [상세] [성명] [정기] ...
-      // 또는 그룹 rowspan 첫행: [그룹] [분류] [상세] [성명] ...
+      // B형 (colspan=2) 또는 그룹 rowspan 첫행(A형):
+      // [구분/그룹] [분류] [상세] [성명] [정기] ...
       nameIdx = 3; domainIdx = 2; startMdIdx = 4
+    } else if (nameRe.test(c[4])) {
+      // C형 (14셀): [구분/그룹] [대분류] [소분류] [기타] [성명] ...
+      nameIdx = 4; domainIdx = 3; startMdIdx = 5
+    } else if (nameRe.test(c[2])) {
+      // A형 fallback (그룹셀 있어도 c[2]가 이름인 경우)
+      nameIdx = 2; domainIdx = 1; startMdIdx = 3
     } else {
-      // 이름을 찾을 수 없으면 스킵
       continue
     }
 
@@ -541,8 +551,10 @@ export function parseProjectHtml(html: string): ParsedProject {
       person_name:     personName,
       member_group:    currentGroup,
       member_type:     currentType,
-      // domain: 끝에 붙는 " 등록" 안내 텍스트 제거
-      domain:          (c[domainIdx] ?? '').replace(/\s*등록\s*$/, '').trim(),
+      // domain: C형(nameIdx=4)은 대분류+소분류 합치기, 나머지는 단일 셀
+      domain: nameIdx === 4
+        ? [c[2], c[3]].filter(Boolean).map(s => s.replace(/\s*등록\s*$/, '').trim()).filter(Boolean).join(' / ')
+        : (c[domainIdx] ?? '').replace(/\s*등록\s*$/, '').trim(),
       regular_md:      extractNumber(c[startMdIdx] ?? '') ?? 0,
       additional_md:   extractNumber(c[startMdIdx + 1] ?? '') ?? 0,
       acceptance_md:   extractNumber(c[startMdIdx + 2] ?? '') ?? 0,
