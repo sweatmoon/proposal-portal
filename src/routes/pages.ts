@@ -694,6 +694,8 @@ app.get('/proposals/:id', async (c) => {
     if (e.key === 'Escape') { closePersonModal(); closeKModal() }
   })
   </script>`
+
+  return c.html(layout(String(project.project_name), body, 'proposals'))
 })
 
 // ── 인력정보 목록 ─────────────────────────────────────────────
