@@ -460,7 +460,10 @@ export function parseProjectHtml(html: string): ParsedProject {
   const t8 = tables[7]?.rows ?? []
   const proposal_members: ProposalMemberData[] = []
 
-  // 헤더: 구분 | 담당 분야 | 성명 | 정기 | 추가 | 검수지원 | 소계 | 상근 | 감리원 등급 | 감리원증 | 연락처 | 교육 시간
+  // 헤더 구조 (HTML 종류에 따라 다름):
+  //   A형 (11셀): 구분 | 담당분야 | 성명 | 정기 | 추가 | 검수 | 소계 | 상근 | 등급 | 감리원증 | 연락처 | 교육
+  //   B형 (13셀): 구분 | 담당분야(colspan=2) | 성명 | 정기 | 추가 | 검수 | 소계 | 상근 | 등급 | 감리원증 | 연락처 | 교육
+  //   (B형에서 담당분야=분류+상세 2컬럼, 성명은 c[3])
   let memberStart = 0
   for (let i = 0; i < t8.length; i++) {
     if (t8[i][0]?.includes('구분') || t8[i][0]?.includes('▶')) {
@@ -475,9 +478,11 @@ export function parseProjectHtml(html: string): ParsedProject {
 
   for (let i = memberStart; i < t8.length; i++) {
     const row = t8[i]
-    const c = row.map(s => (s ?? '').trim())
+    // 개행·연속 공백 정규화: "단계 감리팀\n (11 명)" → "단계 감리팀 (11 명)"
+    const c = row.map(s => (s ?? '').replace(/[\r\n]+/g, ' ').replace(/\s{2,}/g, ' ').trim())
 
-    // 그룹 헤더: "단계 감리팀 (6 명)"
+    // 그룹 헤더 감지: "단계 감리팀 (6 명)" / "전문가 (14 명)" 등
+    // rowspan으로 반복 등장하거나 c[0]에 그룹명이 있는 경우
     if (c[0].includes('감리팀') || c[0].includes('전문가') || c[0].includes('테스터')) {
       const mType = c[0].match(/(감리팀|전문가|테스터)/)
       if (mType) {
@@ -487,21 +492,31 @@ export function parseProjectHtml(html: string): ParsedProject {
     }
 
     // 소계 행 스킵
-    if (c[0] === '소계' || c[1] === '소계' || c[2] === '소계') continue
+    if (c[0] === '소계' || c[1] === '소계' || c[2] === '소계' || c[3] === '소계') continue
     // 총계 행 스킵
     if (c[0].includes('총계') || c[0].includes('합계')) continue
 
-    // 이름 컬럼 위치 결정 (c[2] or c[1])
-    // 구조: 구분 | 담당분야 | 성명 | 정기 | 추가 | 검수 | 소계 | 상근 | 등급 | 감리원증 | 연락처 | 교육
-    // 또는:      | 담당분야 | 성명 | ... (구분 없는 행)
-    let nameIdx = 2
-    let domainIdx = 1
+    // ── 이름 컬럼 위치 동적 탐지 ──
+    // 이름 패턴: 한글 2~5자 (선택적으로 " (K)" 접미사)
+    const nameRe = /^[가-힣]{2,5}(\s*\([A-Z]\))?$/
+
+    let nameIdx    = 2   // 기본값: A형 (11셀)
+    let domainIdx  = 1
     let startMdIdx = 3
 
-    // 이름 패턴 탐지 (한글 2-4자 + " (K)" 가능)
-    const nameRe = /^[가-힣]{2,5}(\s*\([A-Z]\))?$/
-    if (!nameRe.test(c[nameIdx]) && nameRe.test(c[1])) {
+    if (nameRe.test(c[2])) {
+      // A형: [구분] [담당분야] [성명] [정기] ...
+      nameIdx = 2; domainIdx = 1; startMdIdx = 3
+    } else if (nameRe.test(c[1])) {
+      // 구분 없는 행: [담당분야] [성명] [정기] ...
       nameIdx = 1; domainIdx = 0; startMdIdx = 2
+    } else if (nameRe.test(c[3])) {
+      // B형 (colspan=2): [구분] [분류] [상세] [성명] [정기] ...
+      // 또는 그룹 rowspan 첫행: [그룹] [분류] [상세] [성명] ...
+      nameIdx = 3; domainIdx = 2; startMdIdx = 4
+    } else {
+      // 이름을 찾을 수 없으면 스킵
+      continue
     }
 
     const rawName = c[nameIdx]
@@ -509,18 +524,32 @@ export function parseProjectHtml(html: string): ParsedProject {
 
     const personName = rawName.replace(/\s*\([A-Z]\)/, '').trim()
 
+    // is_fulltime: "상근" 정확히 일치 / "비상근" 포함 방지
+    const fulltimeCell = (c[startMdIdx + 4] ?? '').trim()
+    const is_fulltime  = fulltimeCell === '상근' ? 1 : 0
+
+    // 그룹 첫 행(rowspan)에서 c[0]이 그룹명이면 currentGroup/currentType 업데이트
+    if (c[0].includes('감리팀') || c[0].includes('전문가') || c[0].includes('테스터')) {
+      const mType = c[0].match(/(감리팀|전문가|테스터)/)
+      if (mType) {
+        currentGroup = c[0]
+        currentType  = mType[1] === '감리팀' ? '감리원' : mType[1]
+      }
+    }
+
     proposal_members.push({
-      person_name:    personName,
-      member_group:   currentGroup,
-      member_type:    currentType,
-      domain:         c[domainIdx] ?? '',
-      regular_md:     extractNumber(c[startMdIdx] ?? '') ?? 0,
-      additional_md:  extractNumber(c[startMdIdx + 1] ?? '') ?? 0,
-      acceptance_md:  extractNumber(c[startMdIdx + 2] ?? '') ?? 0,
-      is_fulltime:    (c[startMdIdx + 4] ?? '').includes('상근') ? 1 : 0,
-      auditor_grade:  c[startMdIdx + 5] ?? '',
+      person_name:     personName,
+      member_group:    currentGroup,
+      member_type:     currentType,
+      // domain: 끝에 붙는 " 등록" 안내 텍스트 제거
+      domain:          (c[domainIdx] ?? '').replace(/\s*등록\s*$/, '').trim(),
+      regular_md:      extractNumber(c[startMdIdx] ?? '') ?? 0,
+      additional_md:   extractNumber(c[startMdIdx + 1] ?? '') ?? 0,
+      acceptance_md:   extractNumber(c[startMdIdx + 2] ?? '') ?? 0,
+      is_fulltime,
+      auditor_grade:   c[startMdIdx + 5] ?? '',
       auditor_cert_no: c[startMdIdx + 6] ?? '',
-      phone:          c[startMdIdx + 7] ?? '',
+      phone:           c[startMdIdx + 7] ?? '',
       education_hours: extractNumber(c[startMdIdx + 8] ?? '') ?? 0,
     })
   }
