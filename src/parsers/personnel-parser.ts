@@ -219,13 +219,25 @@ export function parsePersonnelHtml(html: string): ParsedPersonnel {
       if (!personnel.degree && vRow[2]) personnel.degree = vRow[2]
     }
 
-    // ── 경력 요약 (라벨-값이 같은 행 또는 다음 행) ────────
-    if (cells[0].includes('주요 경력') && !cells[0].includes('자격')) {
-      personnel.career_summary = cells[1] || (t4[i + 1]?.[0] ?? '')
+    // ── 경력 관련 필드 (라벨 | 값 이 같은 행에 있는 구조) ───
+    // cells[1]이 비어있으면 colspan으로 합쳐진 경우 cells[1] = '' 일 수 있으나
+    // parseHtmlTables가 <pre> 내부 텍스트를 cells[1]에 넣어준다 (확인 완료)
+    if (cells[0] === '주요 경력' || (cells[0].includes('주요 경력') && !cells[0].includes('자격') && !cells[0].includes('및'))) {
+      const val = (cells[1] ?? '').trim()
+      if (val) personnel.career_summary = val
     }
-    if (cells[0].includes('주요 경력 및 자격')) personnel.career_qualif  = cells[1] || ''
-    if (cells[0].includes('시스템 개발'))        personnel.career_project = cells[1] || ''
-    if (cells[0].includes('주요 이력'))           personnel.career_expert  = cells[1] || ''
+    if (cells[0].includes('주요 경력 및 자격') || cells[0].includes('주요경력및자격')) {
+      const val = (cells[1] ?? '').trim()
+      if (val) personnel.career_qualif = val
+    }
+    if (cells[0].includes('시스템 개발') || cells[0].includes('프로젝트 실무')) {
+      const val = (cells[1] ?? '').trim()
+      if (val) personnel.career_project = val
+    }
+    if (cells[0].includes('주요 이력') || cells[0].includes('전문가용')) {
+      const val = (cells[1] ?? '').trim()
+      if (val) personnel.career_expert = val
+    }
   }
 
   // ── 이메일 전체 재스캔 (보조) ──────────────────────────
@@ -276,13 +288,37 @@ export function parsePersonnelHtml(html: string): ParsedPersonnel {
     })
   }
 
-  // ── 4. IT 경력 (헤더: 연도|프로젝트명|주관기관|담당분야|역할|소속회사|비고) ──
-  // 실제 확인: index 10
-  const itTable =
-    findTableByHeaders(tables, ['프로젝트명', '소속 회사']) ??
-    findTableByHeaders(tables, ['프로젝트명', '소속']) ??
-    findTableByHeaders(tables, ['연도', '프로젝트명', '비고']) ??
-    tables[10]
+  // ── 4. IT 경력 ─────────────────────────────────────────────
+  // 포맷 A (강신배 등): 연도|프로젝트명|주관기관|담당분야|역할|소속회사|비고
+  // 포맷 B (강혁 등):   기간(년)|경력|담당 업무|유사 경력의 근거
+  //
+  // 탐색 우선순위:
+  //   1) 포맷 A 헤더 탐색
+  //   2) 포맷 B 헤더 탐색 ('기간' + '경력' 또는 '담당 업무')
+  //   3) fallback: tables[10]
+  // 데이터 행이 2행 이상인 테이블만 유효로 판단 (헤더만 있는 테이블 제외)
+  const hasData = (t: { rows: string[][] } | null | undefined) =>
+    t != null && t.rows.length >= 2
+
+  const itTableA =
+    [
+      findTableByHeaders(tables, ['프로젝트명', '소속 회사']),
+      findTableByHeaders(tables, ['프로젝트명', '소속']),
+      findTableByHeaders(tables, ['연도', '프로젝트명', '비고']),
+    ].find(hasData) ?? null
+
+  const itTableB =
+    [
+      findTableByHeaders(tables, ['기간', '경력', '담당']),
+      findTableByHeaders(tables, ['기간(년)', '경력']),
+      findTableByHeaders(tables, ['기간', '담당 업무']),
+    ].find(hasData) ?? null
+
+  // A형 우선, 없으면 B형, 없으면 fallback
+  const itTable = (hasData(itTableA) ? itTableA : null)
+               ?? (hasData(itTableB) ? itTableB : null)
+               ?? (hasData(tables[10]) ? tables[10] : null)
+               ?? itTableA ?? itTableB ?? tables[10]
   const t9 = itTable?.rows ?? []
   const it_career: PersonnelItCareer[] = []
 
@@ -293,18 +329,27 @@ export function parsePersonnelHtml(html: string): ParsedPersonnel {
 
     for (let ci = 0; ci < hdr.length; ci++) {
       const h = hdr[ci]
-      if (h.includes('연도') || h.includes('기간'))                               cPeriod  = ci
-      if (h.includes('프로젝트') || h.includes('경력') || h.includes('사업명'))  cProject = ci
-      if (h.includes('주관') || h.includes('발주') || h.includes('기관'))         cClient  = ci
-      if (h.includes('분야') || h.includes('담당'))                               cDomain  = ci
-      if (h.includes('역할'))                                                      cRole    = ci
-      if (h.includes('소속') || h.includes('회사') || h.includes('수행사'))       cCompany = ci
-      if (h.includes('비고') || h.includes('근거'))                               cRemarks = ci
+      if (h.includes('연도') || h.includes('기간'))                                            cPeriod  = ci
+      // '경력'이 포함되더라도 '근거'도 포함이면 remarks로 처리 (예: "유사 경력의 근거")
+      if ((h.includes('프로젝트') || h.includes('사업명') ||
+           (h.includes('경력') && !h.includes('근거') && !h.includes('기간'))))               cProject = ci
+      if (h.includes('주관') || h.includes('발주') ||
+          (h.includes('기관') && !h.includes('교육')))                                         cClient  = ci
+      if (h.includes('담당 업무') || h.includes('담당분야') ||
+          (h.includes('분야') && !h.includes('유사')))                                         cDomain  = ci
+      if (h === '역할' || (h.includes('역할') && !h.includes('분야')))                        cRole    = ci
+      if (h.includes('소속') || h.includes('수행사') ||
+          (h.includes('회사') && !h.includes('기관')))                                         cCompany = ci
+      if (h.includes('비고') || h.includes('근거'))                                            cRemarks = ci
     }
+
+    // 포맷 B 판별: '기관' 컬럼이 없는 경우 → 클라이언트 없는 포맷
+    const isFmtB = hdr.some(h => h.includes('기간') && (h.includes('년') || h === '기간'))
+                   && !hdr.some(h => h.includes('주관') || h.includes('기관'))
 
     for (let i = 1; i < t9.length; i++) {
       const r = (t9[i] ?? []).map(c => (c ?? '').trim())
-      const periodRaw = r[cPeriod] ?? ''
+      const periodRaw  = r[cPeriod]  ?? ''
       const projectRaw = r[cProject] ?? ''
       if (!periodRaw || !projectRaw) continue
       if (!/\d{4}/.test(periodRaw)) continue
@@ -314,10 +359,10 @@ export function parsePersonnelHtml(html: string): ParsedPersonnel {
         period_start: period.start,
         period_end:   period.end,
         project_name: projectRaw,
-        client_org:   r[cClient]  ?? '',
+        client_org:   isFmtB ? '' : (r[cClient]  ?? ''),
         domain:       r[cDomain]  ?? '',
-        role:         r[cRole]    ?? '',
-        company:      r[cCompany] ?? '',
+        role:         isFmtB ? '' : (r[cRole]    ?? ''),
+        company:      isFmtB ? '' : (r[cCompany] ?? ''),
         remarks:      r[cRemarks] ?? '',
       })
     }

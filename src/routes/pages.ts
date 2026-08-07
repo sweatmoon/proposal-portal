@@ -863,13 +863,19 @@ app.get('/personnel/:id', async (c) => {
         <!-- 전문 역량 -->
         ${person.career_qualif ? `
         <div class="bg-teal-50 rounded-2xl border border-teal-200 p-5">
-          <h3 class="font-bold text-teal-700 mb-2 text-sm"><i class="fas fa-star mr-2"></i>자격 사항</h3>
+          <h3 class="font-bold text-teal-700 mb-2 text-sm"><i class="fas fa-star mr-2"></i>주요 경력 및 자격</h3>
           <p class="text-xs text-teal-800 whitespace-pre-line leading-relaxed">${person.career_qualif}</p>
+        </div>` : ''}
+
+        ${person.career_project ? `
+        <div class="bg-orange-50 rounded-2xl border border-orange-200 p-5">
+          <h3 class="font-bold text-orange-700 mb-2 text-sm"><i class="fas fa-code mr-2"></i>시스템 개발 / 프로젝트 실무 경력</h3>
+          <p class="text-xs text-orange-800 whitespace-pre-line leading-relaxed">${person.career_project}</p>
         </div>` : ''}
 
         ${person.career_expert ? `
         <div class="bg-violet-50 rounded-2xl border border-violet-200 p-5">
-          <h3 class="font-bold text-violet-700 mb-2 text-sm"><i class="fas fa-lightbulb mr-2"></i>전문 분야</h3>
+          <h3 class="font-bold text-violet-700 mb-2 text-sm"><i class="fas fa-lightbulb mr-2"></i>주요 이력 (전문가용)</h3>
           <p class="text-xs text-violet-800 whitespace-pre-line leading-relaxed">${person.career_expert}</p>
         </div>` : ''}
 
