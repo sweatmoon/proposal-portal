@@ -248,7 +248,7 @@ app.get('/proposals/:id', async (c) => {
             'audit_md', pa.audit_md, 'action_confirm_md', pa.action_confirm_md,
             'total_md', pa.total_md, 'is_fulltime', pa.is_fulltime
           ) ORDER BY pa.id
-        ) FILTER (WHERE pa.id IS NOT NULL), '[]') AS assignments
+        ) FILTER (WHERE pa.id IS NOT NULL), '[]'::json) AS assignments
       FROM audit_phases ph
       LEFT JOIN audit_phase_assignments pa ON pa.phase_id = ph.id
       WHERE ph.project_id = $1
@@ -267,7 +267,10 @@ app.get('/proposals/:id', async (c) => {
 
   // 감리 단계 테이블
   const phaseRows = phases.map(ph => {
-    const assigns = ph.assignments as Record<string, unknown>[]
+    // pg 드라이버가 json 컬럼을 문자열로 반환하는 경우 파싱
+    const rawAssign = ph.assignments
+    const assigns: Record<string, unknown>[] =
+      typeof rawAssign === 'string' ? JSON.parse(rawAssign) : (rawAssign as Record<string, unknown>[] ?? [])
     const assignRows = assigns.map((a: Record<string, unknown>) => `
       <tr class="text-xs border-t border-slate-100">
         <td class="px-3 py-2 text-slate-600">${a.domain ?? '-'}</td>
