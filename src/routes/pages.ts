@@ -539,7 +539,7 @@ app.get('/personnel', async (c) => {
   let idx = 1
   if (search) { sql += ` AND (p.name ILIKE $${idx} OR p.company ILIKE $${idx})`; params.push(`%${search}%`); idx++ }
   if (grade)  { sql += ` AND p.auditor_grade = $${idx++}`; params.push(grade) }
-  sql += ` GROUP BY p.id ORDER BY TRIM(p.name) ASC`
+  sql += ` GROUP BY p.id ORDER BY TRIM(p.name) COLLATE "C" ASC`
 
   const list = await query<Record<string, unknown>>(sql, params)
 

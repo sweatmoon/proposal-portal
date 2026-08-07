@@ -36,7 +36,7 @@ app.get('/', async (c) => {
     params.push(grade)
   }
 
-  sql += ` GROUP BY p.id ORDER BY TRIM(p.name) ASC`
+  sql += ` GROUP BY p.id ORDER BY TRIM(p.name) COLLATE "C" ASC`
 
   const rows = await query(sql, params)
   return c.json({ ok: true, data: rows })
