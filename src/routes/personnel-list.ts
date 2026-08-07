@@ -104,7 +104,8 @@ app.get('/:id/audit-match', async (c) => {
     const projectNameNorm = String(h.project_name ?? '').replace(/\s+/g, '')
     const sectorNorm      = String(h.sector      ?? '').replace(/\s+/g, '')
     const domainNorm      = String(h.domain      ?? '').replace(/\s+/g, '')
-    const combined = projectNameNorm + sectorNorm + domainNorm
+    const clientOrgNorm   = String(h.client_org  ?? '').replace(/\s+/g, '')
+    const combined = projectNameNorm + sectorNorm + domainNorm + clientOrgNorm
 
     // 매칭된 원본 키워드 목록 (sort_order 순)
     const matched: string[] = []
