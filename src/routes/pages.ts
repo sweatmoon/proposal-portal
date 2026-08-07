@@ -5,6 +5,22 @@ import { Hono } from 'hono'
 import { query, queryOne } from '../db/client.js'
 import { layout, statusBadge, fmtMoney, fmtDate } from '../views/layout.js'
 
+// ── 감리경력 "n년 n개월" 포맷 헬퍼 ──────────────────────────────
+// earliest: "YYYY.MM" 문자열
+function fmtCareer(earliest: string | null | undefined): string {
+  if (!earliest) return '-'
+  const m = String(earliest).match(/^(\d{4})\.(\d{2})$/)
+  if (!m) return '-'
+  const [, sy, sm] = m
+  const now = new Date()
+  const totalMonths = (now.getFullYear() - Number(sy)) * 12 + (now.getMonth() + 1 - Number(sm))
+  if (totalMonths < 0) return '-'
+  const years  = Math.floor(totalMonths / 12)
+  const months = totalMonths % 12
+  if (years === 0)  return `${months}개월`
+  if (months === 0) return `${years}년`
+  return `${years}년 ${months}개월`
+}
 
 const app = new Hono()
 
@@ -510,9 +526,10 @@ app.get('/personnel', async (c) => {
 
   let sql = `
     SELECT p.id, p.name, p.position, p.company, p.is_fulltime,
-           p.auditor_grade, p.auditor_cert_no, p.auditor_career_yrs, p.phone,
+           p.auditor_grade, p.auditor_cert_no, p.phone,
            COUNT(DISTINCT pc.id) AS cert_count,
-           COUNT(DISTINCT ph.id) AS audit_count
+           COUNT(DISTINCT ph.id) AS audit_count,
+           MIN(ph.audit_yearmonth) AS earliest_audit
     FROM personnel p
     LEFT JOIN personnel_certifications pc ON pc.personnel_id = p.id
     LEFT JOIN personnel_audit_history  ph ON ph.personnel_id = p.id
@@ -543,7 +560,7 @@ app.get('/personnel', async (c) => {
       </td>
       <td class="px-4 py-3 text-center text-sm">${p.auditor_grade ?? '-'}</td>
       <td class="px-4 py-3 text-center text-sm text-slate-500">${p.auditor_cert_no ?? '-'}</td>
-      <td class="px-4 py-3 text-center text-sm">${p.auditor_career_yrs != null ? Number(p.auditor_career_yrs).toFixed(1) + '년' : '-'}</td>
+      <td class="px-4 py-3 text-center text-sm">${fmtCareer(p.earliest_audit as string)}</td>
       <td class="px-4 py-3 text-center text-sm text-slate-500">${p.cert_count ?? 0}개</td>
       <td class="px-4 py-3 text-center text-sm text-slate-500">${p.audit_count ?? 0}건</td>
       <td class="px-4 py-3 text-sm text-slate-500">${p.phone ?? '-'}</td>
@@ -623,26 +640,17 @@ app.get('/personnel/:id', async (c) => {
 
   // 감리 실적 표시용 정렬: 최신순(DESC)
   const auditHistoryDesc = [...auditHistory].reverse()
-  let dynamicCareerYrs: number | null = null
-  let dynamicStartDate: string | null = null
-  if (auditHistory.length > 0) {
-    const toSortable = (ym: string): string => {
-      const m = String(ym).match(/(\d{4})[.\s년](\d{1,2})/)
-      if (m) return `${m[1]}.${m[2].padStart(2, '0')}`
-      return String(ym)
-    }
-    const sorted = auditHistory
-      .map(h => toSortable(String(h.audit_yearmonth ?? '')))
-      .filter(s => /^\d{4}\.\d{2}$/.test(s))
-      .sort()
-    if (sorted.length > 0) {
-      dynamicStartDate = sorted[0]
-      const [sy, sm] = sorted[0].split('.').map(Number)
-      const now = new Date()
-      const totalMonths = (now.getFullYear() - sy) * 12 + (now.getMonth() + 1 - sm)
-      dynamicCareerYrs = Math.max(0, Math.round(totalMonths / 12 * 10) / 10)
-    }
+
+  // 감리경력 동적 계산: audit_history 최솟값 → fmtCareer로 n년 n개월
+  const toSortableYM = (ym: string): string => {
+    const m = String(ym).match(/(\d{4})[.\s년](\d{1,2})/)
+    return m ? `${m[1]}.${m[2].padStart(2, '0')}` : String(ym)
   }
+  const sortedYM = auditHistory
+    .map(h => toSortableYM(String(h.audit_yearmonth ?? '')))
+    .filter(s => /^\d{4}\.\d{2}$/.test(s))
+    .sort()
+  const dynamicStartDate: string | null = sortedYM[0] ?? null
 
   // 자격증 목록
   const certRows = certs.map(cert => `
@@ -799,7 +807,7 @@ app.get('/personnel/:id', async (c) => {
             ${infoItem('감리자격번호', String(person.auditor_cert_no ?? '-'))}
             ${infoItem('감리등급', String(person.auditor_grade ?? '-'))}
             ${infoItem('기술등급', String(person.tech_grade ?? '-'))}
-            ${infoItem('감리경력', dynamicCareerYrs != null ? dynamicCareerYrs.toFixed(1) + '년' : (person.auditor_career_yrs != null ? Number(person.auditor_career_yrs).toFixed(1) + '년' : '-'))}
+            ${infoItem('감리경력', fmtCareer(dynamicStartDate ?? String(person.auditor_start_date ?? '')))}
             ${infoItem('감리시작일', dynamicStartDate ?? String(person.auditor_start_date ?? '-'))}
             ${infoItem('이메일', String(person.email ?? '-'))}
             ${infoItem('연락처', String(person.phone ?? '-'))}

@@ -2,29 +2,35 @@
  * 인력 프로파일 HTML 파서
  * 파일: 프로파일(성명).html
  *
- * 파싱 대상 테이블 (HTML 내 순서 기준):
- *   #4  → personnel (기본정보)
- *   #5  → personnel (education_hours)
- *   #7  → personnel_audit_history (감리실적)
- *   #9  → personnel_it_career (IT경력)
- *   #10 → personnel_certifications (자격증)
- *
- * ※ 테이블 인덱스는 HTML 버전마다 달라질 수 있으므로
- *    헤더 텍스트로 동적 탐색하는 방식을 병행 사용.
+ * 실제 확인된 HTML 테이블 구조 (강신배 기준):
+ *   index 0~2 : 헤더/메뉴 등 무시
+ *   index 3   : 기본정보
+ *     row0: [성명 (직위)] [감리] [IT 경력] [프로젝트 경력] [보유 자격] [회사]  ← 헤더
+ *     row1: [강신배 (수석, 상근)] [105회...] [9회...] [6회] [4개] [ATV]        ← 값
+ *     row2: [감리원증] [감리원 등급] [기술 등급] [감리 경력] [감리 시작일]      ← 라벨행
+ *     row3: [서울 제134호] [수석감리원] [기술사] [-] [0]                        ← 값행
+ *     row4: [이메일] [연락처] [생년월일]                                         ← 라벨행
+ *     row5: [sbaekang@activo.kr] [010-8769-9410] [640621]                       ← 값행
+ *     row6: [최종학교] [전공분야] [학위]
+ *     row7: [건국대학교 대학원 박사과정] [] [박사과정]
+ *   index 4   : 교육정보
+ *   index 8   : 감리실적  (헤더: 연월|사업명|주관기관|공공민간|담당분야|역할|참여단계|참여율)
+ *   index 10  : IT 경력   (헤더: 연도|프로젝트명|주관기관|담당분야|역할|소속회사|비고)
+ *   index 11  : 자격증    (헤더: 자격증명|발급처|국가공인여부|관련분야)
  */
 
 import { parseHtmlTables, extractNumber } from './html-table-parser.js'
 
-// 이메일 형식 검증 (xxx@xxx.xxx 패턴)
+// 이메일 형식 검증
 function isValidEmail(s: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s.trim())
 }
 
-/**
- * 특정 헤더 키워드를 포함하는 테이블 인덱스를 동적 탐색
- * headers: 첫 행에 포함돼야 할 키워드 배열 (모두 포함 시 매칭)
- */
-function findTableByHeaders(tables: { rows: string[][] }[], headers: string[]): { rows: string[][] } | null {
+// 헤더 키워드로 테이블 동적 탐색 (모든 키워드가 첫 행에 포함돼야 매칭)
+function findTableByHeaders(
+  tables: { rows: string[][] }[],
+  headers: string[]
+): { rows: string[][] } | null {
   for (const t of tables) {
     const firstRow = (t.rows[0] ?? []).join(' ')
     if (headers.every(h => firstRow.includes(h))) return t
@@ -93,16 +99,15 @@ export interface ParsedPersonnel {
   it_career: PersonnelItCareer[]
 }
 
-// ─── 기간 파싱: "2015년10월～2017년3월" → { start, end } ─────
+// ─── 기간 파싱: "2015년10월～2017년3월" or "2015.10 ~ 2017.03" → { start, end } ──
 function parsePeriod(raw: string): { start: string; end: string } {
-  const sep = raw.includes('～') ? '～' : raw.includes('~') ? '~' : '-'
+  // 구분자: ～ | ~ | - (단, 연도 내부 - 는 제외)
+  const sep = raw.includes('～') ? '～' : raw.includes('~') ? '~' : ' - '
   const parts = raw.split(sep).map(s => s.trim())
 
-  const toYYYYMM = (s: string) => {
-    // "2015년10월" → "2015.10"
+  const toYYYYMM = (s: string): string => {
     const m1 = s.match(/(\d{4})[년.\/\-](\d{1,2})/)
     if (m1) return `${m1[1]}.${m1[2].padStart(2, '0')}`
-    // "2015.10" 그대로
     const m2 = s.match(/(\d{4})\.(\d{1,2})/)
     if (m2) return `${m2[1]}.${m2[2].padStart(2, '0')}`
     return s
@@ -110,7 +115,7 @@ function parsePeriod(raw: string): { start: string; end: string } {
 
   return {
     start: toYYYYMM(parts[0] ?? ''),
-    end: toYYYYMM(parts[1] ?? ''),
+    end:   toYYYYMM(parts[1] ?? ''),
   }
 }
 
@@ -118,11 +123,14 @@ function parsePeriod(raw: string): { start: string; end: string } {
 export function parsePersonnelHtml(html: string): ParsedPersonnel {
   const tables = parseHtmlTables(html)
 
-  // ── 1. personnel 기본정보 ──────────────────────────────────
-  // 테이블 인덱스 3을 기본으로 하되, "성명"을 포함하는 테이블을 동적 탐색
-  const t4raw = tables[3] ?? findTableByHeaders(tables, ['성명'])
-               ?? tables.find(t => t.rows.some(r => r.some(c => c.includes('감리원증') || c.includes('감리원증'))))
-  const t4 = t4raw?.rows ?? []
+  // ── 1. 기본정보 테이블 탐색 ──────────────────────────────
+  // "성명 (직위)" 헤더를 포함하는 테이블 (index 3)
+  const basicTable =
+    tables[3] ??
+    findTableByHeaders(tables, ['성명']) ??
+    tables.find(t => t.rows.some(r => r[0]?.includes('감리원증'))) ??
+    null
+  const t4 = basicTable?.rows ?? []
 
   const personnel: PersonnelData = {
     name: '', position: '', is_fulltime: 1, company: '',
@@ -133,138 +141,128 @@ export function parsePersonnelHtml(html: string): ParsedPersonnel {
     education_name: '', education_hours: 0, education_org: '',
   }
 
-  for (let i = 0; i < t4.length; i++) {
-    const row = t4[i]
-    // 각 셀을 trim하여 저장
-    const cells = row.map(c => c?.trim() ?? '')
+  // 실제 HTML 구조: 라벨 행 다음에 값 행이 오는 패턴
+  // row N   = 라벨들: [감리원증] [감리원 등급] [기술 등급] [감리 경력] [감리 시작일]
+  // row N+1 = 값들:  [서울 제134호] [수석감리원] [기술사] [-] [0]
+  //
+  // 따라서 "라벨 행"을 먼저 감지하고, 다음 행에서 인덱스 대응 값을 읽는다
 
-    // ── 성명 헤더 행 → 다음 행에 "성명 (직위, 상근여부)" 값
+  for (let i = 0; i < t4.length; i++) {
+    const cells = (t4[i] ?? []).map(c => (c ?? '').trim())
+
+    // ── 성명/직위/회사 ─────────────────────────────────────
     if (cells[0].includes('성명')) {
-      const nextRow = (t4[i + 1] ?? []).map(c => c?.trim() ?? '')
-      const raw = nextRow[0] ?? ''   // ex) "강신배 (수석, 상근)"
+      // 다음 행이 값 행
+      const vRow = (t4[i + 1] ?? []).map(c => (c ?? '').trim())
+      const raw = vRow[0] ?? ''   // "강신배 (수석, 상근)"
       const mName = raw.match(/^([^\(（\s]+)/)
       if (mName) personnel.name = mName[1]
-      const mPos = raw.match(/[（(]([^,）)]+)/)
+      const mPos  = raw.match(/[（(]([^,）)]+)/)
       if (mPos) personnel.position = mPos[1].trim()
       personnel.is_fulltime = raw.includes('상근') ? 1 : 0
-      // 소속회사: 같은 행의 다른 셀에서 탐색
-      for (let ci = 1; ci < nextRow.length; ci++) {
-        if (nextRow[ci] && !nextRow[ci].match(/^[\d.]+$/) && nextRow[ci].length > 1) {
-          personnel.company = nextRow[ci]; break
-        }
+      // 회사: 마지막 셀 (index 5 기준, 없으면 마지막 비어있지 않은 셀)
+      personnel.company = vRow[5] ?? vRow[vRow.length - 1] ?? ''
+    }
+
+    // ── 감리원증 / 감리원 등급 / 기술 등급 라벨 행 감지 ───
+    // 패턴: cells = [감리원증, 감리원 등급, 기술 등급, 감리 경력, 감리 시작일]
+    if (cells[0].includes('감리원증') || cells[0].includes('감리원 번호')) {
+      // 다음 행이 값 행
+      const vRow = (t4[i + 1] ?? []).map(c => (c ?? '').trim())
+      // cells[0]=감리원증  → vRow[0]=자격번호
+      // cells[1]=감리원 등급 → vRow[1]=등급값
+      // cells[2]=기술 등급  → vRow[2]=기술등급값
+      // cells[3]=감리 경력  → vRow[3]=경력값 (무시 - 동적 계산)
+      // cells[4]=감리 시작일 → vRow[4]=시작일 (무시 - 동적 계산)
+      for (let ci = 0; ci < cells.length; ci++) {
+        const lbl = cells[ci]
+        const val = (vRow[ci] ?? '').trim()
+        if (!val || val === '-') continue
+        if (lbl.includes('감리원증') || lbl.includes('감리원 번호')) personnel.auditor_cert_no = val
+        if (lbl.includes('감리원 등급') || lbl === '감리등급')         personnel.auditor_grade   = val
+        if (lbl.includes('기술 등급')   || lbl === '기술등급')          personnel.tech_grade      = val
       }
     }
 
-    // ── 감리원증번호 / 감리원 등급 / 기술 등급 ──────────────
-    // 패턴A: label0=라벨, val1=값 (한 행에 라벨-값 쌍)
-    // 패턴B: label0=라벨, val1=값, label2=라벨, val3=값 (두 쌍이 같은 행)
-    for (let ci = 0; ci < cells.length - 1; ci++) {
-      const lbl = cells[ci]
-      const val = cells[ci + 1]
-      if (lbl.includes('감리원증') || lbl.includes('감리원 번호') || lbl.includes('자격번호')) {
-        if (val && !['감리원 등급','기술 등급','감리 경력','감리원 등급'].includes(val)) {
-          personnel.auditor_cert_no = val
-        }
-      }
-      if (lbl.includes('감리원 등급') || lbl.includes('감리등급')) {
-        if (val && !['기술 등급','감리원증','감리 경력'].includes(val)) {
-          personnel.auditor_grade = val
-        }
-      }
-      if (lbl.includes('기술 등급') || lbl.includes('기술등급')) {
-        if (val && !['감리원 등급','감리원증','감리 경력'].includes(val)) {
-          personnel.tech_grade = val
-        }
-      }
-    }
-
-    // ── 이메일 / 연락처 / 생년월일 ──────────────────────────
-    // 원본 HTML 구조: label="이메일" val=email | label="연락처" val=phone | label="생년월일" val=birthdate
-    // 같은 행에 여러 라벨-값 쌍이 있을 수 있음
-    for (let ci = 0; ci < cells.length - 1; ci++) {
-      const lbl = cells[ci]
-      const val = cells[ci + 1]
-      if (lbl === '이메일' || lbl.includes('이메일')) {
-        if (isValidEmail(val)) personnel.email = val
-        // 이메일 다음 셀들에서 연락처/생년월일 추가 탐색
-        for (let ci2 = ci + 2; ci2 < cells.length - 1; ci2++) {
-          const lbl2 = cells[ci2]
-          const val2 = cells[ci2 + 1]
-          if (lbl2.includes('연락처') || lbl2.includes('핸드폰') || lbl2.includes('전화')) {
-            if (val2 && !isValidEmail(val2)) personnel.phone = val2
-          }
-          if (lbl2.includes('생년월일') || lbl2.includes('생년')) {
-            if (val2) personnel.birthdate = val2
-          }
-        }
-      }
-      if ((lbl.includes('연락처') || lbl.includes('핸드폰') || lbl.includes('전화번호')) && !personnel.phone) {
-        if (val && !isValidEmail(val) && !val.includes('등급') && !val.includes('경력')) {
+    // ── 이메일 / 연락처 / 생년월일 라벨 행 감지 ──────────
+    // 패턴: cells = [이메일, 연락처, 생년월일, ...]
+    if (cells[0] === '이메일' || cells[0].includes('이메일')) {
+      // 다음 행이 값 행
+      const vRow = (t4[i + 1] ?? []).map(c => (c ?? '').trim())
+      for (let ci = 0; ci < cells.length; ci++) {
+        const lbl = cells[ci]
+        const val = vRow[ci] ?? ''
+        if (!val || val === '-') continue
+        if (lbl.includes('이메일')) {
+          if (isValidEmail(val)) personnel.email = val
+        } else if (lbl.includes('연락처') || lbl.includes('핸드폰') || lbl.includes('전화')) {
           personnel.phone = val
-        }
-      }
-      if ((lbl.includes('생년월일') || lbl.includes('생년')) && !personnel.birthdate) {
-        if (val && !val.includes('등급') && !val.includes('경력')) {
+        } else if (lbl.includes('생년월일') || lbl.includes('생년')) {
           personnel.birthdate = val
         }
       }
     }
 
-    // ── 학력 ─────────────────────────────────────────────────
+    // ── 최종학교 라벨 행 감지 ────────────────────────────
     if (cells[0].includes('최종학교')) {
-      personnel.school = cells[1] ?? ''
-      for (let ci = 2; ci < cells.length - 1; ci++) {
-        if (cells[ci].includes('전공')) personnel.major  = cells[ci + 1] ?? ''
-        if (cells[ci].includes('학위') || cells[ci].includes('졸업')) personnel.degree = cells[ci + 1] ?? ''
+      const vRow = (t4[i + 1] ?? []).map(c => (c ?? '').trim())
+      personnel.school = vRow[0] ?? ''
+      // 전공/학위는 라벨 행에서 인덱스 파악 후 값 행에서 읽기
+      for (let ci = 1; ci < cells.length; ci++) {
+        const lbl = cells[ci]
+        const val = vRow[ci] ?? ''
+        if (lbl.includes('전공')) personnel.major  = val
+        if (lbl.includes('학위') || lbl.includes('졸업')) personnel.degree = val
       }
-      if (!personnel.major  && cells[2]) personnel.major  = cells[2]
-      if (!personnel.degree && cells[3]) personnel.degree = cells[3]
-      if (!personnel.degree && cells[4]) personnel.degree = cells[4]
+      // 라벨 없이 순서만 있는 경우
+      if (!personnel.major  && vRow[1]) personnel.major  = vRow[1]
+      if (!personnel.degree && vRow[2]) personnel.degree = vRow[2]
     }
 
-    // ── 경력 요약 ─────────────────────────────────────────────
+    // ── 경력 요약 (라벨-값이 같은 행 또는 다음 행) ────────
     if (cells[0].includes('주요 경력') && !cells[0].includes('자격')) {
-      personnel.career_summary = cells[1] ?? ''
+      personnel.career_summary = cells[1] || (t4[i + 1]?.[0] ?? '')
     }
-    if (cells[0].includes('주요 경력 및 자격')) personnel.career_qualif  = cells[1] ?? ''
-    if (cells[0].includes('시스템 개발'))        personnel.career_project = cells[1] ?? ''
-    if (cells[0].includes('주요 이력'))           personnel.career_expert  = cells[1] ?? ''
+    if (cells[0].includes('주요 경력 및 자격')) personnel.career_qualif  = cells[1] || ''
+    if (cells[0].includes('시스템 개발'))        personnel.career_project = cells[1] || ''
+    if (cells[0].includes('주요 이력'))           personnel.career_expert  = cells[1] || ''
   }
 
-  // ── 이메일 전체 재스캔 (보조) ──
+  // ── 이메일 전체 재스캔 (보조) ──────────────────────────
   if (!personnel.email) {
-    for (const row of t4) {
+    outer: for (const row of t4) {
       for (const cell of row) {
         if (isValidEmail(cell ?? '')) {
-          personnel.email = cell.trim(); break
+          personnel.email = cell.trim()
+          break outer
         }
       }
-      if (personnel.email) break
     }
   }
 
-  // ── 2. 교육정보 ───────────────────────────────────────────
-  // "교육명" 헤더를 포함하는 테이블을 동적 탐색
-  const t5raw = findTableByHeaders(tables, ['교육']) ?? tables[4]
-  const t5 = t5raw?.rows ?? []
+  // ── 2. 교육정보 (index 4, 헤더: 교육명|교육이수시간|교육기관) ──
+  const eduTable =
+    findTableByHeaders(tables, ['교육명']) ??
+    findTableByHeaders(tables, ['교육', '시간']) ??
+    tables[4]
+  const t5 = eduTable?.rows ?? []
   if (t5.length >= 2) {
-    const dataRow = t5[1]
-    personnel.education_name  = (dataRow[0] ?? '').trim()
-    personnel.education_hours = extractNumber(dataRow[1] ?? '') ?? 0
-    personnel.education_org   = (dataRow[2] ?? '').trim()
+    const dr = (t5[1] ?? []).map(c => (c ?? '').trim())
+    personnel.education_name  = dr[0] ?? ''
+    personnel.education_hours = extractNumber(dr[1] ?? '') ?? 0
+    personnel.education_org   = dr[2] ?? ''
   }
 
-  // ── 3. 감리실적 ───────────────────────────────────────────
-  // 헤더: 연월 | 사업명 | 주관기관 | 공공/민간 | 담당분야 | 역할 | 참여단계 | 참여율
-  const t7raw = findTableByHeaders(tables, ['사업명', '참여율'])
-             ?? findTableByHeaders(tables, ['감리', '사업명'])
-             ?? tables[6]
-  const t7 = t7raw?.rows ?? []
+  // ── 3. 감리실적 (헤더: 연월|사업명|주관기관|공공/민간|담당분야|역할|참여단계|참여율) ──
+  const auditTable =
+    findTableByHeaders(tables, ['사업명', '참여율']) ??
+    findTableByHeaders(tables, ['사업명', '참여 단계']) ??
+    tables[8]
+  const t7 = auditTable?.rows ?? []
   const audit_history: PersonnelAuditHistory[] = []
   for (let i = 1; i < t7.length; i++) {
-    const r = t7[i].map(c => c?.trim() ?? '')
+    const r = (t7[i] ?? []).map(c => (c ?? '').trim())
     if (!r[0] || !r[1]) continue
-    // 연월 검증: "YYYY.MM" 또는 "YYYY년MM월" 형식
     if (!/\d{4}[.\s년]/.test(r[0])) continue
     audit_history.push({
       audit_yearmonth:    r[0],
@@ -278,85 +276,66 @@ export function parsePersonnelHtml(html: string): ParsedPersonnel {
     })
   }
 
-  // ── 4. IT 경력 ────────────────────────────────────────────
-  // 헤더 패턴: 기간(년) | 프로젝트명 | 주관기관 | 담당분야 | 역할 | 소속회사 | 비고
-  //   또는:   연도     | 프로젝트명 | 기간(년) | 주관기관 | 담당분야 | 역할 | 소속회사 | 비고
-  //
-  // 동적 탐색: "IT 경력" 섹션 또는 "기간" + "프로젝트명" 포함 테이블
-  const t9raw = findTableByHeaders(tables, ['프로젝트명', '소속'])
-             ?? findTableByHeaders(tables, ['사업명', '소속'])
-             ?? findTableByHeaders(tables, ['기간', '역할', '비고'])
-             ?? tables[8]
-  const t9 = t9raw?.rows ?? []
+  // ── 4. IT 경력 (헤더: 연도|프로젝트명|주관기관|담당분야|역할|소속회사|비고) ──
+  // 실제 확인: index 10
+  const itTable =
+    findTableByHeaders(tables, ['프로젝트명', '소속 회사']) ??
+    findTableByHeaders(tables, ['프로젝트명', '소속']) ??
+    findTableByHeaders(tables, ['연도', '프로젝트명', '비고']) ??
+    tables[10]
+  const t9 = itTable?.rows ?? []
   const it_career: PersonnelItCareer[] = []
 
   if (t9.length > 0) {
-    // 헤더 행으로 컬럼 인덱스 동적 파악
-    const header = (t9[0] ?? []).map(c => c?.trim() ?? '')
-    let colPeriod    = -1  // "기간" 컬럼 (period_start/end 파싱 대상)
-    let colProject   = -1  // "프로젝트명" 또는 "사업명"
-    let colClient    = -1  // "주관기관" 또는 "발주기관"
-    let colDomain    = -1  // "담당분야"
-    let colRole      = -1  // "역할"
-    let colCompany   = -1  // "소속회사" 또는 "수행사"
-    let colRemarks   = -1  // "비고"
+    // 헤더에서 컬럼 인덱스 파악
+    const hdr = (t9[0] ?? []).map(c => (c ?? '').trim())
+    let cPeriod = 0, cProject = 1, cClient = 2, cDomain = 3, cRole = 4, cCompany = 5, cRemarks = 6
 
-    for (let ci = 0; ci < header.length; ci++) {
-      const h = header[ci]
-      if (colPeriod  < 0 && (h.includes('기간') || h.includes('연도') || h.match(/^\d{4}/))) colPeriod  = ci
-      if (colProject < 0 && (h.includes('프로젝트') || h.includes('사업명')))               colProject = ci
-      if (colClient  < 0 && (h.includes('주관') || h.includes('발주') || h.includes('기관'))) colClient = ci
-      if (colDomain  < 0 && (h.includes('분야') || h.includes('담당')))                     colDomain  = ci
-      if (colRole    < 0 && h.includes('역할'))                                              colRole    = ci
-      if (colCompany < 0 && (h.includes('소속') || h.includes('수행사') || h.includes('회사'))) colCompany = ci
-      if (colRemarks < 0 && h.includes('비고'))                                             colRemarks = ci
+    for (let ci = 0; ci < hdr.length; ci++) {
+      const h = hdr[ci]
+      if (h.includes('연도') || h.includes('기간'))                               cPeriod  = ci
+      if (h.includes('프로젝트') || h.includes('경력') || h.includes('사업명'))  cProject = ci
+      if (h.includes('주관') || h.includes('발주') || h.includes('기관'))         cClient  = ci
+      if (h.includes('분야') || h.includes('담당'))                               cDomain  = ci
+      if (h.includes('역할'))                                                      cRole    = ci
+      if (h.includes('소속') || h.includes('회사') || h.includes('수행사'))       cCompany = ci
+      if (h.includes('비고') || h.includes('근거'))                               cRemarks = ci
     }
 
-    // 헤더 탐색 실패 시 원본 HTML 구조 기반 기본값 적용
-    // 확인된 구조: 기간(년) | 프로젝트명 | 주관기관 | 담당분야 | 역할 | 소속회사 | 비고
-    if (colPeriod  < 0) colPeriod  = 0
-    if (colProject < 0) colProject = 1
-    if (colClient  < 0) colClient  = 2
-    if (colDomain  < 0) colDomain  = 3
-    if (colRole    < 0) colRole    = 4
-    if (colCompany < 0) colCompany = 5
-    if (colRemarks < 0) colRemarks = 6
-
     for (let i = 1; i < t9.length; i++) {
-      const r = t9[i].map(c => c?.trim() ?? '')
-      const periodRaw = r[colPeriod] ?? ''
-      if (!periodRaw || !r[colProject]) continue
-
-      // 기간 셀이 숫자 연도가 아닌 경우 건너뜀 (헤더 반복 등)
+      const r = (t9[i] ?? []).map(c => (c ?? '').trim())
+      const periodRaw = r[cPeriod] ?? ''
+      const projectRaw = r[cProject] ?? ''
+      if (!periodRaw || !projectRaw) continue
       if (!/\d{4}/.test(periodRaw)) continue
 
       const period = parsePeriod(periodRaw)
       it_career.push({
         period_start: period.start,
         period_end:   period.end,
-        project_name: r[colProject] ?? '',
-        client_org:   r[colClient]  ?? '',
-        domain:       r[colDomain]  ?? '',
-        role:         r[colRole]    ?? '',
-        company:      r[colCompany] ?? '',
-        remarks:      r[colRemarks] ?? '',
+        project_name: projectRaw,
+        client_org:   r[cClient]  ?? '',
+        domain:       r[cDomain]  ?? '',
+        role:         r[cRole]    ?? '',
+        company:      r[cCompany] ?? '',
+        remarks:      r[cRemarks] ?? '',
       })
     }
   }
 
-  // ── 5. 자격증 ────────────────────────────────────────────
-  // 헤더: 자격증명 | 발급처 | 국가공인 여부 | 관련 분야
-  const t10raw = findTableByHeaders(tables, ['자격증', '발급'])
-              ?? findTableByHeaders(tables, ['자격', '국가공인'])
-              ?? tables[9]
-  const t10 = t10raw?.rows ?? []
+  // ── 5. 자격증 (헤더: 자격증명|발급처|국가공인여부|관련분야) ──
+  // 실제 확인: index 11
+  const certTable =
+    findTableByHeaders(tables, ['자격증 명', '발급처']) ??
+    findTableByHeaders(tables, ['자격증', '국가공인']) ??
+    tables[11]
+  const t10 = certTable?.rows ?? []
   const certifications: PersonnelCertification[] = []
   for (let i = 1; i < t10.length; i++) {
-    const r = t10[i].map(c => c?.trim() ?? '')
+    const r = (t10[i] ?? []).map(c => (c ?? '').trim())
     if (!r[0]) continue
-    // "정보시스템 수석감리원 (2006)" → 이름 + 연도
     const nameRaw = r[0]
-    const mYear = nameRaw.match(/\((\d{4})\)/)
+    const mYear   = nameRaw.match(/\((\d{4})\)/)
     const certName = nameRaw.replace(/\s*\(\d{4}\)/, '').trim()
     certifications.push({
       cert_name:     certName,
