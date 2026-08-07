@@ -966,6 +966,22 @@ app.get('/upload', (c) => {
   const MAX_FILES = 10
   const state = { personnel: [], project: [] }
 
+  // ── 알럿 (카드 하단 인라인) ──────────────────────────────────
+  function showAlert(type, msg) {
+    const id = 'alert-' + type
+    let el = document.getElementById(id)
+    if (!el) {
+      el = document.createElement('div')
+      el.id = id
+      el.className = 'mt-3 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 flex gap-2 items-start'
+      // 카드 내부 drop-zone 위쪽에 삽입
+      const card = document.getElementById('drop-' + type).closest('.bg-white')
+      card.appendChild(el)
+    }
+    el.innerHTML = \`<i class="fas fa-exclamation-circle mt-0.5 flex-shrink-0"></i><span class="whitespace-pre-line">\${msg}</span>
+      <button onclick="document.getElementById('\${id}').remove()" class="ml-auto text-red-400 hover:text-red-600 flex-shrink-0"><i class="fas fa-times"></i></button>\`
+  }
+
   function renderFileList(type) {
     const files = state[type]
     const ul = document.getElementById('filelist-' + type)
@@ -1000,13 +1016,20 @@ app.get('/upload', (c) => {
     const htmlFiles = newFiles.filter(f => f.name.endsWith('.html'))
     const nonHtml = newFiles.length - htmlFiles.length
     if (nonHtml > 0) addLog('err', nonHtml + '개 파일은 HTML이 아니어서 제외됨')
+
     const merged = [...state[type], ...htmlFiles]
+
+    // 10개 초과 시 알럿 + 추가 자체 차단
     if (merged.length > MAX_FILES) {
-      addLog('err', \`최대 \${MAX_FILES}개까지만 선택 가능합니다.\`)
-      state[type] = merged.slice(0, MAX_FILES)
-    } else {
-      state[type] = merged
+      const over = merged.length - MAX_FILES
+      showAlert(type,
+        \`파일은 최대 \${MAX_FILES}개까지만 업로드할 수 있습니다.\\n현재 \${state[type].length}개 선택됨 + 새 파일 \${htmlFiles.length}개 = \${merged.length}개 (초과: \${over}개)\\n\\n먼저 기존 파일을 제거하거나, 파일을 \${MAX_FILES - state[type].length}개 이하로 선택해 주세요.\`
+      )
+      addLog('err', \`❌ 파일 추가 불가: 최대 \${MAX_FILES}개 초과 (선택 \${merged.length}개)\`)
+      return  // 추가하지 않고 즉시 종료
     }
+
+    state[type] = merged
     if (htmlFiles.length > 0) addLog('info', htmlFiles.length + '개 파일 추가됨 (총 ' + state[type].length + '개)')
     renderFileList(type)
   }
