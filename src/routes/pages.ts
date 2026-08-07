@@ -662,7 +662,7 @@ app.get('/proposals/:id', async (c) => {
         .filter(r => r.match_count > 0)
         .map(r => {
           const kwLabel = r.mapped_keywords.length > 0 ? r.mapped_keywords[0] : r.matched_keywords[0]
-          return \`[\${kwLabel}] \${r.client_org ?? ''}, \${r.project_name ?? ''}\`
+          return \`[ \${kwLabel} ] \${r.client_org ?? ''}, \${r.project_name ?? ''}\`
         })
         .join('\\n')
 
