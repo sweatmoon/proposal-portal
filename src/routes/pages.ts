@@ -270,7 +270,7 @@ app.get('/proposals/:id', async (c) => {
       WHERE ph.project_id = $1
       GROUP BY ph.id ORDER BY ph.phase_order, ph.id
     `, [id]),
-    query<Record<string, unknown>>(`SELECT * FROM proposal_members WHERE project_id = $1 ORDER BY member_group, id`, [id]),
+    query<Record<string, unknown>>(`SELECT * FROM proposal_members WHERE project_id = $1 ORDER BY id ASC`, [id]),
     query<Record<string, unknown>>(`SELECT * FROM keywords WHERE project_id = $1 ORDER BY sort_order`, [id]),
     query<Record<string, unknown>>(`SELECT * FROM proposal_files WHERE project_id = $1 ORDER BY id`, [id]),
     query<Record<string, unknown>>(`SELECT * FROM proposal_attachments_toc WHERE project_id = $1 ORDER BY item_order`, [id]),
