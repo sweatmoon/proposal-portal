@@ -657,6 +657,15 @@ app.get('/proposals/:id', async (c) => {
 
       const matchedCount = rows.filter(r => r.match_count > 0).length
 
+      // 텍스트박스용 복사 텍스트 생성: 매칭된 이력만, 상위키워드 순 정렬 유지
+      const copyLines = rows
+        .filter(r => r.match_count > 0)
+        .map(r => {
+          const kwLabel = r.mapped_keywords.length > 0 ? r.mapped_keywords[0] : r.matched_keywords[0]
+          return \`[\${kwLabel}] \${r.client_org ?? ''}, \${r.project_name ?? ''}\`
+        })
+        .join('\\n')
+
       document.getElementById('kModalBody').innerHTML = \`
         <div class="mb-4">
           <p class="text-xs text-slate-500 mb-2 font-medium">이 제안의 키워드 (\${keywords.length}개) — 앞 순서가 상위 키워드</p>
@@ -665,8 +674,21 @@ app.get('/proposals/:id', async (c) => {
         <div class="mb-3 flex items-center gap-3">
           <span class="text-sm text-slate-600">전체 감리실적 <strong>\${rows.length}</strong>건</span>
           <span class="text-sm text-teal-700 font-semibold">키워드 매칭 <strong>\${matchedCount}</strong>건</span>
-          <span class="text-xs text-slate-400">(매칭 많은 순 → 상위 키워드 순 정렬)</span>
+          <span class="text-xs text-slate-400">(상위 키워드 순 → 최근 수행일자 순 정렬)</span>
         </div>
+        \${matchedCount > 0 ? \`
+        <div class="mb-4">
+          <div class="flex items-center justify-between mb-1.5">
+            <span class="text-xs font-semibold text-slate-600">매칭 감리이력 요약</span>
+            <button onclick="copyKText()" class="flex items-center gap-1.5 px-3 py-1.5 bg-teal-600 hover:bg-teal-700 text-white text-xs rounded-lg transition">
+              <i class="fas fa-copy"></i> 복사
+            </button>
+          </div>
+          <textarea id="kCopyText" readonly
+            class="w-full text-xs font-mono bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 text-slate-700 leading-relaxed resize-none focus:outline-none focus:ring-2 focus:ring-teal-300"
+            rows="\${Math.min(matchedCount, 8)}"
+          >\${copyLines}</textarea>
+        </div>\` : ''}
         <div class="overflow-x-auto rounded-xl border border-slate-200">
           <table class="w-full text-xs">
             <thead><tr class="bg-slate-50 text-slate-500 text-xs">
@@ -686,6 +708,28 @@ app.get('/proposals/:id', async (c) => {
     }
   }
   function closeKModal() { document.getElementById('kModal').classList.add('hidden') }
+
+  function copyKText() {
+    const ta = document.getElementById('kCopyText')
+    if (!ta) return
+    navigator.clipboard.writeText(ta.value).then(() => {
+      const btn = document.querySelector('#kModal button[onclick="copyKText()"]')
+      if (btn) {
+        const orig = btn.innerHTML
+        btn.innerHTML = '<i class="fas fa-check"></i> 복사됨'
+        btn.classList.replace('bg-teal-600', 'bg-green-600')
+        btn.classList.replace('hover:bg-teal-700', 'hover:bg-green-700')
+        setTimeout(() => {
+          btn.innerHTML = orig
+          btn.classList.replace('bg-green-600', 'bg-teal-600')
+          btn.classList.replace('hover:bg-green-700', 'hover:bg-teal-700')
+        }, 2000)
+      }
+    }).catch(() => {
+      ta.select()
+      document.execCommand('copy')
+    })
+  }
 
   // ESC 키로 모달 닫기
   document.addEventListener('keydown', e => {
