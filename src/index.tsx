@@ -5,7 +5,6 @@ import { serve } from '@hono/node-server'
 import { Hono } from 'hono'
 import { logger } from 'hono/logger'
 import { cors } from 'hono/cors'
-import { erdHtml } from './erd-html.js'
 import { uploadHtml } from './upload-html.js'
 import uploadPersonnelRoute from './routes/upload-personnel.js'
 import uploadProjectRoute from './routes/upload-project.js'
@@ -19,7 +18,6 @@ app.use('/api/*', cors())
 // ── 페이지 라우트 ─────────────────────────────────────────────
 app.get('/',       (c) => c.redirect('/upload'))
 app.get('/upload', (c) => c.html(uploadHtml))
-app.get('/erd',    (c) => c.html(erdHtml))
 
 // ── 헬스체크 (Railway health probe) ──────────────────────────
 app.get('/health', (c) => c.json({ ok: true, ts: new Date().toISOString() }))

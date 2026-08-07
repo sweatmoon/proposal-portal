@@ -7,7 +7,7 @@ export const uploadHtml = `<!DOCTYPE html>
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>파일 업로드 — 감리 DB</title>
+  <title>파일 업로드 — 제안팀 포털</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css">
   <style>
@@ -29,9 +29,8 @@ export const uploadHtml = `<!DOCTYPE html>
 
 <!-- 상단 네비 -->
 <nav class="bg-white border-b border-slate-200 px-6 py-3 flex items-center gap-6 shadow-sm">
-  <span class="font-bold text-indigo-700 text-lg"><i class="fas fa-database mr-2"></i>감리 DB</span>
+  <span class="font-bold text-indigo-700 text-lg"><i class="fas fa-building mr-2"></i>제안팀 포털</span>
   <a href="/upload" class="text-indigo-600 font-medium text-sm"><i class="fas fa-upload mr-1"></i>업로드</a>
-  <a href="/erd"    class="text-slate-500 hover:text-slate-700 text-sm"><i class="fas fa-project-diagram mr-1"></i>ERD</a>
 </nav>
 
 <div class="max-w-4xl mx-auto px-6 py-10">
