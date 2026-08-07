@@ -29,6 +29,17 @@ app.route('/api/personnel',        personnelApiRoute)
 // ── 페이지 라우트 (홈, /proposals, /personnel, /upload) ───────
 app.route('/', pagesRoute)
 
+// ── 전역 에러 핸들러 (디버그용 — 실제 에러 메시지 노출) ──────
+app.onError((err, c) => {
+  console.error('[onError]', err)
+  return c.html(`
+    <html><body style="background:#111;color:#f87171;font-family:monospace;padding:2rem">
+      <h2 style="color:#fb923c">Internal Server Error</h2>
+      <pre style="white-space:pre-wrap;font-size:13px">${err.stack ?? err.message}</pre>
+    </body></html>
+  `, 500)
+})
+
 // ── 서버 시작 ─────────────────────────────────────────────────
 const port = parseInt(process.env.PORT ?? '3000', 10)
 console.log(`🚀 서버 시작: http://localhost:${port}`)
