@@ -138,10 +138,11 @@ app.get('/:id/audit-match', async (c) => {
     return true
   })
 
-  // 정렬: match_count 많은 순 → top_sort_order 낮은 순 → audit_yearmonth 최신 순
+  // 정렬: 상위 키워드 sort_order 낮은 순 → 최신 연월 순 (매칭 없으면 최하위)
   rows.sort((a, b) => {
-    if (b.match_count !== a.match_count) return b.match_count - a.match_count
-    if (a.top_sort_order !== b.top_sort_order) return a.top_sort_order - b.top_sort_order
+    const aTop = (a as Record<string, unknown>).top_sort_order as number
+    const bTop = (b as Record<string, unknown>).top_sort_order as number
+    if (aTop !== bTop) return aTop - bTop
     const aYm = String((a as Record<string, unknown>).audit_yearmonth ?? '')
     const bYm = String((b as Record<string, unknown>).audit_yearmonth ?? '')
     return bYm.localeCompare(aYm)
