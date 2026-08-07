@@ -58,4 +58,94 @@ app.get('/:id', async (c) => {
   return c.json({ ok: true, data: { person, certs, auditHistory, itCareer } })
 })
 
+/**
+ * GET /api/personnel/:id/audit-match?projectId=N
+ * 특정 인원의 감리이력을 제안 프로젝트 키워드 기준으로 매칭/정렬하여 반환
+ * 응답: { ok, person, keywords, rows }
+ *   rows[]: { ...audit_history, matched_keywords: string[], mapped_keywords: string[], match_count: number }
+ */
+app.get('/:id/audit-match', async (c) => {
+  const personnelId = Number(c.req.param('id'))
+  const projectId   = Number(c.req.query('projectId') || '0')
+
+  if (isNaN(personnelId) || personnelId <= 0)
+    return c.json({ ok: false, error: 'invalid personnelId' }, 400)
+  if (isNaN(projectId) || projectId <= 0)
+    return c.json({ ok: false, error: 'projectId required' }, 400)
+
+  const [person, auditHistory, kwRows, kmRows] = await Promise.all([
+    queryOne('SELECT id, name, position, company, auditor_grade FROM personnel WHERE id = $1', [personnelId]),
+    query<Record<string, unknown>>(
+      'SELECT * FROM personnel_audit_history WHERE personnel_id = $1 ORDER BY audit_yearmonth DESC',
+      [personnelId]
+    ),
+    // 키워드 (sort_order 순 = 우선순위 순)
+    query<{ id: number; keyword: string; sort_order: number }>(
+      'SELECT id, keyword, sort_order FROM keywords WHERE project_id = $1 ORDER BY sort_order ASC',
+      [projectId]
+    ),
+    // 키워드 변환 룰
+    query<{ original_keyword: string; mapped_keyword: string }>(
+      'SELECT original_keyword, mapped_keyword FROM keyword_mappings WHERE project_id = $1',
+      [projectId]
+    ),
+  ])
+
+  if (!person) return c.json({ ok: false, error: 'person not found' }, 404)
+
+  // 변환 맵: original → mapped
+  const mappingMap = new Map<string, string>()
+  for (const km of kmRows) {
+    mappingMap.set(km.original_keyword, km.mapped_keyword)
+  }
+
+  // 각 감리이력에 대해 키워드 매칭
+  const rows = auditHistory.map(h => {
+    const projectNameNorm = String(h.project_name ?? '').replace(/\s+/g, '')
+    const sectorNorm      = String(h.sector      ?? '').replace(/\s+/g, '')
+    const domainNorm      = String(h.domain      ?? '').replace(/\s+/g, '')
+    const combined = projectNameNorm + sectorNorm + domainNorm
+
+    // 매칭된 원본 키워드 목록 (sort_order 순)
+    const matched: string[] = []
+    for (const kw of kwRows) {
+      const kwNorm = kw.keyword.replace(/\s+/g, '')
+      if (combined.includes(kwNorm)) {
+        matched.push(kw.keyword)
+      }
+    }
+
+    // 변환된 키워드 목록
+    const mapped = matched.map(kw => mappingMap.get(kw) ?? kw)
+
+    return {
+      ...h,
+      matched_keywords: matched,
+      mapped_keywords:  mapped,
+      match_count:      matched.length,
+      // 첫 번째 매칭 키워드의 sort_order (정렬용)
+      top_sort_order: matched.length > 0
+        ? (kwRows.find(k => k.keyword === matched[0])?.sort_order ?? 9999)
+        : 9999,
+    }
+  })
+
+  // 정렬: match_count 많은 순 → top_sort_order 낮은 순 → audit_yearmonth 최신 순
+  rows.sort((a, b) => {
+    if (b.match_count !== a.match_count) return b.match_count - a.match_count
+    if (a.top_sort_order !== b.top_sort_order) return a.top_sort_order - b.top_sort_order
+    const aYm = String((a as Record<string, unknown>).audit_yearmonth ?? '')
+    const bYm = String((b as Record<string, unknown>).audit_yearmonth ?? '')
+    return bYm.localeCompare(aYm)
+  })
+
+  return c.json({
+    ok: true,
+    person,
+    keywords: kwRows,
+    mappingMap: Object.fromEntries(mappingMap),
+    rows,
+  })
+})
+
 export default app

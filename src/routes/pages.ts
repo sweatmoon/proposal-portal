@@ -323,17 +323,23 @@ app.get('/proposals/:id', async (c) => {
   }).join('')
 
   // 제안 인력 테이블
-  const memberRows = members.map(m => `
+  const memberRows = members.map(m => {
+    const pid = m.personnel_id  // null이면 인력DB 미연결
+    const nameCell = pid
+      ? `<span class="cursor-pointer text-indigo-700 font-semibold hover:underline" onclick="openPersonModal(${pid})">${m.person_name}</span><span class="text-xs text-teal-600 font-bold cursor-pointer hover:text-teal-800 ml-0.5" onclick="openKModal(${pid},${id},'${String(m.person_name).replace(/'/g,"\\'")}')"> (K)</span>`
+      : `<span class="font-medium text-slate-700">${m.person_name}</span>`
+    return `
     <tr class="hover:bg-slate-50 text-sm border-t border-slate-100">
       <td class="px-4 py-2.5 text-slate-500 text-xs">${m.member_group ?? '-'}</td>
-      <td class="px-4 py-2.5 font-medium">${m.person_name}</td>
+      <td class="px-4 py-2.5">${nameCell}</td>
       <td class="px-4 py-2.5 text-slate-600 text-xs">${m.member_type ?? '-'}</td>
       <td class="px-4 py-2.5 text-slate-600 text-xs">${m.domain ?? '-'}</td>
       <td class="px-4 py-2.5 text-center">${m.total_md ?? 0} MD</td>
       <td class="px-4 py-2.5 text-center text-xs text-slate-500">${m.is_fulltime ? '상근' : '비상근'}</td>
       <td class="px-4 py-2.5 text-slate-600 text-xs">${m.auditor_grade ?? '-'}</td>
       <td class="px-4 py-2.5 text-slate-500 text-xs">${m.phone ?? '-'}</td>
-    </tr>`).join('')
+    </tr>`
+  }).join('')
 
   // 파일 목록
   const fileRows = files.map(f => `
@@ -514,9 +520,180 @@ app.get('/proposals/:id', async (c) => {
 
       </div>
     </div>
-  </div>`
+  </div>
 
-  return c.html(layout(String(project.project_name), body, 'proposals'))
+  <!-- ── 인원 상세 모달 ─────────────────────────────── -->
+  <div id="personModal" class="fixed inset-0 z-50 hidden flex items-center justify-center p-4">
+    <div class="absolute inset-0 bg-black/40 backdrop-blur-sm" onclick="closePersonModal()"></div>
+    <div class="relative bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[85vh] overflow-y-auto">
+      <div class="sticky top-0 bg-white border-b border-slate-200 px-6 py-4 flex items-center justify-between rounded-t-2xl z-10">
+        <h2 class="font-bold text-slate-800 text-lg" id="personModalTitle">인원 정보</h2>
+        <button onclick="closePersonModal()" class="text-slate-400 hover:text-slate-600 text-xl leading-none">&times;</button>
+      </div>
+      <div id="personModalBody" class="p-6">
+        <div class="flex justify-center py-8"><div class="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-500"></div></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── K 감리이력 매칭 모달 ──────────────────────────── -->
+  <div id="kModal" class="fixed inset-0 z-50 hidden flex items-center justify-center p-4">
+    <div class="absolute inset-0 bg-black/40 backdrop-blur-sm" onclick="closeKModal()"></div>
+    <div class="relative bg-white rounded-2xl shadow-2xl w-full max-w-5xl max-h-[90vh] overflow-y-auto">
+      <div class="sticky top-0 bg-white border-b border-slate-200 px-6 py-4 flex items-center justify-between rounded-t-2xl z-10">
+        <h2 class="font-bold text-slate-800 text-lg" id="kModalTitle">감리이력 키워드 매칭</h2>
+        <button onclick="closeKModal()" class="text-slate-400 hover:text-slate-600 text-xl leading-none">&times;</button>
+      </div>
+      <div id="kModalBody" class="p-6">
+        <div class="flex justify-center py-8"><div class="animate-spin rounded-full h-8 w-8 border-b-2 border-teal-500"></div></div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+  // ── 인원 상세 모달 ──────────────────────────────────────────
+  async function openPersonModal(personnelId) {
+    document.getElementById('personModal').classList.remove('hidden')
+    document.getElementById('personModalBody').innerHTML =
+      '<div class="flex justify-center py-8"><div class="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-500"></div></div>'
+
+    try {
+      const res  = await fetch('/api/personnel/' + personnelId)
+      const json = await res.json()
+      if (!json.ok) throw new Error(json.error)
+      const { person, certs, auditHistory, itCareer } = json.data
+
+      const certRows = certs.map(c => \`
+        <tr class="border-t border-slate-100 text-xs">
+          <td class="px-3 py-1.5 text-slate-600">\${c.cert_name ?? '-'}</td>
+          <td class="px-3 py-1.5 text-center text-slate-500">\${c.cert_no ?? '-'}</td>
+          <td class="px-3 py-1.5 text-center text-slate-500">\${c.cert_year ?? '-'}</td>
+        </tr>\`).join('')
+
+      const auditRows = auditHistory.slice(0, 10).map(h => \`
+        <tr class="border-t border-slate-100 text-xs">
+          <td class="px-3 py-1.5 text-slate-500">\${h.audit_yearmonth ?? '-'}</td>
+          <td class="px-3 py-1.5 text-slate-700">\${h.project_name ?? '-'}</td>
+          <td class="px-3 py-1.5 text-slate-500">\${h.domain ?? '-'}</td>
+          <td class="px-3 py-1.5 text-slate-500">\${h.role ?? '-'}</td>
+        </tr>\`).join('')
+
+      document.getElementById('personModalTitle').textContent = person.name + ' — 인원 정보'
+      document.getElementById('personModalBody').innerHTML = \`
+        <div class="grid grid-cols-2 gap-3 mb-5 text-sm">
+          <div class="bg-slate-50 rounded-xl p-3"><span class="text-slate-400 text-xs block mb-0.5">직위</span><span class="font-medium">\${person.position ?? '-'}</span></div>
+          <div class="bg-slate-50 rounded-xl p-3"><span class="text-slate-400 text-xs block mb-0.5">소속</span><span class="font-medium">\${person.company ?? '-'}</span></div>
+          <div class="bg-slate-50 rounded-xl p-3"><span class="text-slate-400 text-xs block mb-0.5">감리등급</span><span class="font-medium">\${person.auditor_grade ?? '-'}</span></div>
+          <div class="bg-slate-50 rounded-xl p-3"><span class="text-slate-400 text-xs block mb-0.5">자격번호</span><span class="font-medium">\${person.auditor_cert_no ?? '-'}</span></div>
+        </div>
+        \${certs.length > 0 ? \`
+        <div class="mb-4">
+          <h4 class="font-semibold text-slate-700 text-sm mb-2"><i class="fas fa-certificate mr-1 text-amber-500"></i>자격증 (\${certs.length}건)</h4>
+          <table class="w-full text-xs rounded-xl overflow-hidden border border-slate-200">
+            <thead><tr class="bg-slate-50 text-slate-500"><th class="px-3 py-1.5 text-left">자격명</th><th class="px-3 py-1.5 text-center">자격번호</th><th class="px-3 py-1.5 text-center">취득연도</th></tr></thead>
+            <tbody>\${certRows}</tbody>
+          </table>
+        </div>\` : ''}
+        \${auditHistory.length > 0 ? \`
+        <div>
+          <h4 class="font-semibold text-slate-700 text-sm mb-2"><i class="fas fa-history mr-1 text-indigo-500"></i>감리실적 (최근 10건 / 전체 \${auditHistory.length}건)</h4>
+          <table class="w-full text-xs rounded-xl overflow-hidden border border-slate-200">
+            <thead><tr class="bg-slate-50 text-slate-500"><th class="px-3 py-1.5 text-left">연월</th><th class="px-3 py-1.5 text-left">사업명</th><th class="px-3 py-1.5 text-left">분야</th><th class="px-3 py-1.5 text-left">역할</th></tr></thead>
+            <tbody>\${auditRows}</tbody>
+          </table>
+          \${auditHistory.length > 10 ? '<p class="text-xs text-slate-400 mt-1 text-right">... 외 ' + (auditHistory.length - 10) + '건</p>' : ''}
+        </div>\` : '<p class="text-slate-400 text-sm text-center py-4">감리실적 없음</p>'}
+      \`
+    } catch(e) {
+      document.getElementById('personModalBody').innerHTML =
+        '<p class="text-red-500 text-sm text-center py-4">불러오기 실패: ' + e.message + '</p>'
+    }
+  }
+  function closePersonModal() { document.getElementById('personModal').classList.add('hidden') }
+
+  // ── K 감리이력 키워드 매칭 모달 ─────────────────────────────
+  async function openKModal(personnelId, projectId, personName) {
+    document.getElementById('kModal').classList.remove('hidden')
+    document.getElementById('kModalTitle').textContent = personName + ' — 감리이력 키워드 매칭'
+    document.getElementById('kModalBody').innerHTML =
+      '<div class="flex justify-center py-8"><div class="animate-spin rounded-full h-8 w-8 border-b-2 border-teal-500"></div></div>'
+
+    try {
+      const res  = await fetch('/api/personnel/' + personnelId + '/audit-match?projectId=' + projectId)
+      const json = await res.json()
+      if (!json.ok) throw new Error(json.error)
+      const { keywords, rows, mappingMap } = json
+
+      // 키워드 태그 목록
+      const kwTags = keywords.map((k, i) => \`
+        <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs border
+          \${i < 3 ? 'bg-teal-50 border-teal-300 text-teal-700 font-semibold' : 'bg-slate-50 border-slate-200 text-slate-500'}">
+          <span class="text-slate-400">\${i+1}.</span>
+          \${mappingMap[k.keyword] ? \`<span class="line-through text-slate-300">\${k.keyword}</span><span class="ml-1">\${mappingMap[k.keyword]}</span>\` : k.keyword}
+        </span>\`).join(' ')
+
+      const tableRows = rows.map(h => {
+        const matchBadges = h.mapped_keywords.map((mk, mi) => \`
+          <span class="inline-block px-1.5 py-0.5 bg-teal-100 text-teal-700 rounded text-xs font-medium mr-0.5">\${mk}</span>\`).join('')
+        const origBadges = h.matched_keywords.map((ok) =>
+          mappingMap[ok] ? \`<span class="text-slate-400 text-xs line-through mr-0.5">\${ok}</span>\` : '').join('')
+
+        const matchClass = h.match_count >= 3 ? 'bg-teal-50'
+                         : h.match_count >= 1 ? 'bg-indigo-50/40'
+                         : ''
+        return \`
+          <tr class="border-t border-slate-100 text-xs \${matchClass}">
+            <td class="px-3 py-2 text-slate-500 whitespace-nowrap">\${h.audit_yearmonth ?? '-'}</td>
+            <td class="px-3 py-2 text-slate-700 max-w-xs">\${h.project_name ?? '-'}</td>
+            <td class="px-3 py-2 text-slate-500">\${h.client_org ?? '-'}</td>
+            <td class="px-3 py-2 text-slate-500">\${h.domain ?? '-'}</td>
+            <td class="px-3 py-2 text-center">
+              \${h.match_count > 0
+                ? \`<span class="inline-block px-2 py-0.5 rounded-full text-xs font-bold bg-teal-600 text-white">\${h.match_count}</span>\`
+                : '<span class="text-slate-300">-</span>'}
+            </td>
+            <td class="px-3 py-2">\${matchBadges || '<span class="text-slate-300 text-xs">없음</span>'}\${origBadges}</td>
+          </tr>\`
+      }).join('')
+
+      const matchedCount = rows.filter(r => r.match_count > 0).length
+
+      document.getElementById('kModalBody').innerHTML = \`
+        <div class="mb-4">
+          <p class="text-xs text-slate-500 mb-2 font-medium">이 제안의 키워드 (\${keywords.length}개) — 앞 순서가 상위 키워드</p>
+          <div class="flex flex-wrap gap-1.5">\${kwTags}</div>
+        </div>
+        <div class="mb-3 flex items-center gap-3">
+          <span class="text-sm text-slate-600">전체 감리실적 <strong>\${rows.length}</strong>건</span>
+          <span class="text-sm text-teal-700 font-semibold">키워드 매칭 <strong>\${matchedCount}</strong>건</span>
+          <span class="text-xs text-slate-400">(매칭 많은 순 → 상위 키워드 순 정렬)</span>
+        </div>
+        <div class="overflow-x-auto rounded-xl border border-slate-200">
+          <table class="w-full text-xs">
+            <thead><tr class="bg-slate-50 text-slate-500 text-xs">
+              <th class="px-3 py-2 text-left whitespace-nowrap">연월</th>
+              <th class="px-3 py-2 text-left">사업명</th>
+              <th class="px-3 py-2 text-left">발주처</th>
+              <th class="px-3 py-2 text-left">분야</th>
+              <th class="px-3 py-2 text-center">매칭수</th>
+              <th class="px-3 py-2 text-left">주요 키워드 (변환)</th>
+            </tr></thead>
+            <tbody>\${tableRows}</tbody>
+          </table>
+        </div>
+      \`
+    } catch(e) {
+      document.getElementById('kModalBody').innerHTML =
+        '<p class="text-red-500 text-sm text-center py-4">불러오기 실패: ' + e.message + '</p>'
+    }
+  }
+  function closeKModal() { document.getElementById('kModal').classList.add('hidden') }
+
+  // ESC 키로 모달 닫기
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape') { closePersonModal(); closeKModal() }
+  })
+  </script>`
 })
 
 // ── 인력정보 목록 ─────────────────────────────────────────────
