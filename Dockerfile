@@ -10,6 +10,8 @@ RUN npm ci
 COPY tsconfig.build.json ./
 COPY src ./src
 RUN npm run build
+# schema.sql을 dist/db/에 복사 (migrate.js가 런타임에 읽음)
+RUN cp src/db/schema.sql dist/db/schema.sql
 
 # ── 2단계: 실행 ──────────────────────────────────────────────
 FROM node:20-slim AS runner
