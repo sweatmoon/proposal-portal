@@ -643,7 +643,6 @@ app.get('/proposals/:id', async (c) => {
                          : ''
         return \`
           <tr class="border-t border-slate-100 text-xs \${matchClass}">
-            <td class="px-3 py-2 text-slate-500 whitespace-nowrap">\${h.audit_yearmonth ?? '-'}</td>
             <td class="px-3 py-2 text-slate-700 max-w-xs">\${h.project_name ?? '-'}</td>
             <td class="px-3 py-2 text-slate-500">\${h.client_org ?? '-'}</td>
             <td class="px-3 py-2 text-slate-500">\${h.domain ?? '-'}</td>
@@ -671,7 +670,6 @@ app.get('/proposals/:id', async (c) => {
         <div class="overflow-x-auto rounded-xl border border-slate-200">
           <table class="w-full text-xs">
             <thead><tr class="bg-slate-50 text-slate-500 text-xs">
-              <th class="px-3 py-2 text-left whitespace-nowrap">연월</th>
               <th class="px-3 py-2 text-left">사업명</th>
               <th class="px-3 py-2 text-left">발주처</th>
               <th class="px-3 py-2 text-left">분야</th>

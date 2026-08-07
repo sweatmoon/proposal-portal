@@ -100,7 +100,7 @@ app.get('/:id/audit-match', async (c) => {
   }
 
   // 각 감리이력에 대해 키워드 매칭
-  const rows = auditHistory.map(h => {
+  const rawRows = auditHistory.map(h => {
     const projectNameNorm = String(h.project_name ?? '').replace(/\s+/g, '')
     const sectorNorm      = String(h.sector      ?? '').replace(/\s+/g, '')
     const domainNorm      = String(h.domain      ?? '').replace(/\s+/g, '')
@@ -123,11 +123,19 @@ app.get('/:id/audit-match', async (c) => {
       matched_keywords: matched,
       mapped_keywords:  mapped,
       match_count:      matched.length,
-      // 첫 번째 매칭 키워드의 sort_order (정렬용)
       top_sort_order: matched.length > 0
         ? (kwRows.find(k => k.keyword === matched[0])?.sort_order ?? 9999)
         : 9999,
     }
+  })
+
+  // project_name 기준 중복 제거 — 같은 사업명이면 첫 번째(최신) 행만 유지
+  const seen = new Set<string>()
+  const rows = rawRows.filter(r => {
+    const key = String((r as Record<string, unknown>).project_name ?? '').trim()
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
   })
 
   // 정렬: match_count 많은 순 → top_sort_order 낮은 순 → audit_yearmonth 최신 순
