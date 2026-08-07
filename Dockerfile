@@ -1,24 +1,28 @@
 # ── 1단계: 빌드 ──────────────────────────────────────────────
-FROM node:20-alpine AS builder
+FROM node:20-slim AS builder
 WORKDIR /app
 
+# 의존성 먼저 설치 (캐시 활용)
 COPY package*.json ./
-RUN npm ci --ignore-scripts
+RUN npm ci
 
-COPY tsconfig.build.json ./tsconfig.build.json
+# 소스 복사 후 빌드
+COPY tsconfig.build.json ./
 COPY src ./src
-
 RUN npm run build
 
 # ── 2단계: 실행 ──────────────────────────────────────────────
-FROM node:20-alpine AS runner
+FROM node:20-slim AS runner
 WORKDIR /app
 
 ENV NODE_ENV=production
+ENV PORT=3000
 
+# 프로덕션 의존성만 설치
 COPY package*.json ./
-RUN npm ci --omit=dev --ignore-scripts
+RUN npm ci --omit=dev
 
+# 빌드 결과물 복사
 COPY --from=builder /app/dist ./dist
 
 EXPOSE 3000
