@@ -176,16 +176,23 @@ app.post('/', async (c) => {
         `, [phaseId, projectId, a.person_name, a.member_type, a.pre_survey_md, a.audit_md, a.action_confirm_md])
       }
 
-      // 6. proposal_members
+      // 6. proposal_members — personnel_id 자동 매칭
       for (const m of proposal_members) {
+        // person_name으로 personnel 테이블에서 id 조회 (trim 일치)
+        const matched = await client.query(
+          `SELECT id FROM personnel WHERE TRIM(name) = TRIM($1) LIMIT 1`,
+          [m.person_name]
+        )
+        const personnelId = matched.rows[0]?.id ?? null
+
         await client.query(`
           INSERT INTO proposal_members
-            (project_id, person_name, member_group, member_type, domain,
+            (project_id, personnel_id, person_name, member_group, member_type, domain,
              regular_md, additional_md, acceptance_md,
              is_fulltime, auditor_grade, auditor_cert_no, phone, education_hours)
-          VALUES ($1,$2,$3,$4,$5, $6,$7,$8, $9,$10,$11,$12,$13)
+          VALUES ($1,$2,$3,$4,$5,$6, $7,$8,$9, $10,$11,$12,$13,$14)
         `, [
-          projectId, m.person_name, m.member_group, m.member_type, m.domain,
+          projectId, personnelId, m.person_name, m.member_group, m.member_type, m.domain,
           m.regular_md, m.additional_md, m.acceptance_md,
           m.is_fulltime, m.auditor_grade, m.auditor_cert_no, m.phone, m.education_hours,
         ])

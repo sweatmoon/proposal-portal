@@ -148,4 +148,42 @@ app.get('/:id/audit-match', async (c) => {
   })
 })
 
+/**
+ * POST /api/personnel/fix-links
+ * proposal_members.personnel_id 가 NULL인 행을 person_name 기준으로 일괄 업데이트
+ */
+app.post('/fix-links', async (c) => {
+  // NULL인 건수 조회
+  const nullRows = await query<{ id: number; person_name: string }>(
+    `SELECT id, person_name FROM proposal_members WHERE personnel_id IS NULL`,
+    []
+  )
+  let updated = 0
+  let skipped = 0
+
+  for (const row of nullRows) {
+    const matched = await query<{ id: number }>(
+      `SELECT id FROM personnel WHERE TRIM(name) = TRIM($1) LIMIT 1`,
+      [row.person_name]
+    )
+    if (matched.length > 0) {
+      await query(
+        `UPDATE proposal_members SET personnel_id = $1 WHERE id = $2`,
+        [matched[0].id, row.id]
+      )
+      updated++
+    } else {
+      skipped++
+    }
+  }
+
+  return c.json({
+    ok: true,
+    total: nullRows.length,
+    updated,
+    skipped,
+    message: `${updated}건 연결, ${skipped}건 미매칭(인력DB에 없음)`,
+  })
+})
+
 export default app
