@@ -435,7 +435,8 @@ export function parseProjectHtml(html: string): ParsedProject {
       proposed_md:       proposeMd,
     })
 
-    // 투입 인력 파싱: "성명:pre:audit:action, 성명2:..." (col[8])
+    // 투입 인력 파싱 — col[8]: 감리원 투입 "성명:pre:audit:action, ..."
+    // col[2]의 값은 인력 구분이 아닌 다른 컬럼이므로 member_type은 나중에 proposal_members로 결정
     const assignRaw = (row[8] ?? '').trim()
     // 개행+콤마 정리
     const assignList = assignRaw.split(/,\s*\n?\s*/).map(s => s.trim()).filter(Boolean)
@@ -448,7 +449,7 @@ export function parseProjectHtml(html: string): ParsedProject {
       phase_assignments.push({
         phase_name:        phaseName,
         person_name:       personName,
-        member_type:       row[2]?.trim() ?? '감리원',
+        member_type:       '__pending__',  // proposal_members 파싱 후 최종 결정
         pre_survey_md:     parseInt(parts[1] ?? '0') || 0,
         audit_md:          parseInt(parts[2] ?? '0') || 0,
         action_confirm_md: parseInt(parts[3] ?? '0') || 0,
@@ -476,19 +477,41 @@ export function parseProjectHtml(html: string): ParsedProject {
 
   let currentGroup = ''
   let currentType  = '감리원'
+  let currentSubGroup = ''  // 핵심기술 / 필수기술 / 보안진단
 
   for (let i = memberStart; i < t8.length; i++) {
     const row = t8[i]
     // 개행·연속 공백 정규화: "단계 감리팀\n (11 명)" → "단계 감리팀 (11 명)"
     const c = row.map(s => (s ?? '').replace(/[\r\n]+/g, ' ').replace(/\s{2,}/g, ' ').trim())
 
-    // 그룹 헤더 감지: "단계 감리팀 (6 명)" / "전문가 (14 명)" 등
-    // rowspan으로 반복 등장하거나 c[0]에 그룹명이 있는 경우
-    if (c[0].includes('감리팀') || c[0].includes('전문가') || c[0].includes('테스터')) {
-      const mType = c[0].match(/(감리팀|전문가|테스터)/)
-      if (mType) {
-        currentGroup = c[0]
-        currentType  = mType[1] === '감리팀' ? '감리원' : mType[1]
+    // 그룹 헤더 감지
+    // c[0]: "단계 감리팀 (6 명)", "전문가 (14 명)", "테스터 (N 명)"
+    // c[1]: "핵심기술", "필수기술", "보안진단" (전문가 서브그룹, rowspan 첫 행)
+    const checkCells = [c[0], c[1]]
+    for (const cell of checkCells) {
+      if (cell.includes('감리팀')) {
+        currentGroup    = cell
+        currentType     = '감리원'
+        currentSubGroup = ''
+      } else if (cell.includes('테스터')) {
+        currentGroup    = cell
+        currentType     = '테스터'
+        currentSubGroup = ''
+      } else if (cell.includes('전문가')) {
+        currentGroup    = cell
+        currentType     = '전문가'
+        // 서브그룹은 c[1]에 별도 셀로 오거나 c[0] 안에 포함될 수 있음
+        const subM = cell.match(/(핵심기술|필수기술|보안진단)/)
+        if (subM) currentSubGroup = subM[1]
+        // c[0]에 전문가만 있고 c[1]에 서브그룹이 오는 경우
+        if (!subM) {
+          const subM2 = (c[1] ?? '').match(/(핵심기술|필수기술|보안진단)/)
+          if (subM2) currentSubGroup = subM2[1]
+        }
+      } else if (/^(핵심기술|필수기술|보안진단)/.test(cell)) {
+        // c[1]이 직접 서브그룹명인 경우
+        currentSubGroup = cell.match(/(핵심기술|필수기술|보안진단)/)?.[1] ?? currentSubGroup
+        if (currentType === '전문가') currentGroup = '전문가 (' + currentSubGroup + ')'
       }
     }
 
@@ -538,18 +561,14 @@ export function parseProjectHtml(html: string): ParsedProject {
     const fulltimeCell = (c[startMdIdx + 4] ?? '').trim()
     const is_fulltime  = fulltimeCell === '상근' ? 1 : 0
 
-    // 그룹 첫 행(rowspan)에서 c[0]이 그룹명이면 currentGroup/currentType 업데이트
-    if (c[0].includes('감리팀') || c[0].includes('전문가') || c[0].includes('테스터')) {
-      const mType = c[0].match(/(감리팀|전문가|테스터)/)
-      if (mType) {
-        currentGroup = c[0]
-        currentType  = mType[1] === '감리팀' ? '감리원' : mType[1]
-      }
-    }
+    // member_group: 전문가인 경우 "전문가/핵심기술" 형태로 저장 (pages.ts의 rawGroup 파싱에 맞춤)
+    const resolvedGroup = currentType === '전문가' && currentSubGroup
+      ? '전문가/' + currentSubGroup
+      : currentGroup
 
     proposal_members.push({
       person_name:     personName,
-      member_group:    currentGroup,
+      member_group:    resolvedGroup,
       member_type:     currentType,
       // domain: C형(nameIdx=4)은 대분류+소분류 합치기, 나머지는 단일 셀
       domain: nameIdx === 4
@@ -586,6 +605,19 @@ export function parseProjectHtml(html: string): ParsedProject {
         const title = (parts[j + 1] ?? '').trim()
         if (title) attachments_toc.push({ item_order: num, item_name: title })
       }
+    }
+  }
+
+  // ── phase_assignments.member_type 최종 결정 ──────────────────
+  // proposal_members 파싱이 끝난 후 이름 매칭으로 member_type 결정
+  // col[8] "투입 인력" 셀은 감리원/전문가/테스터가 혼재 → 이름만으로 구분
+  const memberTypeByName: Record<string, string> = {}
+  for (const m of proposal_members) {
+    memberTypeByName[m.person_name] = m.member_type
+  }
+  for (const a of phase_assignments) {
+    if (a.member_type === '__pending__') {
+      a.member_type = memberTypeByName[a.person_name] ?? '감리원'
     }
   }
 
