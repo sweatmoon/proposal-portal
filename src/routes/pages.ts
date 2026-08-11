@@ -371,7 +371,7 @@ app.get('/proposals/:id', async (c) => {
   )
   if (!project) return c.html(layout('없음', '<div class="p-8 text-center text-red-500">프로젝트를 찾을 수 없습니다</div>', 'proposals'))
 
-  const [phases, members, keywords, files, toc] = await Promise.all([
+  const [phases, members, keywords, files, toc, kwMappings] = await Promise.all([
     query<Record<string, unknown>>(`
       SELECT ph.*,
         COALESCE(json_agg(
@@ -391,6 +391,10 @@ app.get('/proposals/:id', async (c) => {
     query<Record<string, unknown>>(`SELECT * FROM keywords WHERE project_id = $1 ORDER BY sort_order`, [id]),
     query<Record<string, unknown>>(`SELECT * FROM proposal_files WHERE project_id = $1 ORDER BY id`, [id]),
     query<Record<string, unknown>>(`SELECT * FROM proposal_attachments_toc WHERE project_id = $1 ORDER BY item_order`, [id]),
+    query<{ id: number; original_keyword: string; mapped_keyword: string }>(
+      `SELECT id, original_keyword, mapped_keyword FROM keyword_mappings WHERE project_id = $1 ORDER BY id ASC`,
+      [id]
+    ),
   ])
 
   // 키워드 태그
@@ -816,7 +820,50 @@ app.get('/proposals/:id', async (c) => {
         ${keywords.length > 0 ? `
         <div class="bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
           <h3 class="font-bold text-slate-700 mb-3 text-sm"><i class="fas fa-tags mr-2 text-slate-400"></i>키워드 (${keywords.length}개)</h3>
-          <div class="flex flex-wrap gap-1.5">${kwTags}</div>
+          <div class="flex flex-wrap gap-1.5 mb-4">${kwTags}</div>
+
+          <!-- 키워드 치환 규칙 -->
+          <div class="border-t border-slate-100 pt-4">
+            <div class="flex items-center justify-between mb-2">
+              <span class="text-xs font-semibold text-slate-600"><i class="fas fa-exchange-alt mr-1 text-teal-500"></i>키워드 치환 규칙</span>
+              <span class="text-xs text-slate-400">검색된 키워드를 장표에 표시할 다른 이름으로 변환</span>
+            </div>
+            <!-- 기존 규칙 목록 -->
+            <div id="kwMappingList" class="space-y-1 mb-3">
+              ${kwMappings.length === 0
+                ? `<p class="text-xs text-slate-400 py-1">등록된 치환 규칙이 없습니다.</p>`
+                : kwMappings.map(m => `
+                  <div class="flex items-center gap-2 bg-slate-50 rounded-lg px-3 py-1.5" data-mapping-id="${m.id}">
+                    <span class="text-xs text-slate-500 line-through">${m.original_keyword}</span>
+                    <i class="fas fa-arrow-right text-teal-400 text-xs"></i>
+                    <span class="text-xs font-semibold text-teal-700">${m.mapped_keyword}</span>
+                    <button onclick="deleteKwMapping(${id}, ${m.id})" class="ml-auto text-slate-300 hover:text-red-400 transition text-xs" title="삭제"><i class="fas fa-times"></i></button>
+                  </div>`).join('')
+              }
+            </div>
+            <!-- 새 규칙 입력 -->
+            <div class="flex gap-2 items-start">
+              <div class="flex-1">
+                <input id="kwMapOrig" type="text" placeholder="원본 키워드 (쉼표로 여러 개)"
+                  class="w-full text-xs border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-teal-300 placeholder-slate-300" />
+              </div>
+              <i class="fas fa-arrow-right text-teal-400 text-xs mt-2.5"></i>
+              <div class="flex-1">
+                <input id="kwMapMapped" type="text" placeholder="변환할 이름"
+                  class="w-full text-xs border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-teal-300 placeholder-slate-300" />
+              </div>
+              <button onclick="addKwMapping(${id})"
+                class="px-3 py-2 bg-teal-600 hover:bg-teal-700 text-white text-xs rounded-lg transition whitespace-nowrap">
+                <i class="fas fa-plus mr-1"></i>추가
+              </button>
+            </div>
+            <div class="mt-2 text-xs text-slate-400 leading-relaxed">
+              <span class="font-semibold text-slate-500">예시)</span>
+              한국공항공사 → 주관기관 &nbsp;·&nbsp;
+              환경부, 환경측정 → 환경 &nbsp;·&nbsp;
+              지방계약, 계약관리 → 계약/이행평가
+            </div>
+          </div>
         </div>` : ''}
 
         <!-- 감리 일정 -->

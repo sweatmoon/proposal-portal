@@ -1032,3 +1032,68 @@ document.addEventListener('keydown', e => {
     closeAutoModal(); closePersonnelTableModal(); closeExpertBreakdown()
   }
 })
+
+// ── 키워드 치환 규칙 CRUD ────────────────────────────────────
+async function addKwMapping(projectId) {
+  const origEl   = document.getElementById('kwMapOrig')
+  const mappedEl = document.getElementById('kwMapMapped')
+  const orig   = (origEl?.value || '').trim()
+  const mapped = (mappedEl?.value || '').trim()
+  if (!orig || !mapped) { alert('원본 키워드와 변환 이름을 모두 입력해주세요.'); return }
+
+  try {
+    const res = await fetch('/api/projects/' + projectId + '/keyword-mappings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ original_keyword: orig, mapped_keyword: mapped }),
+    })
+    const json = await res.json()
+    if (!json.ok) throw new Error(json.error)
+
+    // DOM 즉시 반영 (새 규칙들 삽입)
+    const list = document.getElementById('kwMappingList')
+    if (list) {
+      const empty = list.querySelector('p')
+      if (empty) empty.remove()
+      ;(json.inserted || []).forEach(m => {
+        const div = document.createElement('div')
+        div.className = 'flex items-center gap-2 bg-slate-50 rounded-lg px-3 py-1.5'
+        div.dataset.mappingId = String(m.id)
+        div.innerHTML =
+          '<span class="text-xs text-slate-500 line-through">' + m.original_keyword + '</span>' +
+          '<i class="fas fa-arrow-right text-teal-400 text-xs"></i>' +
+          '<span class="text-xs font-semibold text-teal-700">' + m.mapped_keyword + '</span>' +
+          '<button onclick="deleteKwMapping(' + projectId + ',' + m.id + ')" ' +
+            'class="ml-auto text-slate-300 hover:text-red-400 transition text-xs" title="삭제">' +
+            '<i class="fas fa-times"></i></button>'
+        list.appendChild(div)
+      })
+    }
+    if (origEl)   origEl.value   = ''
+    if (mappedEl) mappedEl.value = ''
+  } catch (e) {
+    alert('저장 실패: ' + e.message)
+  }
+}
+
+async function deleteKwMapping(projectId, mappingId) {
+  if (!confirm('이 치환 규칙을 삭제하시겠습니까?')) return
+  try {
+    const res = await fetch('/api/projects/' + projectId + '/keyword-mappings/' + mappingId, {
+      method: 'DELETE',
+    })
+    const json = await res.json()
+    if (!json.ok) throw new Error(json.error)
+
+    // DOM에서 해당 행 제거
+    const row = document.querySelector('[data-mapping-id="' + mappingId + '"]')
+    if (row) row.remove()
+    // 목록이 비었으면 안내 문구 표시
+    const list = document.getElementById('kwMappingList')
+    if (list && !list.querySelector('[data-mapping-id]')) {
+      list.innerHTML = '<p class="text-xs text-slate-400 py-1">등록된 치환 규칙이 없습니다.</p>'
+    }
+  } catch (e) {
+    alert('삭제 실패: ' + e.message)
+  }
+}

@@ -105,4 +105,73 @@ app.delete('/:id', async (c) => {
   return c.json({ ok: true, message: `"${existing.project_name}" 삭제 완료` })
 })
 
+// ── 키워드 치환 규칙 CRUD ──────────────────────────────────────
+
+/** GET /api/projects/:id/keyword-mappings — 치환 목록 조회 */
+app.get('/:id/keyword-mappings', async (c) => {
+  const id = Number(c.req.param('id'))
+  if (!id) return c.json({ ok: false, error: 'invalid id' }, 400)
+  const rows = await query<{ id: number; original_keyword: string; mapped_keyword: string }>(
+    `SELECT id, original_keyword, mapped_keyword
+     FROM keyword_mappings WHERE project_id = $1
+     ORDER BY id ASC`,
+    [id]
+  )
+  return c.json({ ok: true, mappings: rows })
+})
+
+/** POST /api/projects/:id/keyword-mappings — 규칙 추가 */
+app.post('/:id/keyword-mappings', async (c) => {
+  const projectId = Number(c.req.param('id'))
+  if (!projectId) return c.json({ ok: false, error: 'invalid id' }, 400)
+  const body = await c.req.json().catch(() => null)
+  if (!body) return c.json({ ok: false, error: 'invalid body' }, 400)
+
+  // original_keyword 는 쉼표 구분 여러 개 지원 (파서와 동일 방식)
+  const originals: string[] = String(body.original_keyword ?? '')
+    .split(',').map((s: string) => s.trim()).filter(Boolean)
+  const mapped: string = String(body.mapped_keyword ?? '').trim()
+  if (!originals.length || !mapped)
+    return c.json({ ok: false, error: 'original_keyword / mapped_keyword 필수' }, 400)
+
+  const inserted: { id: number; original_keyword: string; mapped_keyword: string }[] = []
+  for (const orig of originals) {
+    // 같은 (project_id, original_keyword)가 이미 있으면 mapped_keyword 갱신
+    const existing = await query<{ id: number }>(
+      `SELECT id FROM keyword_mappings WHERE project_id = $1 AND original_keyword = $2 LIMIT 1`,
+      [projectId, orig]
+    )
+    if (existing[0]) {
+      await query(
+        `UPDATE keyword_mappings SET mapped_keyword = $1 WHERE id = $2`,
+        [mapped, existing[0].id]
+      )
+      inserted.push({ id: existing[0].id, original_keyword: orig, mapped_keyword: mapped })
+    } else {
+      const row = await query<{ id: number; original_keyword: string; mapped_keyword: string }>(
+        `INSERT INTO keyword_mappings (project_id, keyword_id, original_keyword, mapped_keyword)
+         VALUES ($1,
+           (SELECT id FROM keywords WHERE project_id = $1 AND keyword = $2 LIMIT 1),
+           $2, $3)
+         RETURNING id, original_keyword, mapped_keyword`,
+        [projectId, orig, mapped]
+      )
+      if (row[0]) inserted.push(row[0])
+    }
+  }
+  return c.json({ ok: true, inserted })
+})
+
+/** DELETE /api/projects/:id/keyword-mappings/:mappingId — 규칙 삭제 */
+app.delete('/:id/keyword-mappings/:mappingId', async (c) => {
+  const projectId  = Number(c.req.param('id'))
+  const mappingId  = Number(c.req.param('mappingId'))
+  if (!projectId || !mappingId) return c.json({ ok: false, error: 'invalid id' }, 400)
+  await query(
+    'DELETE FROM keyword_mappings WHERE id = $1 AND project_id = $2',
+    [mappingId, projectId]
+  )
+  return c.json({ ok: true })
+})
+
 export default app
