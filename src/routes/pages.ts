@@ -953,9 +953,10 @@ app.get('/proposals/:id', async (c) => {
     </div>
   </div>
 
-  <!-- pptxgenjs + jszip -->
+  <!-- pptxgenjs + jszip + 사진장표 PPTX 템플릿 (base64) -->
   <script src="https://cdn.jsdelivr.net/npm/pptxgenjs@4.0.1/dist/pptxgen.bundle.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+  <script src="/static/photo-template.b64.js"></script>
 
   <script>
   // ══════════════════════════════════════════════════════════

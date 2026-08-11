@@ -504,16 +504,33 @@ async function downloadAssignPptx(btn, opts) {
   finally { setBtnState(btn, false) }
 }
 
-// ── 사진장표 PPT ────────────────────────────────────────────
-// 장표 레이아웃: 슬라이드 당 카드 배치 정의 (cols × rows 격자)
-const PHOTO_LAYOUT = {
-  2: { cols: 2, rows: 1 },
-  4: { cols: 2, rows: 2 },
-  6: { cols: 3, rows: 2 },
-  9: { cols: 3, rows: 3 },
+// ── 사진장표 PPT (템플릿 기반) ─────────────────────────────────
+// 원본 PPTX 템플릿(photo-template.b64.js)을 JSZip으로 열고 DOMParser로
+// 슬라이드 XML을 파싱해 placeholder만 실제 값으로 치환한다.
+// 폰트·색상·레이아웃 등 서식이 100% 원본 그대로 보존된다.
+
+// 장표 레이아웃 메타 (원본 PPT의 슬라이드 파일명 + 카드 배치 매핑)
+const PHOTO_LAYOUT_META = {
+  2: { file: 'ppt/slides/slide1.xml', rows: 1, cols: 2, orderIndexToSlot: [1, 2] },
+  4: { file: 'ppt/slides/slide2.xml', rows: 2, cols: 2, orderIndexToSlot: [1, 2, 3, 4] },
+  6: { file: 'ppt/slides/slide3.xml', rows: 2, cols: 3, orderIndexToSlot: [1, 4, 5, 6, 2, 3] },
+  9: { file: 'ppt/slides/slide4.xml', rows: 3, cols: 3, orderIndexToSlot: [1, 2, 3, 6, 9, 4, 5, 7, 8] },
 }
 
-// PHOTO_CATS 라벨 → 슬라이드 제목 매핑
+// 열 우선 슬롯 채움 순서 (왼쪽 열부터 위→아래로 채운 뒤 다음 열)
+function computeFillOrder(rows, cols) {
+  const order = []
+  for (let c = 0; c < cols; c++) for (let r = 0; r < rows; r++) order.push(r * cols + c + 1)
+  return order
+}
+
+// 신규 슬라이드용 관계 XML (slideLayout6.xml 참조 고정)
+const PHOTO_SLIDE_RELS_XML = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\r\n'
+  + '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+  + '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideLayout" Target="../slideLayouts/slideLayout6.xml"/>'
+  + '</Relationships>'
+
+// PHOTO_CATS 라벨 → 슬라이드 제목 매핑 (하위 호환용, 현재 buildPhotoPptxFromTemplate에선 미사용)
 const PHOTO_CAT_TITLES = {
   audit:    '감리원',
   core:     '핵심기술 전문가',
@@ -522,22 +539,186 @@ const PHOTO_CAT_TITLES = {
   tester:   '테스터',
 }
 
+// ── buildPhotoPptxFromTemplate ──────────────────────────────────
+// pages = [{ sheetSize: 2|4|6|9, slotPeople: { slotNum: {name, field, grade} } }]
+// → JSZip 객체 반환 (generateAsync로 blob 변환 필요)
+async function buildPhotoPptxFromTemplate(pages) {
+  if (typeof JSZip === 'undefined') throw new Error('JSZip을 찾을 수 없습니다.')
+  if (typeof PHOTO_TEMPLATE_PPTX_B64 === 'undefined') throw new Error('PHOTO_TEMPLATE_PPTX_B64를 찾을 수 없습니다. photo-template.b64.js 로드를 확인하세요.')
+
+  const bytes = Uint8Array.from(atob(PHOTO_TEMPLATE_PPTX_B64), c => c.charCodeAt(0))
+  const zip = await JSZip.loadAsync(bytes)
+
+  // 4개 원본 템플릿 슬라이드 XML 미리 읽기
+  const templateTexts = {}
+  for (const size of [2, 4, 6, 9]) {
+    templateTexts[size] = await zip.file(PHOTO_LAYOUT_META[size].file).async('string')
+  }
+
+  // presentation.xml에서 원본 4개 슬라이드 참조 제거
+  let presXml = await zip.file('ppt/presentation.xml').async('string')
+  let presRelsXml = await zip.file('ppt/_rels/presentation.xml.rels').async('string')
+
+  const slideRelRe = /<Relationship Id="(rId\d+)"[^>]*Target="slides\/(slide[1-4]\.xml)"\s*\/>/g
+  const ridToRemove = []
+  let relMatch
+  while ((relMatch = slideRelRe.exec(presRelsXml))) ridToRemove.push(relMatch[1])
+  presRelsXml = presRelsXml.replace(slideRelRe, '')
+  ridToRemove.forEach(rid => {
+    presXml = presXml.replace(new RegExp(`<p:sldId[^>]*r:id="${rid}"\\s*/>`), '')
+  })
+
+  let maxRid = 0
+  presRelsXml.replace(/Id="rId(\d+)"/g, (_, n) => { maxRid = Math.max(maxRid, parseInt(n, 10)); return _ })
+  let maxSldId = 255
+  presXml.replace(/<p:sldId id="(\d+)"/g, (_, n) => { maxSldId = Math.max(maxSldId, parseInt(n, 10)); return _ })
+
+  let newRelEntries = '', newSldIdEntries = '', newContentTypeEntries = ''
+
+  const A_NS = 'http://schemas.openxmlformats.org/drawingml/2006/main'
+  const P_NS = 'http://schemas.openxmlformats.org/presentationml/2006/main'
+
+  function shapeXfrm(sp) {
+    const spPr = sp.getElementsByTagNameNS(P_NS, 'spPr')[0]
+    if (!spPr) return null
+    const xfrm = spPr.getElementsByTagNameNS(A_NS, 'xfrm')[0]
+    if (!xfrm) return null
+    const off = xfrm.getElementsByTagNameNS(A_NS, 'off')[0]
+    const ext = xfrm.getElementsByTagNameNS(A_NS, 'ext')[0]
+    if (!off || !ext) return null
+    return { x: +off.getAttribute('x'), y: +off.getAttribute('y'), w: +ext.getAttribute('cx'), h: +ext.getAttribute('cy') }
+  }
+
+  // "[값]" placeholder run의 실제 값을 채우고, 인접 run의 대괄호 문자만 제거
+  function fillPlaceholder(tNode, value) {
+    const run = tNode.parentNode
+    let prev = run.previousSibling
+    while (prev && !(prev.nodeType === 1 && prev.localName === 'r')) prev = prev.previousSibling
+    if (prev) {
+      const pt = prev.getElementsByTagNameNS(A_NS, 't')[0]
+      if (pt && /\[$/.test(pt.textContent)) pt.textContent = pt.textContent.replace(/\[$/, '')
+    }
+    let next = run.nextSibling
+    while (next && !(next.nodeType === 1 && next.localName === 'r')) next = next.nextSibling
+    if (next) {
+      const nt = next.getElementsByTagNameNS(A_NS, 't')[0]
+      if (nt && /^\]/.test(nt.textContent)) nt.textContent = nt.textContent.replace(/^\]/, '')
+    }
+    tNode.textContent = value
+  }
+
+  pages.forEach((page, i) => {
+    const meta = PHOTO_LAYOUT_META[page.sheetSize]
+    const fname = `slideGen${i + 1}.xml`
+
+    const xmlDoc = new DOMParser().parseFromString(templateTexts[page.sheetSize], 'application/xml')
+    const spTree = xmlDoc.getElementsByTagNameNS(P_NS, 'spTree')[0]
+    const shapeEls = Array.from(spTree.childNodes).filter(n => n.nodeType === 1 && (n.localName === 'sp' || n.localName === 'cxnSp'))
+
+    // 카드 배경 도형 자동 탐지: N개 정확히 반복되는 도형 중 면적 최대인 것
+    const N = meta.rows * meta.cols
+    const xfrmOf = new Map()
+    const sizeGroups = {}
+    shapeEls.forEach(sp => {
+      const xf = shapeXfrm(sp)
+      if (!xf) return
+      xfrmOf.set(sp, xf)
+      const key = xf.w + 'x' + xf.h;
+      (sizeGroups[key] = sizeGroups[key] || []).push(xf)
+    })
+    const cardCandidates = Object.entries(sizeGroups).filter(([, arr]) => arr.length === N)
+    cardCandidates.sort((a, b) => (b[1][0].w * b[1][0].h) - (a[1][0].w * a[1][0].h))
+    const cardBoxes = cardCandidates.length ? cardCandidates[0][1] : []
+
+    const MARGIN_X = 60000, MARGIN_TOP = 400000, MARGIN_BOTTOM = 60000
+    function findCardIndex(pt) {
+      for (let ci = 0; ci < cardBoxes.length; ci++) {
+        const b = cardBoxes[ci]
+        if (pt.x >= b.x - MARGIN_X && pt.x <= b.x + b.w + MARGIN_X &&
+            pt.y >= b.y - MARGIN_TOP && pt.y <= b.y + b.h + MARGIN_BOTTOM) return ci
+      }
+      return -1
+    }
+    const cardShapes = cardBoxes.map(() => [])
+    shapeEls.forEach(sp => {
+      const xf = xfrmOf.get(sp)
+      if (!xf) return
+      const idx = findCardIndex({ x: xf.x + xf.w / 2, y: xf.y + xf.h / 2 })
+      if (idx >= 0) cardShapes[idx].push(sp)
+    })
+
+    function collectPlaceholderNodes(label) {
+      return Array.from(xmlDoc.getElementsByTagNameNS(A_NS, 't')).filter(t => t.textContent === label)
+    }
+    const labelLists = {
+      '감리 분야': collectPlaceholderNodes('감리 분야'),
+      '감리원명': collectPlaceholderNodes('감리원명'),
+      '감리원등급': collectPlaceholderNodes('감리원등급'),
+    }
+
+    // 미배정 슬롯 카드 삭제
+    const cardsToRemove = new Set()
+    labelLists['감리원명'].forEach((tNode, idx) => {
+      const slot = meta.orderIndexToSlot[idx]
+      if (page.slotPeople[slot]) return
+      let sp = tNode
+      while (sp && !(sp.nodeType === 1 && sp.localName === 'sp')) sp = sp.parentNode
+      const xf = sp && xfrmOf.get(sp)
+      if (xf) {
+        const ci = findCardIndex({ x: xf.x + xf.w / 2, y: xf.y + xf.h / 2 })
+        if (ci >= 0) cardsToRemove.add(ci)
+      }
+    })
+
+    // 배정 슬롯 값 채우기
+    const fieldKeyOf = { '감리 분야': 'field', '감리원명': 'name', '감리원등급': 'grade' }
+    ;['감리 분야', '감리원명', '감리원등급'].forEach(label => {
+      labelLists[label].forEach((tNode, idx) => {
+        const slot = meta.orderIndexToSlot[idx]
+        const p = page.slotPeople[slot]
+        if (p) fillPlaceholder(tNode, p[fieldKeyOf[label]])
+      })
+    })
+
+    cardsToRemove.forEach(ci => cardShapes[ci].forEach(sp => { if (sp.parentNode) sp.parentNode.removeChild(sp) }))
+
+    const xml = new XMLSerializer().serializeToString(xmlDoc)
+    zip.file(`ppt/slides/${fname}`, xml)
+    zip.file(`ppt/slides/_rels/${fname}.rels`, PHOTO_SLIDE_RELS_XML)
+
+    const rid = `rId${++maxRid}`
+    const sldId = ++maxSldId
+    newRelEntries += `<Relationship Id="${rid}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide" Target="slides/${fname}"/>`
+    newSldIdEntries += `<p:sldId id="${sldId}" r:id="${rid}"/>`
+    newContentTypeEntries += `<Override PartName="/ppt/slides/${fname}" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slide+xml"/>`
+  })
+
+  presRelsXml = presRelsXml.replace('</Relationships>', newRelEntries + '</Relationships>')
+  presXml = presXml.replace('</p:sldIdLst>', newSldIdEntries + '</p:sldIdLst>')
+  zip.file('ppt/presentation.xml', presXml)
+  zip.file('ppt/_rels/presentation.xml.rels', presRelsXml)
+
+  let ctXml = await zip.file('[Content_Types].xml').async('string')
+  ctXml = ctXml.replace('</Types>', newContentTypeEntries + '</Types>')
+  zip.file('[Content_Types].xml', ctXml)
+
+  return zip
+}
+
+// ── downloadPhotoAssignPptx ─────────────────────────────────────
+// 체크리스트 설정을 읽어 pages 배열을 구성한 뒤 buildPhotoPptxFromTemplate 호출
 async function downloadPhotoAssignPptx(btn, opts) {
   opts = opts || {}
-  if (typeof PptxGenJS === 'undefined') { alert('PPT 라이브러리 로딩 중입니다.'); return null }
+  if (typeof JSZip === 'undefined') { alert('JSZip 라이브러리 로딩 중입니다. 잠시 후 다시 시도해주세요.'); return null }
   setBtnState(btn, true)
   try {
-    const { portalOrder, personFieldMap, personGradeMap } = parsedData
     const cache = buildPhotoAssignCache()
     if (!cache) { showAutoAlert('❌ 인력 데이터가 없습니다.', false); return null }
 
-    // 체크리스트 설정 읽기 (모달이 열려 있으면 실제 설정, 아니면 기본값 사용)
+    // 체크리스트 설정 읽기 (모달 미열림 시 기본값 fallback)
     let cfg = {}
     try { cfg = readPhotoAssignConfig() } catch (e) { cfg = {} }
-
-    // cfg가 비어있으면 (모달 미열림 or 모든 행 비활성) 기본 설정으로 fallback
-    const activeCfgKeys = Object.keys(cfg)
-    if (!activeCfgKeys.length) {
+    if (!Object.keys(cfg).length) {
       PHOTO_CATS.forEach(c => {
         if (c.key === 'audit') return
         const cnt = (cache[c.key] || []).length
@@ -545,72 +726,79 @@ async function downloadPhotoAssignPptx(btn, opts) {
       })
     }
 
-    // 감리원은 항상 독립 처리 (2인 장표, 단독)
-    const allGroups = [] // { label, people, sheetSize }
+    // pages 배열 구성: { sheetSize, slotPeople: { slotNum: {name, field, grade} } }
+    const pages = []
 
-    // 감리원 (체크리스트 무관 고정 포함)
-    const auditPeople = cache.audit || []
-    if (auditPeople.length > 0) {
-      // 감리원은 2인 장표씩 나눔
-      const pageSize = 2
-      for (let i = 0; i < auditPeople.length; i += pageSize) {
-        allGroups.push({ label: '감리원', people: auditPeople.slice(i, i + pageSize), sheetSize: pageSize })
+    // 감리원: 2인 장표 고정
+    const auditPeople = (cache.audit || []).map(p => ({
+      name: p.name,
+      field: p.field || '감리원',
+      grade: getEffectiveGrade(p.name),
+    }))
+    if (auditPeople.length) {
+      const sheetSize = 2
+      const meta = PHOTO_LAYOUT_META[sheetSize]
+      const fillOrder = computeFillOrder(meta.rows, meta.cols)
+      for (let start = 0; start < auditPeople.length; start += sheetSize) {
+        const pagePeople = auditPeople.slice(start, start + sheetSize)
+        const slotPeople = {}
+        pagePeople.forEach((p, i) => { slotPeople[fillOrder[i]] = p })
+        pages.push({ sheetSize, slotPeople })
       }
     }
 
-    // 전문가/테스터 그룹 묶기 (union-find)
-    const catGroups = groupPhotoCategories(cfg) // [[catKey, ...], ...]
+    // 전문가/테스터: union-find 그룹화
+    const catGroups = groupPhotoCategories(cfg)
     for (const catKeys of catGroups) {
-      // 그룹 내 인원 합치기 (PHOTO_CATS 순서 유지)
-      let people = []
-      catKeys.forEach(k => { people = people.concat(cache[k] || []) })
-      if (!people.length) continue
-      // 장표 크기: 그룹 내 첫 번째 cat 기준
       const firstCat = PHOTO_CATS.find(c => catKeys.includes(c.key))
-      const sheetSize = (cfg[firstCat.key] || {}).sheet || suggestSheetSize(people.length)
-      // 슬라이드 제목: 그룹 내 cat 라벨 합치기
-      const label = catKeys.map(k => PHOTO_CAT_TITLES[k] || k).join(' + ')
-      // 장표 크기 단위로 페이지 나누기
-      for (let i = 0; i < people.length; i += sheetSize) {
-        allGroups.push({ label, people: people.slice(i, i + sheetSize), sheetSize })
+      const sheetSize = (cfg[firstCat.key] || {}).sheet || suggestSheetSize(1)
+      const meta = PHOTO_LAYOUT_META[sheetSize]
+      const fillOrder = computeFillOrder(meta.rows, meta.cols)
+
+      const people = []
+      catKeys.forEach(catKey => {
+        const catLabel = PHOTO_CATS.find(c => c.key === catKey).label.replace(/^\S+\s/, '')
+        ;(cache[catKey] || []).forEach(p => {
+          people.push({
+            name: p.name,
+            field: p.field || catLabel,
+            grade: getEffectiveGrade(p.name),
+          })
+        })
+      })
+      if (!people.length) continue
+
+      for (let start = 0; start < people.length; start += sheetSize) {
+        const pagePeople = people.slice(start, start + sheetSize)
+        const slotPeople = {}
+        pagePeople.forEach((p, i) => { slotPeople[fillOrder[i]] = p })
+        pages.push({ sheetSize, slotPeople })
       }
     }
 
-    if (!allGroups.length) { showAutoAlert('❌ 생성할 인력이 없습니다.', false); return null }
+    if (!pages.length) { showAutoAlert('❌ 생성할 인력이 없습니다.', false); return null }
 
-    const pres = new PptxGenJS(); pres.layout = 'LAYOUT_WIDE'
-    const FONT_BOLD = 'KoPub돋움체 Bold', FONT_MEDIUM = 'KoPub돋움체 Medium'
+    const zip = await buildPhotoPptxFromTemplate(pages)
+    if (opts.returnZip) return { zip }
 
-    for (const g of allGroups) {
-      const people = g.people
-      const layout = PHOTO_LAYOUT[g.sheetSize] || PHOTO_LAYOUT[suggestSheetSize(people.length)]
-      const cols = layout.cols, rows = layout.rows
-      const cardW = 3.8, cardH = 1.4, gapX = 0.2, gapY = 0.2
-      const totalW = cols * cardW + (cols - 1) * gapX
-      const startX = (13.33 - totalW) / 2, startY = 1.2
-      const sld = pres.addSlide()
-      sld.addText(g.label, { x: 0.4, y: 0.3, w: 12.5, h: 0.5, fontFace: FONT_BOLD, fontSize: 18, color: '1A2E4A', bold: true })
-      people.forEach((p, i) => {
-        const col = i % cols, row = Math.floor(i / cols)
-        const x = startX + col * (cardW + gapX), y = startY + row * (cardH + gapY)
-        const field = personFieldMap[p.name] || p.field || ''
-        const grade = getEffectiveGrade(p.name)
-        const gradeColor = grade === '수석감리원' ? '1A2E4A' : grade === '감리원' ? '3A6EA8' : '2E7D32'
-        sld.addShape('rect', { x, y, w: cardW, h: cardH, fill: { color: 'F8F9FC' }, line: { color: 'E5E8F0', pt: 1 } })
-        sld.addText(field || '(분야 미상)', { x: x + 0.12, y: y + 0.08, w: cardW - 0.24, h: 0.25, fontFace: FONT_MEDIUM, fontSize: 9, color: '2E7D32', italic: true, valign: 'top' })
-        sld.addText(p.name, { x: x + 0.12, y: y + 0.35, w: cardW - 0.24, h: 0.4, fontFace: FONT_BOLD, fontSize: 16, color: '1A2E4A', bold: true, valign: 'middle' })
-        sld.addShape('rect', { x: x + 0.12, y: y + 0.82, w: 0.7, h: 0.24, fill: { color: gradeColor }, line: { color: gradeColor, pt: 0 } })
-        sld.addText(grade, { x: x + 0.12, y: y + 0.82, w: 0.7, h: 0.24, fontFace: FONT_BOLD, fontSize: 9, color: 'FFFFFF', bold: true, align: 'center', valign: 'middle' })
-      })
-    }
-    if (opts.returnZip) {
-      const ab = await pres.write({ outputType: 'arraybuffer' })
-      const z = new JSZip(); await z.loadAsync(ab); return { zip: z }
-    }
-    await pres.writeFile({ fileName: '사진장표_' + (parsedData.projectTitle || '').slice(0, 10) + '.pptx' })
+    const today = new Date().toISOString().slice(0, 10)
+    const blob = await zip.generateAsync({
+      type: 'blob',
+      mimeType: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+    })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url; a.download = `사진장표_${today}.pptx`
+    document.body.appendChild(a); a.click(); a.remove()
+    setTimeout(() => URL.revokeObjectURL(url), 1000)
     showAutoAlert('✅ 사진장표 생성 완료', true)
     return null
-  } catch (e) { showAutoAlert('❌ 생성 실패: ' + e.message, false); return null }
+  } catch (e) {
+    console.error(e)
+    showAutoAlert('❌ 생성 실패: ' + e.message, false)
+    if (opts.returnZip) throw e
+    return null
+  }
   finally { setBtnState(btn, false) }
 }
 
