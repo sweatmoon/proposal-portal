@@ -157,22 +157,23 @@ app.get('/:id/audit-match', async (c) => {
 
   if (kwMatchedCount < 20) {
     const need = 30 - kwMatchedCount
-    // 키워드 매칭에서 이미 포함된 project_name 제외
-    const kwMatchedNames = new Set(
-      kwMatchedRows
-        .filter(r => (r as Record<string, unknown>).match_count as number > 0)
-        .map(r => String((r as Record<string, unknown>).project_name ?? '').trim())
+    // kwMatchedRows에 이미 포함된 project_name 전체 (매칭 여부 무관, 중복제거된 전체 목록)
+    const seenInKwRows = new Set(
+      kwMatchedRows.map(r => String((r as Record<string, unknown>).project_name ?? '').trim())
     )
 
-    // 이 인원의 전체 감리이력 중 키워드 미매칭 행에서 domain이 있는 것만 추출
-    // domain 컬럼 값이 있으면 분야 매칭으로 포함
+    // auditHistory 원본에서 kwMatchedRows에 없는 행 중 domain이 있는 것만 추출
+    // (rawRows가 아닌 auditHistory를 쓰므로 seen Set 충돌 없음)
+    const domainSeenNames = new Set<string>()
     const domainCandidates = auditHistory
       .filter(h => {
         const name = String(h.project_name ?? '').trim()
-        if (kwMatchedNames.has(name)) return false        // 이미 키워드 매칭에 포함
-        if (seen.has(name)) return false                  // 중복 제거
+        if (seenInKwRows.has(name)) return false        // kwMatchedRows에 이미 있는 사업명
+        if (domainSeenNames.has(name)) return false     // 분야 보충 내 중복 제거
         const domain = String(h.domain ?? '').trim()
-        return domain.length > 0                          // domain이 있는 행만
+        if (domain.length === 0) return false           // domain이 없는 행 제외
+        domainSeenNames.add(name)
+        return true
       })
       .sort((a, b) => {
         // 최신 연월 순 정렬
@@ -181,9 +182,6 @@ app.get('/:id/audit-match', async (c) => {
         return bYm.localeCompare(aYm)
       })
       .slice(0, need)
-
-    // 중복 방지용 seen에 추가
-    domainCandidates.forEach(h => seen.add(String(h.project_name ?? '').trim()))
 
     domainRows = domainCandidates.map(h => ({
       ...h,
