@@ -993,10 +993,17 @@ async function openKModal(personnelId, projectId, personName) {
     }).join('')
     const matchedCount = kw_matched_count != null ? kw_matched_count : rows.filter(r => r.match_count > 0).length
     const domainCount  = domain_rows_count != null ? domain_rows_count : 0
-    const copyLines = rows.filter(r => r.match_count > 0).map(r => {
+    // 요약 필드: 키워드 매칭(match_count>0) 우선, 부족하면 분야 보충 행으로 채워 최대 20건
+    const kwLines = rows.filter(r => r.match_count > 0).map(r => {
       const kwLabel = r.mapped_keywords.length > 0 ? r.mapped_keywords[0] : r.matched_keywords[0]
       return '[ ' + kwLabel + ' ] ' + (r.client_org || '') + ', ' + (r.project_name || '')
-    }).join('\n')
+    })
+    const domainLines = rows.filter(r => r.match_type === 'domain').map(r => {
+      return '[ ' + (r.domain || '분야') + ' ] ' + (r.client_org || '') + ', ' + (r.project_name || '')
+    })
+    const copyLines = [...kwLines, ...domainLines].slice(0, 20).join('\n')
+    const summaryCount = Math.min(kwLines.length + domainLines.length, 20)
+
     let countText = '<span class="text-sm text-slate-600">전체 감리실적 <strong>' + rows.length + '</strong>건</span>'
       + '<span class="text-sm text-teal-700 font-semibold">키워드 매칭 <strong>' + matchedCount + '</strong>건</span>'
     if (domainCount > 0) {
@@ -1005,9 +1012,9 @@ async function openKModal(personnelId, projectId, personName) {
     countText += '<span class="text-xs text-slate-400">(상위 키워드 순 → 최근 수행일자 순 정렬)</span>'
     let html = '<div class="mb-4"><p class="text-xs text-slate-500 mb-2 font-medium">이 제안의 키워드 (' + keywords.length + '개) — 앞 순서가 상위 키워드</p><div class="flex flex-wrap gap-1.5">' + kwTags + '</div></div>'
     html += '<div class="mb-3 flex items-center gap-3">' + countText + '</div>'
-    if (matchedCount > 0) {
-      html += '<div class="mb-4"><div class="flex items-center justify-between mb-1.5"><span class="text-xs font-semibold text-slate-600">매칭 감리이력 요약</span><button onclick="copyKText()" class="flex items-center gap-1.5 px-3 py-1.5 bg-teal-600 hover:bg-teal-700 text-white text-xs rounded-lg transition"><i class="fas fa-copy"></i> 복사</button></div>'
-      html += '<textarea id="kCopyText" readonly class="w-full text-xs font-mono bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 text-slate-700 leading-relaxed resize-none focus:outline-none focus:ring-2 focus:ring-teal-300" rows="' + Math.min(matchedCount, 8) + '">' + copyLines + '</textarea></div>'
+    if (summaryCount > 0) {
+      html += '<div class="mb-4"><div class="flex items-center justify-between mb-1.5"><span class="text-xs font-semibold text-slate-600">매칭 감리이력 요약 <span class="text-slate-400 font-normal">(' + summaryCount + '건)</span></span><button onclick="copyKText()" class="flex items-center gap-1.5 px-3 py-1.5 bg-teal-600 hover:bg-teal-700 text-white text-xs rounded-lg transition"><i class="fas fa-copy"></i> 복사</button></div>'
+      html += '<textarea id="kCopyText" readonly class="w-full text-xs font-mono bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 text-slate-700 leading-relaxed resize-none focus:outline-none focus:ring-2 focus:ring-teal-300" rows="' + Math.min(summaryCount, 10) + '">' + copyLines + '</textarea></div>'
     }
     html += '<div class="overflow-x-auto rounded-xl border border-slate-200"><table class="w-full text-xs"><thead><tr class="bg-slate-50 text-slate-500 text-xs"><th class="px-3 py-2 text-left">사업명</th><th class="px-3 py-2 text-left">발주처</th><th class="px-3 py-2 text-left">분야</th><th class="px-3 py-2 text-center">매칭</th><th class="px-3 py-2 text-left">주요 키워드 (변환) / 분야</th></tr></thead><tbody>' + tableRows + '</tbody></table></div>'
     if (domainCount > 0) {
