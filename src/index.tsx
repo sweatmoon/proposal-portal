@@ -2,6 +2,7 @@
  * Entry point — Hono + @hono/node-server (Railway / Node.js)
  */
 import { serve } from '@hono/node-server'
+import { serveStatic } from '@hono/node-server/serve-static'
 import { Hono } from 'hono'
 import { logger } from 'hono/logger'
 import { cors } from 'hono/cors'
@@ -16,6 +17,9 @@ const app = new Hono()
 // ── 미들웨어 ──────────────────────────────────────────────────
 app.use('*', logger())
 app.use('/api/*', cors())
+
+// ── 정적 파일 서빙 (dist/static/) ────────────────────────────
+app.use('/static/*', serveStatic({ root: './dist' }))
 
 // ── 헬스체크 (Railway health probe) ──────────────────────────
 app.get('/health', (c) => c.json({ ok: true, ts: new Date().toISOString() }))
