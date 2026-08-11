@@ -138,92 +138,77 @@ app.get('/:id/audit-match', async (c) => {
     }
   })
 
-  // project_name 기준 중복 제거 — 같은 사업명이면 첫 번째(최신) 행만 유지
+  // ── project_name 기준 중복 제거 (전체 이력) ──────────────────
   const seen = new Set<string>()
-  const kwMatchedRows = rawRows.filter(r => {
+  const dedupedRows = rawRows.filter(r => {
     const key = String((r as Record<string, unknown>).project_name ?? '').trim()
     if (seen.has(key)) return false
     seen.add(key)
     return true
   })
 
-  // 정렬: 상위 키워드 sort_order 낮은 순 → 최신 연월 순 (매칭 없으면 최하위)
-  kwMatchedRows.sort((a, b) => {
-    const aTop = (a as Record<string, unknown>).top_sort_order as number
-    const bTop = (b as Record<string, unknown>).top_sort_order as number
-    if (aTop !== bTop) return aTop - bTop
-    const aYm = String((a as Record<string, unknown>).audit_yearmonth ?? '')
-    const bYm = String((b as Record<string, unknown>).audit_yearmonth ?? '')
-    return bYm.localeCompare(aYm)
-  })
-
-  // ── 분야 매칭 보충 ──────────────────────────────────────────
-  // 키워드 매칭 건수가 20건 미만이면 전문분야(proposal_members.domain)로 감리이력 domain 매칭해 30건까지 보충
-  const kwMatchedCount = kwMatchedRows.filter(r => (r as Record<string, unknown>).match_count as number > 0).length
-  let domainRows: typeof kwMatchedRows = []
-
-  // 전문분야 키워드 추출: "응용시스템 (정산)" → ["응용시스템", "정산"]
-  // 공백/괄호/쉼표로 분리 후 2자 이상인 토큰만 사용
+  // ── 전문분야 토큰 추출 ─────────────────────────────────────
+  // "응용시스템 (정산)" → ["응용시스템", "정산"]
   const personDomain = String(memberRow?.domain ?? '').trim()
   const personDomainTokens = personDomain
     .split(/[\s,()（）\/]+/)
     .map(s => s.trim().replace(/\s+/g, ''))
     .filter(s => s.length >= 2)
 
-  if (kwMatchedCount < 20 && personDomainTokens.length > 0) {
-    const need = 30 - kwMatchedCount
+  // ── 각 행에 match_type 재판정 ─────────────────────────────
+  // keyword: match_count > 0
+  // domain:  match_count = 0 이지만 h.domain이 전문분야 토큰과 부분매칭
+  // none:    나머지
+  const typedRows = dedupedRows.map(r => {
+    const mc = (r as Record<string, unknown>).match_count as number
+    if (mc > 0) {
+      return { ...r, match_type: 'keyword' as const }
+    }
+    if (personDomainTokens.length > 0) {
+      const hDomainNorm = String((r as Record<string, unknown>).domain ?? '').replace(/\s+/g, '')
+      const isDomainMatch = hDomainNorm.length > 0 &&
+        personDomainTokens.some(tok => hDomainNorm.includes(tok))
+      if (isDomainMatch) {
+        return { ...r, match_type: 'domain' as const }
+      }
+    }
+    return { ...r, match_type: 'none' as 'keyword' | 'domain' | 'none' }
+  })
 
-    // 키워드 매칭된 행(match_count > 0)의 사업명만 제외 대상으로 설정
-    const kwHitNames = new Set(
-      kwMatchedRows
-        .filter(r => (r as Record<string, unknown>).match_count as number > 0)
-        .map(r => String((r as Record<string, unknown>).project_name ?? '').trim())
-    )
+  // ── 3순위 정렬 ────────────────────────────────────────────
+  // 1순위: keyword (상위 키워드 sort_order 낮은 순 → 최신 연월 순)
+  // 2순위: domain  (최신 연월 순)
+  // 3순위: none    (최신 연월 순)
+  const groupOrder = { keyword: 0, domain: 1, none: 2 }
+  typedRows.sort((a, b) => {
+    const aType = (a as Record<string, unknown>).match_type as string
+    const bType = (b as Record<string, unknown>).match_type as string
+    const gA = groupOrder[aType as keyof typeof groupOrder] ?? 2
+    const gB = groupOrder[bType as keyof typeof groupOrder] ?? 2
+    if (gA !== gB) return gA - gB
+    // 같은 그룹 내: keyword는 top_sort_order 우선
+    if (aType === 'keyword') {
+      const aTop = (a as Record<string, unknown>).top_sort_order as number
+      const bTop = (b as Record<string, unknown>).top_sort_order as number
+      if (aTop !== bTop) return aTop - bTop
+    }
+    const aYm = String((a as Record<string, unknown>).audit_yearmonth ?? '')
+    const bYm = String((b as Record<string, unknown>).audit_yearmonth ?? '')
+    return bYm.localeCompare(aYm)
+  })
 
-    // auditHistory 원본에서 전문분야 토큰과 h.domain이 매칭되는 행 추출
-    const domainSeenNames = new Set<string>()
-    const domainCandidates = auditHistory
-      .filter(h => {
-        const name = String(h.project_name ?? '').trim()
-        if (kwHitNames.has(name)) return false          // 이미 키워드 매칭된 사업명 제외
-        if (domainSeenNames.has(name)) return false     // 분야 보충 내 중복 제거
-        // h.domain이 전문분야 토큰 중 하나라도 포함하면 매칭
-        const hDomainNorm = String(h.domain ?? '').replace(/\s+/g, '')
-        if (hDomainNorm.length === 0) return false
-        const matched = personDomainTokens.some(tok => hDomainNorm.includes(tok))
-        if (!matched) return false
-        domainSeenNames.add(name)
-        return true
-      })
-      .sort((a, b) => {
-        // 최신 연월 순 정렬
-        const aYm = String(a.audit_yearmonth ?? '')
-        const bYm = String(b.audit_yearmonth ?? '')
-        return bYm.localeCompare(aYm)
-      })
-      .slice(0, need)
-
-    domainRows = domainCandidates.map(h => ({
-      ...h,
-      matched_keywords: [],
-      mapped_keywords:  [],
-      match_count:      0,
-      match_type:       'domain' as 'keyword' | 'domain',
-      top_sort_order:   99999,
-    }))
-  }
-
-  // 전체 rows: 키워드 매칭 + 분야 매칭 보충
-  const rows = [...kwMatchedRows, ...domainRows]
+  // ── 통계 ─────────────────────────────────────────────────
+  const kwMatchedCount  = typedRows.filter(r => (r as Record<string, unknown>).match_type === 'keyword').length
+  const domainRowsCount = typedRows.filter(r => (r as Record<string, unknown>).match_type === 'domain').length
 
   return c.json({
     ok: true,
     person,
     keywords: kwRows,
     mappingMap: Object.fromEntries(mappingMap),
-    rows,
+    rows: typedRows,
     kw_matched_count: kwMatchedCount,
-    domain_rows_count: domainRows.length,
+    domain_rows_count: domainRowsCount,
   })
 })
 

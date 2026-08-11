@@ -980,16 +980,20 @@ async function openKModal(personnelId, projectId, personName) {
       return '<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs border ' + cls + '"><span class="text-slate-400">' + (i + 1) + '.</span>' + kwText + '</span>'
     }).join(' ')
     const tableRows = rows.map(h => {
-      const isDomain = h.match_type === 'domain'
+      const isKeyword = h.match_type === 'keyword'
+      const isDomain  = h.match_type === 'domain'
+      const isNone    = !isKeyword && !isDomain
       const matchBadges = isDomain
         ? '<span class="inline-block px-1.5 py-0.5 bg-slate-100 text-slate-500 rounded text-xs font-medium mr-0.5">' + (h.domain || '-') + '</span>'
-        : h.mapped_keywords.map(mk => '<span class="inline-block px-1.5 py-0.5 bg-teal-100 text-teal-700 rounded text-xs font-medium mr-0.5">' + mk + '</span>').join('')
-      const origBadges = isDomain ? '' : h.matched_keywords.map(ok => mappingMap[ok] ? '<span class="text-slate-400 text-xs line-through mr-0.5">' + ok + '</span>' : '').join('')
-      const matchClass = isDomain ? 'opacity-60' : h.match_count >= 3 ? 'bg-teal-50' : h.match_count >= 1 ? 'bg-indigo-50/40' : ''
-      const matchBadge = isDomain
-        ? '<span class="inline-block px-2 py-0.5 rounded-full text-xs font-bold bg-slate-300 text-white" title="분야 매칭">분야</span>'
-        : h.match_count > 0 ? '<span class="inline-block px-2 py-0.5 rounded-full text-xs font-bold bg-teal-600 text-white">' + h.match_count + '</span>' : '<span class="text-slate-300">-</span>'
-      return '<tr class="border-t border-slate-100 text-xs ' + matchClass + '"><td class="px-3 py-2 text-slate-700 max-w-xs">' + (h.project_name || '-') + '</td><td class="px-3 py-2 text-slate-500">' + (h.client_org || '-') + '</td><td class="px-3 py-2 text-slate-500">' + (h.domain || '-') + '</td><td class="px-3 py-2 text-center">' + matchBadge + '</td><td class="px-3 py-2">' + (matchBadges || '<span class="text-slate-300 text-xs">없음</span>') + origBadges + '</td></tr>'
+        : isKeyword ? h.mapped_keywords.map(mk => '<span class="inline-block px-1.5 py-0.5 bg-teal-100 text-teal-700 rounded text-xs font-medium mr-0.5">' + mk + '</span>').join('') : ''
+      const origBadges = isKeyword ? h.matched_keywords.map(ok => mappingMap[ok] ? '<span class="text-slate-400 text-xs line-through mr-0.5">' + ok + '</span>' : '').join('') : ''
+      const matchClass = isNone ? 'opacity-40' : isDomain ? 'opacity-70' : h.match_count >= 3 ? 'bg-teal-50' : h.match_count >= 1 ? 'bg-indigo-50/40' : ''
+      const matchBadge = isKeyword
+        ? '<span class="inline-block px-2 py-0.5 rounded-full text-xs font-bold bg-teal-600 text-white">' + h.match_count + '</span>'
+        : isDomain
+          ? '<span class="inline-block px-2 py-0.5 rounded-full text-xs font-bold bg-slate-300 text-white" title="분야 매칭">분야</span>'
+          : '<span class="text-slate-200">-</span>'
+      return '<tr class="border-t border-slate-100 text-xs ' + matchClass + '"><td class="px-3 py-2 text-slate-700 max-w-xs">' + (h.project_name || '-') + '</td><td class="px-3 py-2 text-slate-500">' + (h.client_org || '-') + '</td><td class="px-3 py-2 text-slate-500">' + (h.domain || '-') + '</td><td class="px-3 py-2 text-center">' + matchBadge + '</td><td class="px-3 py-2">' + (matchBadges || '<span class="text-slate-300 text-xs">-</span>') + origBadges + '</td></tr>'
     }).join('')
     const matchedCount = kw_matched_count != null ? kw_matched_count : rows.filter(r => r.match_count > 0).length
     const domainCount  = domain_rows_count != null ? domain_rows_count : 0
@@ -1018,7 +1022,7 @@ async function openKModal(personnelId, projectId, personName) {
     }
     html += '<div class="overflow-x-auto rounded-xl border border-slate-200"><table class="w-full text-xs"><thead><tr class="bg-slate-50 text-slate-500 text-xs"><th class="px-3 py-2 text-left">사업명</th><th class="px-3 py-2 text-left">발주처</th><th class="px-3 py-2 text-left">분야</th><th class="px-3 py-2 text-center">매칭</th><th class="px-3 py-2 text-left">주요 키워드 (변환) / 분야</th></tr></thead><tbody>' + tableRows + '</tbody></table></div>'
     if (domainCount > 0) {
-      html += '<p class="text-xs text-slate-400 mt-2">* <span class="inline-block px-1.5 py-0.5 rounded bg-slate-300 text-white text-xs font-bold">분야</span> 배지: 키워드 매칭 없음, 분야 정보로 보충된 이력</p>'
+      html += '<p class="text-xs text-slate-400 mt-2">* <span class="inline-block px-1.5 py-0.5 rounded bg-slate-300 text-white text-xs font-bold">분야</span> 배지: 분야 매칭 이력 &nbsp;|&nbsp; 흐린 행: 키워드·분야 모두 미매칭 이력</p>'
     }
     document.getElementById('kModalBody').innerHTML = html
   } catch (e) {
