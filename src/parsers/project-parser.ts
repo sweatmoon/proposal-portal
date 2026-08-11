@@ -487,7 +487,10 @@ export function parseProjectHtml(html: string): ParsedProject {
     // 그룹 헤더 감지
     // c[0]: "단계 감리팀 (6 명)", "전문가 (14 명)", "테스터 (N 명)"
     // c[1]: "핵심기술", "필수기술", "보안진단" (전문가 서브그룹, rowspan 첫 행)
-    const checkCells = [c[0], c[1]]
+    // ※ row 셀 수가 1개일 수 있으므로 반드시 ?? '' 로 null-safe 처리
+    const cell0 = c[0] ?? ''
+    const cell1 = c[1] ?? ''
+    const checkCells = [cell0, cell1]
     for (const cell of checkCells) {
       if (cell.includes('감리팀')) {
         currentGroup    = cell
@@ -505,7 +508,7 @@ export function parseProjectHtml(html: string): ParsedProject {
         if (subM) currentSubGroup = subM[1]
         // c[0]에 전문가만 있고 c[1]에 서브그룹이 오는 경우
         if (!subM) {
-          const subM2 = (c[1] ?? '').match(/(핵심기술|필수기술|보안진단)/)
+          const subM2 = cell1.match(/(핵심기술|필수기술|보안진단)/)
           if (subM2) currentSubGroup = subM2[1]
         }
       } else if (/^(핵심기술|필수기술|보안진단)/.test(cell)) {
@@ -516,9 +519,9 @@ export function parseProjectHtml(html: string): ParsedProject {
     }
 
     // 소계 행 스킵
-    if (c[0] === '소계' || c[1] === '소계' || c[2] === '소계' || c[3] === '소계') continue
+    if (cell0 === '소계' || cell1 === '소계' || (c[2] ?? '') === '소계' || (c[3] ?? '') === '소계') continue
     // 총계 행 스킵
-    if (c[0].includes('총계') || c[0].includes('합계')) continue
+    if (cell0.includes('총계') || cell0.includes('합계')) continue
 
     // ── 이름 컬럼 위치 동적 탐지 ──
     // 이름 패턴: 한글 2~5자 (선택적으로 " (K)" 접미사)
