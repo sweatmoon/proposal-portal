@@ -342,7 +342,6 @@ export function parseProjectHtml(html: string): ParsedProject {
         const clean = kw.split(/\s{2,}/)[0].trim()
         if (!clean || clean.length > 50) continue
         keywords.push({ keyword: clean, sort_order: order++ })
-        if (order >= 40) break
       }
     }
 
