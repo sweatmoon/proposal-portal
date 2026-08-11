@@ -902,9 +902,16 @@ app.get('/proposals/:id', async (c) => {
           ${stages.map(s => `<label style="display:flex;align-items:center;gap:4px;font-size:13px;color:#333;cursor:pointer"><input type="checkbox" class="st-extra-stage-cb" value="${s.stage}"> ${s.stage}</label>`).join('')}
         </div>
         <div style="font-size:12px;color:#777;margin-top:8px">
-          요청공수: <b>${project.bid_amount ? fmtMoney(project.bid_amount as number) : '(없음)'}</b> · 
+          요청공수: <b>${project.required_md != null ? project.required_md + ' MD' : '(없음)'}</b> · 
           주관기관: <b>${project.client_org ?? '(없음)'}</b> · 
           총괄감리원: <b>${project.director ?? '(없음)'}</b>
+        </div>
+      </div>
+      <!-- ── 사진장표용 분류 체크리스트 ── -->
+      <div style="margin-bottom:16px;border:1px solid #e8eaf0;border-radius:8px;padding:12px">
+        <b style="font-size:13px;color:#333">🖼️ 사진장표용 분류 체크리스트</b>
+        <div id="photo-assign-rows" style="display:flex;flex-direction:column;gap:8px;margin-top:10px">
+          <span style="color:#aaa;font-size:13px">인력 데이터를 불러오는 중...</span>
         </div>
       </div>
       <button onclick="downloadAllPptx(this)" style="width:100%;padding:14px 0;font-size:16px;font-weight:800;color:#fff;background:linear-gradient(135deg,#7c3aed,#4338ca);border:none;border-radius:9px;cursor:pointer;box-shadow:0 3px 10px rgba(67,56,202,.4);font-family:inherit;margin-bottom:16px">
@@ -956,7 +963,7 @@ app.get('/proposals/:id', async (c) => {
   // ══════════════════════════════════════════════════════════
   var parsedData = {
     projectTitle:  ${projectDataJSON}.projectTitle,
-    requestMD:     0,
+    requestMD:     ${project.required_md ?? 0},
     requestStageCount: 0,
     requestAuditDays:  0,
     clientOrg:     ${projectDataJSON}.clientOrg,

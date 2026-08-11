@@ -151,8 +151,119 @@ function openAutoModal() {
     return
   }
   document.getElementById('autoModal').style.display = 'flex'
+  renderPhotoAssignRows()
 }
 function closeAutoModal() { document.getElementById('autoModal').style.display = 'none' }
+
+// ── 사진장표 분류 체크리스트 ────────────────────────────────
+const PHOTO_CATS = [
+  { key: 'audit',    label: '👤 감리원',    grpFilter: p => p.group === '감리원팀' },
+  { key: 'core',     label: '🟢 핵심기술',  grpFilter: p => p.group === '전문가' && !p.expertSubGroup.includes('필수') && !p.expertSubGroup.includes('보안') },
+  { key: 'required', label: '🟩 필수기술',  grpFilter: p => p.expertSubGroup.includes('필수') },
+  { key: 'security', label: '🔴 보안진단',  grpFilter: p => p.expertSubGroup.includes('보안') },
+  { key: 'tester',   label: '🟣 테스터',    grpFilter: p => p.group === '테스터' },
+]
+
+// 인원수에 맞는 기본 장표 크기 추천 (인원 이상인 가장 작은 규격)
+function suggestSheetSize(count) {
+  for (const size of [2, 4, 6, 9]) if (count <= size) return size
+  return 9
+}
+
+// 각 분류의 인원 목록을 parsedData.portalOrder에서 추출
+function buildPhotoAssignCache() {
+  const { portalOrder } = parsedData || {}
+  if (!portalOrder) return null
+  const cache = {}
+  PHOTO_CATS.forEach(c => { cache[c.key] = portalOrder.filter(c.grpFilter) })
+  return cache
+}
+
+// 사진장표 분류 체크리스트 HTML 렌더링
+function renderPhotoAssignRows() {
+  const wrap = document.getElementById('photo-assign-rows')
+  if (!wrap) return
+  if (!parsedData || !parsedData.portalOrder) {
+    wrap.innerHTML = '<span style="color:#aaa;font-size:13px">인력 데이터가 없습니다.</span>'
+    return
+  }
+  const cache = buildPhotoAssignCache()
+  const activeCats = PHOTO_CATS.filter(c => (cache[c.key] || []).length > 0)
+  if (!activeCats.length) {
+    wrap.innerHTML = '<span style="color:#aaa;font-size:13px">인력 데이터가 없습니다.</span>'
+    return
+  }
+
+  const rows = activeCats.map(c => {
+    const count = cache[c.key].length
+    // 감리원은 장표 크기 선택 없이 고정 안내
+    if (c.key === 'audit') {
+      return `<div class="photo-assign-row" data-cat="audit" style="display:flex;align-items:center;gap:10px;padding:8px 10px;background:#f9fafb;border-radius:6px;flex-wrap:wrap">
+        <span style="font-weight:700;font-size:13px;min-width:110px">${c.label} <span style="font-weight:400;color:#777">(${count}명)</span></span>
+        <span style="font-size:12px;color:#888">2인장표로 기본 포함됩니다</span>
+      </div>`
+    }
+    const otherCats = activeCats.filter(o => o.key !== c.key && o.key !== 'audit')
+    const includeBoxes = [
+      `<label style="display:flex;align-items:center;gap:3px;font-size:12px;cursor:pointer"><input type="checkbox" class="paw-solo" data-cat="${c.key}" checked onchange="onPawSoloChange('${c.key}')"> 단독</label>`,
+      ...otherCats.map(o => `<label style="display:flex;align-items:center;gap:3px;font-size:12px;cursor:pointer"><input type="checkbox" class="paw-include" data-cat="${c.key}" data-target="${o.key}" onchange="onPawIncludeChange('${c.key}')"> ${o.label.replace(/^\S+\s/, '')}</label>`)
+    ].join('')
+    return `<div class="photo-assign-row" data-cat="${c.key}" style="display:flex;align-items:center;gap:10px;padding:8px 10px;background:#f9fafb;border-radius:6px;flex-wrap:wrap">
+      <span style="font-weight:700;font-size:13px;min-width:110px">${c.label} <span style="font-weight:400;color:#777">(${count}명)</span></span>
+      <span style="font-size:12px;color:#555">장표
+        <select class="paw-sheet" data-cat="${c.key}" style="margin:0 4px;padding:2px 4px;border-radius:4px;border:1px solid #ccc;font-size:12px">
+          ${[2, 4, 6, 9].map(n => `<option value="${n}"${n === suggestSheetSize(count) ? ' selected' : ''}>${n}인</option>`).join('')}
+        </select>
+      </span>
+      <span style="font-size:12px;color:#555">포함 <span style="display:inline-flex;gap:6px;flex-wrap:wrap">${includeBoxes}</span></span>
+    </div>`
+  }).join('')
+  wrap.innerHTML = rows
+}
+
+// "단독" 체크 시 같은 행의 포함 체크박스 모두 해제
+function onPawSoloChange(cat) {
+  const row = document.querySelector(`.photo-assign-row[data-cat="${cat}"]`)
+  const solo = row.querySelector('.paw-solo')
+  if (solo.checked) row.querySelectorAll('.paw-include').forEach(cb => { cb.checked = false })
+}
+// 다른 분류 포함 체크 시 "단독" 자동 해제
+function onPawIncludeChange(cat) {
+  const row = document.querySelector(`.photo-assign-row[data-cat="${cat}"]`)
+  const anyChecked = Array.from(row.querySelectorAll('.paw-include')).some(cb => cb.checked)
+  if (anyChecked) row.querySelector('.paw-solo').checked = false
+}
+
+// 각 분류 행의 설정(장표 크기, 포함 대상) 읽기
+function readPhotoAssignConfig() {
+  const cfg = {}
+  document.querySelectorAll('.photo-assign-row').forEach(row => {
+    const cat = row.dataset.cat
+    const sheetEl = row.querySelector('.paw-sheet')
+    if (!sheetEl) return // 감리원 행 (고정, 장표 크기 없음)
+    const sheet = parseInt(sheetEl.value, 10)
+    const include = new Set()
+    row.querySelectorAll('.paw-include:checked').forEach(cb => include.add(cb.dataset.target))
+    cfg[cat] = { sheet, include }
+  })
+  return cfg
+}
+
+// 서로 "포함"으로 연결된 분류들을 하나의 그룹으로 묶음 (union-find)
+function groupPhotoCategories(cfg) {
+  const keys = Object.keys(cfg)
+  const parent = {}; keys.forEach(k => { parent[k] = k })
+  const find = k => (parent[k] === k ? k : (parent[k] = find(parent[k])))
+  const union = (a, b) => { const ra = find(a), rb = find(b); if (ra !== rb) parent[ra] = rb }
+  keys.forEach(k => { cfg[k].include.forEach(t => { if (cfg[t]) union(k, t) }) })
+  const groups = {}
+  PHOTO_CATS.forEach(({ key }) => {
+    if (!cfg[key]) return
+    const root = find(key)
+    ;(groups[root] = groups[root] || []).push(key)
+  })
+  return Object.values(groups)
+}
 
 function showAutoAlert(msg, ok) {
   const el = document.getElementById('autoModalAlertBox')
@@ -394,24 +505,86 @@ async function downloadAssignPptx(btn, opts) {
 }
 
 // ── 사진장표 PPT ────────────────────────────────────────────
+// 장표 레이아웃: 슬라이드 당 카드 배치 정의 (cols × rows 격자)
+const PHOTO_LAYOUT = {
+  2: { cols: 2, rows: 1 },
+  4: { cols: 2, rows: 2 },
+  6: { cols: 3, rows: 2 },
+  9: { cols: 3, rows: 3 },
+}
+
+// PHOTO_CATS 라벨 → 슬라이드 제목 매핑
+const PHOTO_CAT_TITLES = {
+  audit:    '감리원',
+  core:     '핵심기술 전문가',
+  required: '필수기술 전문가',
+  security: '보안진단 전문가',
+  tester:   '테스터',
+}
+
 async function downloadPhotoAssignPptx(btn, opts) {
   opts = opts || {}
   if (typeof PptxGenJS === 'undefined') { alert('PPT 라이브러리 로딩 중입니다.'); return null }
   setBtnState(btn, true)
   try {
     const { portalOrder, personFieldMap, personGradeMap } = parsedData
-    const groups = [
-      { label: '감리원', people: portalOrder.filter(p => p.group === '감리원팀') },
-      { label: '핵심기술 전문가', people: portalOrder.filter(p => p.group === '전문가' && !p.expertSubGroup.includes('필수') && !p.expertSubGroup.includes('보안')) },
-      { label: '필수기술 전문가', people: portalOrder.filter(p => p.expertSubGroup.includes('필수')) },
-      { label: '보안진단 전문가', people: portalOrder.filter(p => p.expertSubGroup.includes('보안')) },
-      { label: '테스터', people: portalOrder.filter(p => p.group === '테스터') },
-    ].filter(g => g.people.length > 0)
+    const cache = buildPhotoAssignCache()
+    if (!cache) { showAutoAlert('❌ 인력 데이터가 없습니다.', false); return null }
+
+    // 체크리스트 설정 읽기 (모달이 열려 있으면 실제 설정, 아니면 기본값 사용)
+    let cfg = {}
+    try { cfg = readPhotoAssignConfig() } catch (e) { cfg = {} }
+
+    // cfg가 비어있으면 (모달 미열림 or 모든 행 비활성) 기본 설정으로 fallback
+    const activeCfgKeys = Object.keys(cfg)
+    if (!activeCfgKeys.length) {
+      PHOTO_CATS.forEach(c => {
+        if (c.key === 'audit') return
+        const cnt = (cache[c.key] || []).length
+        if (cnt > 0) cfg[c.key] = { sheet: suggestSheetSize(cnt), include: new Set() }
+      })
+    }
+
+    // 감리원은 항상 독립 처리 (2인 장표, 단독)
+    const allGroups = [] // { label, people, sheetSize }
+
+    // 감리원 (체크리스트 무관 고정 포함)
+    const auditPeople = cache.audit || []
+    if (auditPeople.length > 0) {
+      // 감리원은 2인 장표씩 나눔
+      const pageSize = 2
+      for (let i = 0; i < auditPeople.length; i += pageSize) {
+        allGroups.push({ label: '감리원', people: auditPeople.slice(i, i + pageSize), sheetSize: pageSize })
+      }
+    }
+
+    // 전문가/테스터 그룹 묶기 (union-find)
+    const catGroups = groupPhotoCategories(cfg) // [[catKey, ...], ...]
+    for (const catKeys of catGroups) {
+      // 그룹 내 인원 합치기 (PHOTO_CATS 순서 유지)
+      let people = []
+      catKeys.forEach(k => { people = people.concat(cache[k] || []) })
+      if (!people.length) continue
+      // 장표 크기: 그룹 내 첫 번째 cat 기준
+      const firstCat = PHOTO_CATS.find(c => catKeys.includes(c.key))
+      const sheetSize = (cfg[firstCat.key] || {}).sheet || suggestSheetSize(people.length)
+      // 슬라이드 제목: 그룹 내 cat 라벨 합치기
+      const label = catKeys.map(k => PHOTO_CAT_TITLES[k] || k).join(' + ')
+      // 장표 크기 단위로 페이지 나누기
+      for (let i = 0; i < people.length; i += sheetSize) {
+        allGroups.push({ label, people: people.slice(i, i + sheetSize), sheetSize })
+      }
+    }
+
+    if (!allGroups.length) { showAutoAlert('❌ 생성할 인력이 없습니다.', false); return null }
+
     const pres = new PptxGenJS(); pres.layout = 'LAYOUT_WIDE'
     const FONT_BOLD = 'KoPub돋움체 Bold', FONT_MEDIUM = 'KoPub돋움체 Medium'
-    for (const g of groups) {
+
+    for (const g of allGroups) {
       const people = g.people
-      const cols = Math.min(3, people.length), rows = Math.ceil(people.length / cols)
+      const layout = PHOTO_LAYOUT[g.sheetSize] || PHOTO_LAYOUT[suggestSheetSize(people.length)]
+      const cols = layout.cols, rows = layout.rows
       const cardW = 3.8, cardH = 1.4, gapX = 0.2, gapY = 0.2
       const totalW = cols * cardW + (cols - 1) * gapX
       const startX = (13.33 - totalW) / 2, startY = 1.2
@@ -420,7 +593,6 @@ async function downloadPhotoAssignPptx(btn, opts) {
       people.forEach((p, i) => {
         const col = i % cols, row = Math.floor(i / cols)
         const x = startX + col * (cardW + gapX), y = startY + row * (cardH + gapY)
-        const info = personGradeMap[p.name] || {}
         const field = personFieldMap[p.name] || p.field || ''
         const grade = getEffectiveGrade(p.name)
         const gradeColor = grade === '수석감리원' ? '1A2E4A' : grade === '감리원' ? '3A6EA8' : '2E7D32'
