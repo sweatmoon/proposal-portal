@@ -1,6 +1,7 @@
 /**
  * GET /api/projects       — 제안작업표 목록
  * GET /api/projects/:id   — 제안작업표 상세
+ * DELETE /api/projects/:id — 제안작업표 삭제 (cascade)
  */
 import { Hono } from 'hono'
 import { query, queryOne } from '../db/client.js'
@@ -86,6 +87,22 @@ app.get('/:id', async (c) => {
   ])
 
   return c.json({ ok: true, data: { project, phases, members, keywords, files, toc } })
+})
+
+// ── 삭제 ──────────────────────────────────────────────────────
+app.delete('/:id', async (c) => {
+  const id = Number(c.req.param('id'))
+  if (isNaN(id)) return c.json({ ok: false, error: 'invalid id' }, 400)
+
+  const existing = await queryOne<{ id: number; project_name: string }>(
+    'SELECT id, project_name FROM audit_projects WHERE id = $1', [id]
+  )
+  if (!existing) return c.json({ ok: false, error: '존재하지 않는 제안건입니다' }, 404)
+
+  // CASCADE 설정으로 하위 테이블(phases, assignments, members, keywords 등) 자동 삭제
+  await query('DELETE FROM audit_projects WHERE id = $1', [id])
+
+  return c.json({ ok: true, message: `"${existing.project_name}" 삭제 완료` })
 })
 
 export default app

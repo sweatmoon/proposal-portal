@@ -218,7 +218,7 @@ app.get('/proposals', async (c) => {
   }).join('')
 
   const rows = projects.map((p, i) => `
-    <tr class="hover:bg-indigo-50 cursor-pointer transition" onclick="location.href='/proposals/${p.id}'">
+    <tr class="hover:bg-indigo-50 transition group" onclick="location.href='/proposals/${p.id}'">
       <td class="px-4 py-3 text-center text-sm text-slate-400">${i + 1}</td>
       <td class="px-4 py-3">
         <div class="text-sm font-semibold text-indigo-700 leading-snug line-clamp-2 max-w-xs">${p.project_name}</div>
@@ -232,6 +232,12 @@ app.get('/proposals', async (c) => {
       <td class="px-4 py-3 text-center text-sm text-slate-600">${p.required_md ?? '-'} MD</td>
       <td class="px-4 py-3 text-center text-sm text-slate-600">${p.member_count ?? 0}명</td>
       <td class="px-4 py-3 text-center">${statusBadge(p.proposal_status as string)}</td>
+      <td class="px-4 py-3 text-center" onclick="event.stopPropagation()">
+        <button onclick="confirmDelete(${p.id}, '${String(p.project_name).replace(/'/g, "\\'")}')"
+          class="opacity-0 group-hover:opacity-100 transition-opacity px-2.5 py-1.5 bg-red-50 hover:bg-red-100 text-red-500 hover:text-red-700 rounded-lg text-xs font-medium border border-red-200 hover:border-red-400 flex items-center gap-1 whitespace-nowrap">
+          <i class="fas fa-trash-alt"></i> 삭제
+        </button>
+      </td>
     </tr>`).join('')
 
   const body = `
@@ -273,15 +279,84 @@ app.get('/proposals', async (c) => {
               <th class="px-4 py-3 text-center">요구공수</th>
               <th class="px-4 py-3 text-center">제안인력</th>
               <th class="px-4 py-3 text-center">상태</th>
+              <th class="px-4 py-3 text-center w-16"></th>
             </tr>
           </thead>
           <tbody class="divide-y divide-slate-100">
-            ${rows || '<tr><td colspan="10" class="px-4 py-12 text-center text-slate-400">데이터가 없습니다.<br><a href="/upload" class="text-indigo-500 underline mt-2 inline-block">HTML 파일을 업로드해주세요</a></td></tr>'}
+            ${rows || '<tr><td colspan="11" class="px-4 py-12 text-center text-slate-400">데이터가 없습니다.<br><a href="/upload" class="text-indigo-500 underline mt-2 inline-block">HTML 파일을 업로드해주세요</a></td></tr>'}
           </tbody>
         </table>
       </div>
     </div>
-  </div>`
+  </div>
+
+  <!-- 삭제 확인 모달 -->
+  <div id="deleteModal" class="hidden fixed inset-0 z-50 flex items-center justify-center">
+    <div class="absolute inset-0 bg-black/40 backdrop-blur-sm" onclick="closeDeleteModal()"></div>
+    <div class="relative bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4 p-6">
+      <div class="flex items-center gap-3 mb-4">
+        <div class="w-10 h-10 rounded-full bg-red-100 flex items-center justify-center flex-shrink-0">
+          <i class="fas fa-trash-alt text-red-500"></i>
+        </div>
+        <div>
+          <h3 class="font-bold text-slate-800 text-base">제안건 삭제</h3>
+          <p class="text-xs text-slate-500 mt-0.5">이 작업은 되돌릴 수 없습니다</p>
+        </div>
+      </div>
+      <div class="bg-red-50 border border-red-200 rounded-xl px-4 py-3 mb-5">
+        <p class="text-sm text-red-700 font-medium" id="deleteModalName"></p>
+        <p class="text-xs text-red-500 mt-1">감리 단계, 투입 인력, 키워드 등 모든 관련 데이터가 함께 삭제됩니다.</p>
+      </div>
+      <div class="flex gap-3 justify-end">
+        <button onclick="closeDeleteModal()"
+          class="px-4 py-2 rounded-xl border border-slate-200 text-slate-600 text-sm hover:bg-slate-50 transition">
+          취소
+        </button>
+        <button id="deleteConfirmBtn" onclick="executeDelete()"
+          class="px-4 py-2 rounded-xl bg-red-600 hover:bg-red-700 text-white text-sm font-semibold transition flex items-center gap-2">
+          <i class="fas fa-trash-alt"></i> 삭제
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+  var _deleteTargetId = null;
+  function confirmDelete(id, name) {
+    _deleteTargetId = id;
+    document.getElementById('deleteModalName').textContent = name;
+    document.getElementById('deleteModal').classList.remove('hidden');
+  }
+  function closeDeleteModal() {
+    document.getElementById('deleteModal').classList.add('hidden');
+    _deleteTargetId = null;
+  }
+  async function executeDelete() {
+    if (!_deleteTargetId) return;
+    var btn = document.getElementById('deleteConfirmBtn');
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 삭제 중...';
+    try {
+      var res = await fetch('/api/projects/' + _deleteTargetId, { method: 'DELETE' });
+      var json = await res.json();
+      if (json.ok) {
+        closeDeleteModal();
+        location.reload();
+      } else {
+        alert('삭제 실패: ' + (json.error || '알 수 없는 오류'));
+        btn.disabled = false;
+        btn.innerHTML = '<i class="fas fa-trash-alt"></i> 삭제';
+      }
+    } catch(e) {
+      alert('삭제 중 오류가 발생했습니다: ' + e.message);
+      btn.disabled = false;
+      btn.innerHTML = '<i class="fas fa-trash-alt"></i> 삭제';
+    }
+  }
+  document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape') closeDeleteModal();
+  });
+  </script>`
 
   return c.html(layout('제안작업표', body, 'proposals'))
 })
