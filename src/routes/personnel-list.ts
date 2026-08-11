@@ -73,7 +73,7 @@ app.get('/:id/audit-match', async (c) => {
   if (isNaN(projectId) || projectId <= 0)
     return c.json({ ok: false, error: 'projectId required' }, 400)
 
-  const [person, auditHistory, kwRows, kmRows] = await Promise.all([
+  const [person, auditHistory, kwRows, kmRows, memberRow] = await Promise.all([
     queryOne('SELECT id, name, position, company, auditor_grade FROM personnel WHERE id = $1', [personnelId]),
     query<Record<string, unknown>>(
       'SELECT * FROM personnel_audit_history WHERE personnel_id = $1 ORDER BY audit_yearmonth DESC',
@@ -88,6 +88,13 @@ app.get('/:id/audit-match', async (c) => {
     query<{ original_keyword: string; mapped_keyword: string }>(
       'SELECT original_keyword, mapped_keyword FROM keyword_mappings WHERE project_id = $1',
       [projectId]
+    ),
+    // 이 인원의 전문분야 (proposal_members.domain) — 분야 보충 매칭에 사용
+    queryOne<{ domain: string }>(
+      `SELECT domain FROM proposal_members
+       WHERE project_id = $1 AND personnel_id = $2
+       LIMIT 1`,
+      [projectId, personnelId]
     ),
   ])
 
@@ -151,29 +158,40 @@ app.get('/:id/audit-match', async (c) => {
   })
 
   // ── 분야 매칭 보충 ──────────────────────────────────────────
-  // 키워드 매칭 건수가 20건 미만이면 domain 컬럼으로 매칭해 30건까지 보충
+  // 키워드 매칭 건수가 20건 미만이면 전문분야(proposal_members.domain)로 감리이력 domain 매칭해 30건까지 보충
   const kwMatchedCount = kwMatchedRows.filter(r => (r as Record<string, unknown>).match_count as number > 0).length
   let domainRows: typeof kwMatchedRows = []
 
-  if (kwMatchedCount < 20) {
+  // 전문분야 키워드 추출: "응용시스템 (정산)" → ["응용시스템", "정산"]
+  // 공백/괄호/쉼표로 분리 후 2자 이상인 토큰만 사용
+  const personDomain = String(memberRow?.domain ?? '').trim()
+  const personDomainTokens = personDomain
+    .split(/[\s,()（）\/]+/)
+    .map(s => s.trim().replace(/\s+/g, ''))
+    .filter(s => s.length >= 2)
+
+  if (kwMatchedCount < 20 && personDomainTokens.length > 0) {
     const need = 30 - kwMatchedCount
+
     // 키워드 매칭된 행(match_count > 0)의 사업명만 제외 대상으로 설정
-    // (match_count=0인 행은 분야 보충으로 대체 가능하므로 제외하지 않음)
     const kwHitNames = new Set(
       kwMatchedRows
         .filter(r => (r as Record<string, unknown>).match_count as number > 0)
         .map(r => String((r as Record<string, unknown>).project_name ?? '').trim())
     )
 
-    // auditHistory 원본에서 키워드 매칭 사업명을 제외하고, domain이 있는 행만 추출
+    // auditHistory 원본에서 전문분야 토큰과 h.domain이 매칭되는 행 추출
     const domainSeenNames = new Set<string>()
     const domainCandidates = auditHistory
       .filter(h => {
         const name = String(h.project_name ?? '').trim()
         if (kwHitNames.has(name)) return false          // 이미 키워드 매칭된 사업명 제외
         if (domainSeenNames.has(name)) return false     // 분야 보충 내 중복 제거
-        const domain = String(h.domain ?? '').trim()
-        if (domain.length === 0) return false           // domain 없는 행 제외
+        // h.domain이 전문분야 토큰 중 하나라도 포함하면 매칭
+        const hDomainNorm = String(h.domain ?? '').replace(/\s+/g, '')
+        if (hDomainNorm.length === 0) return false
+        const matched = personDomainTokens.some(tok => hDomainNorm.includes(tok))
+        if (!matched) return false
         domainSeenNames.add(name)
         return true
       })
