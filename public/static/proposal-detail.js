@@ -971,7 +971,7 @@ async function openKModal(personnelId, projectId, personName) {
     const res = await fetch('/api/personnel/' + personnelId + '/audit-match?projectId=' + projectId)
     const json = await res.json()
     if (!json.ok) throw new Error(json.error)
-    const { keywords, rows, mappingMap } = json
+    const { keywords, rows, mappingMap, kw_matched_count, domain_rows_count } = json
     const kwTags = keywords.map((k, i) => {
       const cls = i < 3 ? 'bg-teal-50 border-teal-300 text-teal-700 font-semibold' : 'bg-slate-50 border-slate-200 text-slate-500'
       const kwText = mappingMap[k.keyword]
@@ -980,24 +980,39 @@ async function openKModal(personnelId, projectId, personName) {
       return '<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs border ' + cls + '"><span class="text-slate-400">' + (i + 1) + '.</span>' + kwText + '</span>'
     }).join(' ')
     const tableRows = rows.map(h => {
-      const matchBadges = h.mapped_keywords.map(mk => '<span class="inline-block px-1.5 py-0.5 bg-teal-100 text-teal-700 rounded text-xs font-medium mr-0.5">' + mk + '</span>').join('')
-      const origBadges = h.matched_keywords.map(ok => mappingMap[ok] ? '<span class="text-slate-400 text-xs line-through mr-0.5">' + ok + '</span>' : '').join('')
-      const matchClass = h.match_count >= 3 ? 'bg-teal-50' : h.match_count >= 1 ? 'bg-indigo-50/40' : ''
-      const matchBadge = h.match_count > 0 ? '<span class="inline-block px-2 py-0.5 rounded-full text-xs font-bold bg-teal-600 text-white">' + h.match_count + '</span>' : '<span class="text-slate-300">-</span>'
+      const isDomain = h.match_type === 'domain'
+      const matchBadges = isDomain
+        ? '<span class="inline-block px-1.5 py-0.5 bg-slate-100 text-slate-500 rounded text-xs font-medium mr-0.5">' + (h.domain || '-') + '</span>'
+        : h.mapped_keywords.map(mk => '<span class="inline-block px-1.5 py-0.5 bg-teal-100 text-teal-700 rounded text-xs font-medium mr-0.5">' + mk + '</span>').join('')
+      const origBadges = isDomain ? '' : h.matched_keywords.map(ok => mappingMap[ok] ? '<span class="text-slate-400 text-xs line-through mr-0.5">' + ok + '</span>' : '').join('')
+      const matchClass = isDomain ? 'opacity-60' : h.match_count >= 3 ? 'bg-teal-50' : h.match_count >= 1 ? 'bg-indigo-50/40' : ''
+      const matchBadge = isDomain
+        ? '<span class="inline-block px-2 py-0.5 rounded-full text-xs font-bold bg-slate-300 text-white" title="분야 매칭">분야</span>'
+        : h.match_count > 0 ? '<span class="inline-block px-2 py-0.5 rounded-full text-xs font-bold bg-teal-600 text-white">' + h.match_count + '</span>' : '<span class="text-slate-300">-</span>'
       return '<tr class="border-t border-slate-100 text-xs ' + matchClass + '"><td class="px-3 py-2 text-slate-700 max-w-xs">' + (h.project_name || '-') + '</td><td class="px-3 py-2 text-slate-500">' + (h.client_org || '-') + '</td><td class="px-3 py-2 text-slate-500">' + (h.domain || '-') + '</td><td class="px-3 py-2 text-center">' + matchBadge + '</td><td class="px-3 py-2">' + (matchBadges || '<span class="text-slate-300 text-xs">없음</span>') + origBadges + '</td></tr>'
     }).join('')
-    const matchedCount = rows.filter(r => r.match_count > 0).length
+    const matchedCount = kw_matched_count != null ? kw_matched_count : rows.filter(r => r.match_count > 0).length
+    const domainCount  = domain_rows_count != null ? domain_rows_count : 0
     const copyLines = rows.filter(r => r.match_count > 0).map(r => {
       const kwLabel = r.mapped_keywords.length > 0 ? r.mapped_keywords[0] : r.matched_keywords[0]
       return '[ ' + kwLabel + ' ] ' + (r.client_org || '') + ', ' + (r.project_name || '')
     }).join('\n')
+    let countText = '<span class="text-sm text-slate-600">전체 감리실적 <strong>' + rows.length + '</strong>건</span>'
+      + '<span class="text-sm text-teal-700 font-semibold">키워드 매칭 <strong>' + matchedCount + '</strong>건</span>'
+    if (domainCount > 0) {
+      countText += '<span class="text-sm text-slate-500">분야 보충 <strong>' + domainCount + '</strong>건</span>'
+    }
+    countText += '<span class="text-xs text-slate-400">(상위 키워드 순 → 최근 수행일자 순 정렬)</span>'
     let html = '<div class="mb-4"><p class="text-xs text-slate-500 mb-2 font-medium">이 제안의 키워드 (' + keywords.length + '개) — 앞 순서가 상위 키워드</p><div class="flex flex-wrap gap-1.5">' + kwTags + '</div></div>'
-    html += '<div class="mb-3 flex items-center gap-3"><span class="text-sm text-slate-600">전체 감리실적 <strong>' + rows.length + '</strong>건</span><span class="text-sm text-teal-700 font-semibold">키워드 매칭 <strong>' + matchedCount + '</strong>건</span><span class="text-xs text-slate-400">(상위 키워드 순 → 최근 수행일자 순 정렬)</span></div>'
+    html += '<div class="mb-3 flex items-center gap-3">' + countText + '</div>'
     if (matchedCount > 0) {
       html += '<div class="mb-4"><div class="flex items-center justify-between mb-1.5"><span class="text-xs font-semibold text-slate-600">매칭 감리이력 요약</span><button onclick="copyKText()" class="flex items-center gap-1.5 px-3 py-1.5 bg-teal-600 hover:bg-teal-700 text-white text-xs rounded-lg transition"><i class="fas fa-copy"></i> 복사</button></div>'
       html += '<textarea id="kCopyText" readonly class="w-full text-xs font-mono bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 text-slate-700 leading-relaxed resize-none focus:outline-none focus:ring-2 focus:ring-teal-300" rows="' + Math.min(matchedCount, 8) + '">' + copyLines + '</textarea></div>'
     }
-    html += '<div class="overflow-x-auto rounded-xl border border-slate-200"><table class="w-full text-xs"><thead><tr class="bg-slate-50 text-slate-500 text-xs"><th class="px-3 py-2 text-left">사업명</th><th class="px-3 py-2 text-left">발주처</th><th class="px-3 py-2 text-left">분야</th><th class="px-3 py-2 text-center">매칭수</th><th class="px-3 py-2 text-left">주요 키워드 (변환)</th></tr></thead><tbody>' + tableRows + '</tbody></table></div>'
+    html += '<div class="overflow-x-auto rounded-xl border border-slate-200"><table class="w-full text-xs"><thead><tr class="bg-slate-50 text-slate-500 text-xs"><th class="px-3 py-2 text-left">사업명</th><th class="px-3 py-2 text-left">발주처</th><th class="px-3 py-2 text-left">분야</th><th class="px-3 py-2 text-center">매칭</th><th class="px-3 py-2 text-left">주요 키워드 (변환) / 분야</th></tr></thead><tbody>' + tableRows + '</tbody></table></div>'
+    if (domainCount > 0) {
+      html += '<p class="text-xs text-slate-400 mt-2">* <span class="inline-block px-1.5 py-0.5 rounded bg-slate-300 text-white text-xs font-bold">분야</span> 배지: 키워드 매칭 없음, 분야 정보로 보충된 이력</p>'
+    }
     document.getElementById('kModalBody').innerHTML = html
   } catch (e) {
     document.getElementById('kModalBody').innerHTML =

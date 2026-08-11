@@ -124,6 +124,7 @@ app.get('/:id/audit-match', async (c) => {
       matched_keywords: matched,
       mapped_keywords:  mapped,
       match_count:      matched.length,
+      match_type:       'keyword' as 'keyword' | 'domain',
       top_sort_order: matched.length > 0
         ? (kwRows.find(k => k.keyword === matched[0])?.sort_order ?? 9999)
         : 9999,
@@ -132,7 +133,7 @@ app.get('/:id/audit-match', async (c) => {
 
   // project_name 기준 중복 제거 — 같은 사업명이면 첫 번째(최신) 행만 유지
   const seen = new Set<string>()
-  const rows = rawRows.filter(r => {
+  const kwMatchedRows = rawRows.filter(r => {
     const key = String((r as Record<string, unknown>).project_name ?? '').trim()
     if (seen.has(key)) return false
     seen.add(key)
@@ -140,7 +141,7 @@ app.get('/:id/audit-match', async (c) => {
   })
 
   // 정렬: 상위 키워드 sort_order 낮은 순 → 최신 연월 순 (매칭 없으면 최하위)
-  rows.sort((a, b) => {
+  kwMatchedRows.sort((a, b) => {
     const aTop = (a as Record<string, unknown>).top_sort_order as number
     const bTop = (b as Record<string, unknown>).top_sort_order as number
     if (aTop !== bTop) return aTop - bTop
@@ -149,12 +150,62 @@ app.get('/:id/audit-match', async (c) => {
     return bYm.localeCompare(aYm)
   })
 
+  // ── 분야 매칭 보충 ──────────────────────────────────────────
+  // 키워드 매칭 건수가 20건 미만이면 domain 컬럼으로 매칭해 30건까지 보충
+  const kwMatchedCount = kwMatchedRows.filter(r => (r as Record<string, unknown>).match_count as number > 0).length
+  let domainRows: typeof kwMatchedRows = []
+
+  if (kwMatchedCount < 20) {
+    const need = 30 - kwMatchedCount
+    // 키워드 매칭에서 이미 포함된 project_name 제외
+    const kwMatchedNames = new Set(
+      kwMatchedRows
+        .filter(r => (r as Record<string, unknown>).match_count as number > 0)
+        .map(r => String((r as Record<string, unknown>).project_name ?? '').trim())
+    )
+
+    // 이 인원의 전체 감리이력 중 키워드 미매칭 행에서 domain이 있는 것만 추출
+    // domain 컬럼 값이 있으면 분야 매칭으로 포함
+    const domainCandidates = auditHistory
+      .filter(h => {
+        const name = String(h.project_name ?? '').trim()
+        if (kwMatchedNames.has(name)) return false        // 이미 키워드 매칭에 포함
+        if (seen.has(name)) return false                  // 중복 제거
+        const domain = String(h.domain ?? '').trim()
+        return domain.length > 0                          // domain이 있는 행만
+      })
+      .sort((a, b) => {
+        // 최신 연월 순 정렬
+        const aYm = String(a.audit_yearmonth ?? '')
+        const bYm = String(b.audit_yearmonth ?? '')
+        return bYm.localeCompare(aYm)
+      })
+      .slice(0, need)
+
+    // 중복 방지용 seen에 추가
+    domainCandidates.forEach(h => seen.add(String(h.project_name ?? '').trim()))
+
+    domainRows = domainCandidates.map(h => ({
+      ...h,
+      matched_keywords: [],
+      mapped_keywords:  [],
+      match_count:      0,
+      match_type:       'domain' as 'keyword' | 'domain',
+      top_sort_order:   99999,
+    }))
+  }
+
+  // 전체 rows: 키워드 매칭 + 분야 매칭 보충
+  const rows = [...kwMatchedRows, ...domainRows]
+
   return c.json({
     ok: true,
     person,
     keywords: kwRows,
     mappingMap: Object.fromEntries(mappingMap),
     rows,
+    kw_matched_count: kwMatchedCount,
+    domain_rows_count: domainRows.length,
   })
 })
 
