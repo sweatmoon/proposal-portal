@@ -22,6 +22,48 @@ function fmtCareer(earliest: string | null | undefined): string {
   return `${years}년 ${months}개월`
 }
 
+// ── 인력풀 카드 SSR 헬퍼 ─────────────────────────────────────────
+// 인력 풀 섹션에서 각 인원 카드를 서버 사이드로 렌더링
+function renderPoolPersonSSR(
+  name: string,
+  fieldMap: Record<string, string>,
+  gradeMap: Record<string, {
+    grade: string
+    group: string
+    expertSubGroup: string
+    residency: string
+    certNo: string
+  }>
+): string {
+  const field     = fieldMap[name] || ''
+  const info      = gradeMap[name] || {}
+  const rawGrade  = info.grade || ''
+  const grade     = rawGrade === '수석감리원' ? '수석감리원'
+                  : rawGrade === '감리원'    ? '감리원'
+                  : rawGrade === '테스터'    ? '테스터'
+                  : '전문가'
+  const gradeColor = grade === '수석감리원' ? '#1a2e4a'
+                   : grade === '감리원'     ? '#3a6ea8'
+                   : grade === '테스터'     ? '#6b21a8'
+                   : '#2e7d32'
+  const safeName  = name.replace(/"/g, '&quot;')
+  const safeField = field.replace(/"/g, '&quot;')
+  return `<div class="pool-person" data-name="${safeName}" data-field="${safeField}" ` +
+    `style="display:flex;flex-direction:column;gap:3px;padding:6px 10px;border-radius:6px;` +
+    `margin-bottom:5px;background:#f8f9fc;border:1px solid #e5e8f0;cursor:pointer;transition:background .15s" ` +
+    `onclick="highlightByName('${safeName}')" title="${safeName} 강조">` +
+    (field
+      ? `<span style="font-size:10px;color:#2e7d32;font-style:italic;background:#e8f5e9;` +
+        `border:1px solid #c8e6c9;border-radius:3px;padding:1px 5px;display:inline-block">${field}</span>`
+      : '') +
+    `<div style="display:flex;align-items:center;gap:6px">` +
+    `<span style="background:${gradeColor};color:#fff;border-radius:4px;font-size:11px;` +
+    `padding:2px 7px;font-weight:700;flex-shrink:0">${grade}</span>` +
+    `<span style="font-size:13px;font-weight:700;color:#1a2e4a">${name}</span>` +
+    `</div>` +
+    `</div>`
+}
+
 const app = new Hono()
 
 // ── 메인 (대시보드) ───────────────────────────────────────────
@@ -281,50 +323,266 @@ app.get('/proposals/:id', async (c) => {
     `<span class="inline-block px-2 py-0.5 bg-indigo-50 text-indigo-700 border border-indigo-200 rounded-full text-xs">${k.keyword}</span>`
   ).join(' ')
 
-  // 감리 단계 테이블
-  const phaseRows = phases.map(ph => {
-    // pg 드라이버가 json 컬럼을 문자열로 반환하는 경우 파싱
+  // ── DB → parsedData 포맷 변환 ────────────────────────────────
+  // proposal_members → personFieldMap / personGradeMap / portalOrder
+  const personFieldMap: Record<string, string> = {}
+  const personGradeMap: Record<string, { grade: string; group: string; expertSubGroup: string; residency: string; certNo: string }> = {}
+  const portalOrder: { name: string; group: string; expertSubGroup: string }[] = []
+
+  members.forEach(m => {
+    const name = String(m.person_name ?? '')
+    if (!name) return
+    const rawGroup = String(m.member_group ?? '')
+    // member_group 값: "감리팀", "전문가/핵심기술", "전문가/필수기술", "전문가/보안진단", "테스터" 등
+    const isExpert = rawGroup.includes('전문가') || rawGroup.includes('테스터')
+    const group = rawGroup.includes('테스터') ? '테스터'
+                : rawGroup.includes('전문가') ? '전문가'
+                : '감리원팀'
+    // expertSubGroup: "핵심기술", "필수기술", "보안진단" 등
+    const subMatch = rawGroup.match(/(핵심기술|필수기술|보안진단)/)
+    const expertSubGroup = subMatch ? subMatch[1] : ''
+
+    personFieldMap[name] = String(m.domain ?? '')
+    personGradeMap[name] = {
+      grade:          String(m.auditor_grade ?? ''),
+      group,
+      expertSubGroup,
+      residency:      m.is_fulltime ? '상근' : '비상근',
+      certNo:         String(m.auditor_cert_no ?? ''),
+    }
+    if (!portalOrder.find(p => p.name === name)) {
+      portalOrder.push({ name, group, expertSubGroup })
+    }
+  })
+
+  // audit_phases + audit_phase_assignments → stages[]
+  interface StageEntry {
+    stage: string; date: string; days: number | null
+    감리원: { count: number; pre: number; audit: number; post: number; total: number; people: { name: string; pre: number; audit: number; post: number; field: string }[] } | null
+    전문가: { count: number; pre: number; audit: number; post: number; total: number; people: { name: string; pre: number; audit: number; post: number; field: string }[] } | null
+  }
+
+  const stages: StageEntry[] = phases.map(ph => {
     const rawAssign = ph.assignments
     const assigns: Record<string, unknown>[] =
       typeof rawAssign === 'string' ? JSON.parse(rawAssign) : (rawAssign as Record<string, unknown>[] ?? [])
-    const assignRows = assigns.map((a: Record<string, unknown>) => `
-      <tr class="text-xs border-t border-slate-100">
-        <td class="px-3 py-2 text-slate-600">${a.domain ?? '-'}</td>
-        <td class="px-3 py-2 font-medium">${a.person_name}</td>
-        <td class="px-3 py-2 text-center text-slate-500">${a.member_type ?? '-'}</td>
-        <td class="px-3 py-2 text-center">${a.pre_survey_md ?? 0}</td>
-        <td class="px-3 py-2 text-center">${a.audit_md ?? 0}</td>
-        <td class="px-3 py-2 text-center">${a.action_confirm_md ?? 0}</td>
-        <td class="px-3 py-2 text-center font-semibold text-indigo-700">${a.total_md ?? 0}</td>
-        <td class="px-3 py-2 text-center text-slate-500">-</td>
-      </tr>`).join('')
 
-    return `
-    <div class="mb-4 bg-white border border-slate-200 rounded-xl overflow-hidden">
-      <div class="bg-slate-700 text-white px-4 py-2 flex items-center justify-between">
-        <span class="font-semibold text-sm">${ph.phase_name}</span>
-        <span class="text-xs text-slate-300">${ph.phase_start_date ?? ''} ~ ${ph.phase_end_date ?? ''} · ${ph.phase_days ?? '-'}일 · ${ph.proposed_md ?? 0}MD</span>
-      </div>
-      <div class="overflow-x-auto">
-        <table class="w-full text-xs">
-          <thead><tr class="bg-slate-50 text-slate-500">
-            <th class="px-3 py-2 text-left">분야</th>
-            <th class="px-3 py-2 text-left">성명</th>
-            <th class="px-3 py-2 text-center">구분</th>
-            <th class="px-3 py-2 text-center">사전조사</th>
-            <th class="px-3 py-2 text-center">감리</th>
-            <th class="px-3 py-2 text-center">조치확인</th>
-            <th class="px-3 py-2 text-center">합계</th>
-          </tr></thead>
-          <tbody>${assignRows || '<tr><td colspan="8" class="px-3 py-3 text-center text-slate-400">배정 인력 없음</td></tr>'}</tbody>
-        </table>
-      </div>
-    </div>`
-  }).join('')
+    const auditors = assigns.filter(a => String(a.member_type ?? '감리원') !== '전문가' && String(a.member_type ?? '') !== '테스터')
+    const experts  = assigns.filter(a => String(a.member_type ?? '') === '전문가' || String(a.member_type ?? '') === '테스터')
 
-  // 제안 인력 테이블
+    const toPeople = (arr: Record<string, unknown>[]) =>
+      arr.map(a => ({
+        name:  String(a.person_name ?? ''),
+        pre:   Number(a.pre_survey_md ?? 0),
+        audit: Number(a.audit_md ?? 0),
+        post:  Number(a.action_confirm_md ?? 0),
+        field: personFieldMap[String(a.person_name ?? '')] ?? String(a.domain ?? ''),
+      }))
+
+    const sumMD = (arr: Record<string, unknown>[], key: string) =>
+      arr.reduce((s, a) => s + Number(a[key] ?? 0), 0)
+
+    const aPeople = toPeople(auditors)
+    const ePeople = toPeople(experts)
+
+    return {
+      stage: String(ph.phase_name ?? ''),
+      date:  `${ph.phase_start_date ?? ''} ~ ${ph.phase_end_date ?? ''}`,
+      days:  ph.phase_days != null ? Number(ph.phase_days) : null,
+      감리원: aPeople.length ? {
+        count: aPeople.length,
+        pre:   sumMD(auditors, 'pre_survey_md'),
+        audit: sumMD(auditors, 'audit_md'),
+        post:  sumMD(auditors, 'action_confirm_md'),
+        total: Number(ph.proposed_md ?? 0),
+        people: aPeople,
+      } : null,
+      전문가: ePeople.length ? {
+        count: ePeople.length,
+        pre:   sumMD(experts, 'pre_survey_md'),
+        audit: sumMD(experts, 'audit_md'),
+        post:  sumMD(experts, 'action_confirm_md'),
+        total: sumMD(experts, 'pre_survey_md') + sumMD(experts, 'audit_md') + sumMD(experts, 'action_confirm_md'),
+        people: ePeople,
+      } : null,
+    }
+  })
+
+  // 요약 계산
+  let totalAuditMD = 0, totalExpertMD = 0, totalTesterMD = 0
+  stages.forEach(s => {
+    if (s.감리원) totalAuditMD += s.감리원.total
+    if (s.전문가) s.전문가.people.forEach(p => {
+      const grp = (personGradeMap[p.name] || {}).group || ''
+      const md = p.pre + p.audit + p.post
+      if (grp === '테스터') totalTesterMD += md
+      else totalExpertMD += md
+    })
+  })
+  const totalAllMD = totalAuditMD + totalExpertMD + totalTesterMD
+
+  // 인력 그룹 분류
+  const auditNames: string[] = []
+  const coreNames: string[] = [], requiredNames: string[] = [], securityNames: string[] = [], testerNames: string[] = []
+  portalOrder.forEach(({ name, group, expertSubGroup }) => {
+    if (group === '테스터') { testerNames.push(name); return }
+    if (group === '전문가') {
+      if (expertSubGroup.includes('보안'))      securityNames.push(name)
+      else if (expertSubGroup.includes('필수')) requiredNames.push(name)
+      else                                     coreNames.push(name)
+      return
+    }
+    auditNames.push(name)
+  })
+
+  // JSON 직렬화 (클라이언트에 전달)
+  const stagesJSON = JSON.stringify(stages)
+  const personFieldMapJSON = JSON.stringify(personFieldMap)
+  const personGradeMapJSON = JSON.stringify(personGradeMap)
+  const portalOrderJSON = JSON.stringify(portalOrder)
+  const projectDataJSON = JSON.stringify({
+    projectTitle: String(project.project_name ?? ''),
+    requestMD: 0, requestStageCount: 0, requestAuditDays: 0,
+    clientOrg: String(project.client_org ?? ''),
+    pmName: String(project.director ?? ''),
+  })
+
+  // ── 감리 단계 스케줄 테이블 (새 통합 버전) ──────────────────
+  const scheduleSection = phases.length > 0 ? `
+  <div id="schedule-section" style="font-family:'Malgun Gothic','Apple SD Gothic Neo',sans-serif">
+    <!-- 요약 카드바 -->
+    <div id="summary-bar" style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px">
+      <div style="background:#fff;border:1px solid #ddd;border-radius:8px;padding:10px 16px;text-align:center;min-width:90px">
+        <div style="font-size:22px;font-weight:700;color:#1a2e4a">${stages.length}</div><div style="font-size:12px;color:#666;margin-top:2px">총 단계</div>
+      </div>
+      <div style="background:#fff;border:1px solid #ddd;border-radius:8px;padding:10px 16px;text-align:center;min-width:90px">
+        <div style="font-size:22px;font-weight:700;color:#1a2e4a">${totalAuditMD}</div><div style="font-size:12px;color:#666;margin-top:2px">감리원 MD</div>
+      </div>
+      <div style="background:#fff;border:1px solid #ddd;border-radius:8px;padding:10px 16px;text-align:center;min-width:90px">
+        <div style="font-size:22px;font-weight:700;color:#1b5e20">${totalExpertMD}</div><div style="font-size:12px;color:#666;margin-top:2px">전문가 MD</div>
+      </div>
+      <div style="background:#fff;border:1px solid #ddd;border-radius:8px;padding:10px 16px;text-align:center;min-width:90px">
+        <div style="font-size:22px;font-weight:700;color:#6a1b9a">${totalTesterMD}</div><div style="font-size:12px;color:#666;margin-top:2px">테스터 MD</div>
+      </div>
+      <div style="background:#fff;border:1px solid #ddd;border-radius:8px;padding:10px 16px;text-align:center;min-width:90px">
+        <div style="font-size:22px;font-weight:700;color:#e65100">${totalAllMD}</div><div style="font-size:12px;color:#666;margin-top:2px">총 제안 MD</div>
+      </div>
+      <div style="display:flex;align-items:center;gap:8px;margin-left:auto;flex-wrap:wrap">
+        <button onclick="clearHighlights()" style="background:#e0e0e0;color:#333;border:none;border-radius:5px;padding:6px 12px;font-size:13px;cursor:pointer;font-family:inherit">🧹 강조 초기화</button>
+        <button onclick="highlightCorrections('pre')" style="background:#e65100;color:#fff;border:none;border-radius:5px;padding:6px 12px;font-size:13px;cursor:pointer;font-family:inherit">🔎 예비조사</button>
+        <button onclick="highlightCorrections('audit')" style="background:#6a1b9a;color:#fff;border:none;border-radius:5px;padding:6px 12px;font-size:13px;cursor:pointer;font-family:inherit">🔔 감리</button>
+        <button onclick="highlightCorrections('post')" style="background:#c62828;color:#fff;border:none;border-radius:5px;padding:6px 12px;font-size:13px;cursor:pointer;font-family:inherit">🚨 조치확인</button>
+        <button onclick="openAutoModal()" style="background:linear-gradient(135deg,#7c3aed,#4338ca);color:#fff;border:none;border-radius:7px;padding:8px 16px;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;box-shadow:0 2px 8px rgba(67,56,202,.4)">🛠️ 자동화 PPT</button>
+      </div>
+    </div>
+
+    <!-- 범례 -->
+    <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px;font-size:12px;color:#444">
+      <span style="display:flex;align-items:center;gap:4px"><span style="width:12px;height:12px;border-radius:2px;display:inline-block;background:#fff9c4;border:1px solid #f9a825"></span>이름 강조</span>
+      <span style="display:flex;align-items:center;gap:4px"><span style="width:12px;height:12px;border-radius:2px;display:inline-block;background:#e8f5e9;border:1px solid #43a047"></span>분야 강조</span>
+      <span style="display:flex;align-items:center;gap:4px"><span style="width:12px;height:12px;border-radius:2px;display:inline-block;background:#eef4ff;border:1px solid #1565c0"></span>예비조사&gt;0</span>
+      <span style="display:flex;align-items:center;gap:4px"><span style="width:12px;height:12px;border-radius:2px;display:inline-block;background:#f5eefc;border:1px solid #6a1b9a"></span>감리&gt;0</span>
+      <span style="display:flex;align-items:center;gap:4px"><span style="width:12px;height:12px;border-radius:2px;display:inline-block;background:#ffcdd2;border:1px solid #c62828"></span>조치확인&gt;0</span>
+    </div>
+
+    <!-- 스케줄 테이블 -->
+    <div style="overflow-x:auto;border-radius:8px;margin-bottom:20px">
+      <table id="schedule-table" style="width:100%;border-collapse:collapse;background:#fff;border-radius:8px;overflow:hidden;box-shadow:0 1px 4px rgba(0,0,0,.1);font-size:13px">
+        <thead>
+          <tr>
+            <th rowspan="2" style="background:#1a2e4a;color:#fff;padding:8px 10px;text-align:center;font-size:12px;font-weight:600;border:1px solid #2b4a78;min-width:90px;white-space:nowrap">단계 구분</th>
+            <th rowspan="2" style="background:#1a2e4a;color:#fff;padding:8px 10px;text-align:center;font-size:12px;font-weight:600;border:1px solid #2b4a78;min-width:70px">감리원<br>MD</th>
+            <th rowspan="2" style="background:#1a2e4a;color:#fff;padding:8px 10px;text-align:center;font-size:12px;font-weight:600;border:1px solid #2b4a78;min-width:70px">전문가<br>MD</th>
+            <th rowspan="2" style="background:#1a2e4a;color:#fff;padding:8px 10px;text-align:center;font-size:12px;font-weight:600;border:1px solid #2b4a78;min-width:60px">총 MD</th>
+            <th style="background:#1a2e4a;color:#fff;padding:8px 10px;text-align:center;font-size:12px;font-weight:600;border:1px solid #2b4a78;min-width:280px">감리원 투입 인력</th>
+            <th style="background:#1a2e4a;color:#fff;padding:8px 10px;text-align:center;font-size:12px;font-weight:600;border:1px solid #2b4a78;min-width:280px">전문가 투입 인력</th>
+          </tr>
+          <tr>
+            <th style="background:#1a2e4a;color:#a8c4e0;padding:6px 10px;text-align:center;font-size:11px;border:1px solid #2b4a78">투입 MD 합계</th>
+            <th style="background:#1a2e4a;color:#a8c4e0;padding:6px 10px;text-align:center;font-size:11px;border:1px solid #2b4a78">투입 MD 합계</th>
+          </tr>
+        </thead>
+        <tbody id="schedule-tbody">
+          ${stages.map((s, si) => {
+            const ae = s.감리원 ?? { total: 0, people: [], count: 0 }
+            const ee = s.전문가 ?? { total: 0, people: [], count: 0 }
+            const tot = ae.total + ee.total
+            const auditPeople = ae.people.map((p: { name: string; pre: number; audit: number; post: number; field: string }) =>
+              `<span class="person-chip" data-name="${p.name}" data-field="${(p.field||'').replace(/"/g,'&quot;')}" data-stage="${si}" data-pre="${p.pre}" data-audit="${p.audit}" data-post="${p.post}" style="display:inline-flex;align-items:center;gap:3px;cursor:pointer;border-radius:3px;padding:2px 6px;border:1px solid transparent;margin:2px;white-space:nowrap;transition:all .15s">
+                <span class="chip-name" style="font-weight:700;color:#1a2e4a;font-size:12px">${p.name}</span>
+                <span class="chip-mds" style="color:#666;font-size:11px">
+                  <span class="mds-num" data-k="pre">${p.pre}</span>:<span class="mds-num" data-k="audit">${p.audit}</span>:<span class="mds-num" data-k="post">${p.post}</span>
+                </span>
+              </span>`
+            ).join('')
+            const expertPeople = ee.people.map((p: { name: string; pre: number; audit: number; post: number; field: string }) =>
+              `<span class="person-chip" data-name="${p.name}" data-field="${(p.field||'').replace(/"/g,'&quot;')}" data-stage="${si}" data-pre="${p.pre}" data-audit="${p.audit}" data-post="${p.post}" style="display:inline-flex;align-items:center;gap:3px;cursor:pointer;border-radius:3px;padding:2px 6px;border:1px solid transparent;margin:2px;white-space:nowrap;transition:all .15s">
+                <span class="chip-name" style="font-weight:700;color:#1a2e4a;font-size:12px">${p.name}</span>
+                <span class="chip-mds" style="color:#666;font-size:11px">
+                  <span class="mds-num" data-k="pre">${p.pre}</span>:<span class="mds-num" data-k="audit">${p.audit}</span>:<span class="mds-num" data-k="post">${p.post}</span>
+                </span>
+                ${p.field ? `<span style="color:#2e7d32;font-size:10px;font-style:italic">[${p.field}]</span>` : ''}
+              </span>`
+            ).join('')
+            return `<tr data-stage="${si}">
+              <td style="padding:8px 10px;border:1px solid #ddd;background:#e8edf5;font-weight:700;text-align:center;white-space:nowrap;font-size:14px">
+                <div>${s.stage}</div>
+                ${s.date && s.date.trim() !== ' ~ ' ? `<div style="font-size:11px;color:#444;margin-top:2px;font-weight:400">${s.date}</div>` : ''}
+                ${s.days ? `<div style="font-size:12px;color:#3a6ea8;font-weight:600;margin-top:2px">(${s.days}일)</div>` : ''}
+              </td>
+              <td style="padding:8px 10px;border:1px solid #ddd;text-align:center;font-weight:700;font-size:14px;background:#fff9e8;vertical-align:middle">
+                <div>${ae.total}</div><div style="font-size:10px;color:#888;font-weight:400">(${ae.count || ae.people.length}명)</div>
+              </td>
+              <td style="padding:8px 10px;border:1px solid #ddd;text-align:center;font-weight:700;font-size:14px;background:#fff9e8;vertical-align:middle">
+                <div>${ee.total}</div><div style="font-size:10px;color:#888;font-weight:400">(${ee.count || ee.people.length}명)</div>
+              </td>
+              <td style="padding:8px 10px;border:1px solid #ddd;text-align:center;font-weight:700;font-size:14px;background:#e8f5e9;color:#1b5e20;vertical-align:middle">${tot}</td>
+              <td class="people-cell" data-ci="people-audit-${si}" style="padding:6px 8px;border:1px solid #ddd;vertical-align:top;line-height:1.8">
+                ${auditPeople || '<span style="color:#bbb;font-size:12px">없음</span>'}
+              </td>
+              <td class="people-cell" data-ci="people-expert-${si}" style="padding:6px 8px;border:1px solid #ddd;vertical-align:top;line-height:1.8">
+                ${expertPeople || '<span style="color:#bbb;font-size:12px">없음</span>'}
+              </td>
+            </tr>`
+          }).join('')}
+        </tbody>
+      </table>
+    </div>
+
+    <!-- 인력 모음 풀 -->
+    <div id="personnel-pool" style="margin-top:16px">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:12px">
+        <h3 style="font-size:15px;font-weight:700;color:#1a2e4a;margin:0">👥 인력 모음</h3>
+        <button onclick="copyPersonnelTable()" style="background:#1a2e4a;color:#fff;border:none;border-radius:5px;padding:6px 12px;font-size:13px;cursor:pointer;font-family:inherit">📋 표로 복사</button>
+      </div>
+      <div id="pool-row" style="display:flex;gap:10px;align-items:flex-start;flex-wrap:wrap">
+        <div id="pool-audit-group" class="pool-group" style="background:#fff;border:1px solid #ddd;border-radius:8px;padding:12px;flex:1;min-width:160px">
+          <div style="font-size:14px;font-weight:700;color:#1a2e4a;margin-bottom:8px;padding-bottom:5px;border-bottom:2px solid #e0e8f5">🔵 감리원 (${auditNames.length}명)</div>
+          <div id="pool-audit-list">${auditNames.map(n => renderPoolPersonSSR(n, personFieldMap, personGradeMap)).join('')}</div>
+        </div>
+        <div id="pool-core-group" class="pool-group" style="background:#fff;border:1px solid #ddd;border-radius:8px;padding:12px;flex:1;min-width:160px">
+          <div style="font-size:14px;font-weight:700;color:#1a2e4a;margin-bottom:8px;padding-bottom:5px;border-bottom:2px solid #e0e8f5">🟢 핵심기술 (${coreNames.length}명)</div>
+          <div id="pool-core-list">${coreNames.map(n => renderPoolPersonSSR(n, personFieldMap, personGradeMap)).join('')}</div>
+        </div>
+        <div id="pool-required-group" class="pool-group" style="background:#fff;border:1px solid #ddd;border-radius:8px;padding:12px;flex:1;min-width:160px">
+          <div style="font-size:14px;font-weight:700;color:#1a2e4a;margin-bottom:8px;padding-bottom:5px;border-bottom:2px solid #e0e8f5">🟩 필수기술 (${requiredNames.length}명)</div>
+          <div id="pool-required-list">${requiredNames.map(n => renderPoolPersonSSR(n, personFieldMap, personGradeMap)).join('')}</div>
+        </div>
+        <div id="pool-security-group" class="pool-group" style="background:#fff;border:1px solid #ddd;border-radius:8px;padding:12px;flex:1;min-width:160px">
+          <div style="font-size:14px;font-weight:700;color:#1a2e4a;margin-bottom:8px;padding-bottom:5px;border-bottom:2px solid #e0e8f5">🔴 보안진단 (${securityNames.length}명)</div>
+          <div id="pool-security-list">${securityNames.map(n => renderPoolPersonSSR(n, personFieldMap, personGradeMap)).join('')}</div>
+        </div>
+        <div id="pool-tester-group" class="pool-group" style="background:#fff;border:1px solid #ddd;border-radius:8px;padding:12px;flex:1;min-width:160px">
+          <div style="font-size:14px;font-weight:700;color:#1a2e4a;margin-bottom:8px;padding-bottom:5px;border-bottom:2px solid #e0e8f5">🟣 테스터 (${testerNames.length}명)</div>
+          <div id="pool-tester-list">${testerNames.map(n => renderPoolPersonSSR(n, personFieldMap, personGradeMap)).join('')}</div>
+        </div>
+      </div>
+    </div>
+  </div>` : ''
+
+  // ── 제안 인력 테이블 ──────────────────────────────────────────
   const memberRows = members.map(m => {
-    const pid = m.personnel_id  // null이면 인력DB 미연결
+    const pid = m.personnel_id
     const nameCell = pid
       ? `<span class="cursor-pointer text-indigo-700 font-semibold hover:underline" onclick="openPersonModal(${pid})">${m.person_name}</span><span class="text-xs text-teal-600 font-bold cursor-pointer hover:text-teal-800 ml-0.5" onclick="openKModal(${pid},${id},'${String(m.person_name).replace(/'/g,"\\'")}')"> (K)</span>`
       : `<span class="font-medium text-slate-700">${m.person_name}</span>`
@@ -426,13 +684,13 @@ app.get('/proposals/:id', async (c) => {
           </div>
         </div>
 
-        <!-- 감리 단계별 인력 배정 -->
+        <!-- 감리 단계별 인력 배정 (통합 뷰어) -->
         ${phases.length > 0 ? `
         <div>
           <h2 class="font-bold text-slate-700 mb-3 flex items-center gap-2">
             <i class="fas fa-tasks text-slate-400"></i> 감리 단계별 인력 배정
           </h2>
-          ${phaseRows}
+          ${scheduleSection}
         </div>` : ''}
 
         <!-- 제안 인력 -->
@@ -550,8 +808,656 @@ app.get('/proposals/:id', async (c) => {
     </div>
   </div>
 
+  <!-- ── 자동화 PPT 모달 ───────────────────────────────── -->
+  <div id="autoModal" style="display:none;position:fixed;inset:0;z-index:3000;background:rgba(0,0,0,.5);align-items:center;justify-content:center;padding:20px">
+    <div style="background:#fff;border-radius:12px;max-width:600px;width:100%;max-height:85vh;overflow-y:auto;padding:24px;position:relative;box-shadow:0 8px 30px rgba(0,0,0,.25);font-family:'Malgun Gothic','Apple SD Gothic Neo',sans-serif">
+      <button onclick="closeAutoModal()" style="position:absolute;top:14px;right:16px;background:#e0e0e0;border:none;border-radius:50%;width:28px;height:28px;cursor:pointer;font-size:14px">✕</button>
+      <h3 style="font-size:16px;font-weight:700;margin:0 0 6px;color:#1a2e4a">🛠️ 자동화 PPT 생성</h3>
+      <p style="font-size:13px;color:#666;margin:0 0 16px">세부감리일정(1,2) → 표장표 → 사진장표 → 요약표 순서로 하나의 PPT로 합쳐서 내려받습니다.</p>
+      <div id="autoModalAlertBox" style="display:none;margin-bottom:12px;padding:10px 14px;border-radius:7px;font-size:13px;font-weight:600"></div>
+      <div style="margin-bottom:16px;background:#f7f8fa;border-radius:8px;padding:12px">
+        <b style="font-size:13px;color:#333">추가 제안 단계</b>
+        <div style="font-size:12px;color:#666;margin-top:4px">RFP 최소 요건 이상으로 추가 제안한 단계를 선택하세요 (요약표에 반영됩니다)</div>
+        <div id="extra-stage-boxes" style="display:flex;flex-wrap:wrap;gap:10px;margin-top:8px">
+          ${stages.map(s => `<label style="display:flex;align-items:center;gap:4px;font-size:13px;color:#333;cursor:pointer"><input type="checkbox" class="st-extra-stage-cb" value="${s.stage}"> ${s.stage}</label>`).join('')}
+        </div>
+        <div style="font-size:12px;color:#777;margin-top:8px">
+          요청공수: <b>${project.bid_amount ? fmtMoney(project.bid_amount as number) : '(없음)'}</b> · 
+          주관기관: <b>${project.client_org ?? '(없음)'}</b> · 
+          총괄감리원: <b>${project.director ?? '(없음)'}</b>
+        </div>
+      </div>
+      <button onclick="downloadAllPptx(this)" style="width:100%;padding:14px 0;font-size:16px;font-weight:800;color:#fff;background:linear-gradient(135deg,#7c3aed,#4338ca);border:none;border-radius:9px;cursor:pointer;box-shadow:0 3px 10px rgba(67,56,202,.4);font-family:inherit;margin-bottom:16px">
+        🚀 자동화 생성 (전체 합본)
+      </button>
+      <details style="margin-top:4px">
+        <summary style="cursor:pointer;color:#555;font-size:13px;font-weight:600;padding:4px 0">🔧 개별 생성</summary>
+        <div style="margin-top:10px;display:flex;flex-direction:column;gap:10px">
+          <button onclick="downloadDetailSchedule1Pptx(this)" style="background:#2e7d32;color:#fff;border:none;border-radius:6px;padding:9px 14px;font-size:14px;font-weight:600;cursor:pointer;font-family:inherit;text-align:left">📅 세부 감리 일정 (1, 2) 생성</button>
+          <button onclick="downloadAssignPptx(this)" style="background:#2e7d32;color:#fff;border:none;border-radius:6px;padding:9px 14px;font-size:14px;font-weight:600;cursor:pointer;font-family:inherit;text-align:left">📋 표장표 생성</button>
+          <button onclick="downloadPhotoAssignPptx(this)" style="background:#2e7d32;color:#fff;border:none;border-radius:6px;padding:9px 14px;font-size:14px;font-weight:600;cursor:pointer;font-family:inherit;text-align:left">🖼️ 사진장표 생성</button>
+          <button onclick="downloadSummaryTablePptx(this)" style="background:#2e7d32;color:#fff;border:none;border-radius:6px;padding:9px 14px;font-size:14px;font-weight:600;cursor:pointer;font-family:inherit;text-align:left">📊 요약표 생성</button>
+        </div>
+      </details>
+    </div>
+  </div>
+
+  <!-- ── 인력 모음 표 복사 모달 ─────────────────────────── -->
+  <div id="personnelTableModal" style="display:none;position:fixed;inset:0;z-index:3000;background:rgba(0,0,0,.5);align-items:center;justify-content:center;padding:20px">
+    <div style="background:#fff;border-radius:10px;max-width:560px;width:100%;max-height:85vh;overflow-y:auto;padding:22px;position:relative;font-family:'Malgun Gothic','Apple SD Gothic Neo',sans-serif">
+      <button onclick="closePersonnelTableModal()" style="position:absolute;top:14px;right:16px;background:#e0e0e0;border:none;border-radius:50%;width:28px;height:28px;cursor:pointer;font-size:14px">✕</button>
+      <h3 style="font-size:16px;font-weight:700;margin:0 0 4px">👥 인력 모음 표</h3>
+      <div style="font-size:12px;color:#888;margin-bottom:14px">역할 · 분야 · 이름(음절마다 띄어쓰기). 셀을 드래그해 선택 후 Ctrl+C 복사, 또는 전체 복사 버튼을 사용하세요.</div>
+      <div id="personnel-table-wrap" style="overflow-x:auto;margin-top:4px"></div>
+      <div style="display:flex;gap:8px;margin-top:14px">
+        <button onclick="copyPersonnelSummaryTable()" style="flex:1;background:#2e7d32;color:#fff;border:none;border-radius:6px;padding:9px;font-size:14px;font-weight:600;cursor:pointer;font-family:inherit">📋 전체 복사</button>
+        <button onclick="closePersonnelTableModal()" style="flex:1;background:#e0e0e0;color:#333;border:none;border-radius:6px;padding:9px;font-size:14px;font-weight:600;cursor:pointer;font-family:inherit">닫기</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── 전문가 분류별 Breakdown 모달 ─────────────────────── -->
+  <div id="expertBreakdownModal" style="display:none;position:fixed;inset:0;z-index:3000;background:rgba(0,0,0,.5);align-items:center;justify-content:center;padding:20px" onclick="if(event.target===this)closeExpertBreakdown()">
+    <div style="background:#fff;border-radius:10px;max-width:440px;width:100%;max-height:80vh;overflow-y:auto;padding:22px;position:relative;font-family:'Malgun Gothic','Apple SD Gothic Neo',sans-serif">
+      <button onclick="closeExpertBreakdown()" style="position:absolute;top:14px;right:16px;background:#e0e0e0;border:none;border-radius:50%;width:28px;height:28px;cursor:pointer;font-size:14px">✕</button>
+      <h3 id="ebTitle" style="font-size:16px;font-weight:700;margin:0 0 2px">전문가 분류별 인력</h3>
+      <div id="ebSub" style="font-size:12px;color:#888;margin-bottom:14px"></div>
+      <div id="ebBody"></div>
+    </div>
+  </div>
+
+  <!-- pptxgenjs + jszip -->
+  <script src="https://cdn.jsdelivr.net/npm/pptxgenjs@4.0.1/dist/pptxgen.bundle.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+
   <script>
-  // ── 인원 상세 모달 ──────────────────────────────────────────
+  // ══════════════════════════════════════════════════════════
+  // 데이터 주입 (서버에서 렌더링된 JSON)
+  // ══════════════════════════════════════════════════════════
+  const parsedData = Object.assign(${projectDataJSON}, {
+    stages:          ${stagesJSON},
+    personFieldMap:  ${personFieldMapJSON},
+    personGradeMap:  ${personGradeMapJSON},
+    portalOrder:     ${portalOrderJSON},
+  })
+  let activeHL = null
+  let correctionMode = null
+  let gradeOverrides = {}
+
+  // ══════════════════════════════════════════════════════════
+  // 인력 모음 표 복사
+  // ══════════════════════════════════════════════════════════
+  function copyPersonnelTable(){
+    const { portalOrder, personFieldMap, personGradeMap } = parsedData
+    const groups = [
+      { role:'감리원',   names: portalOrder.filter(p=>p.group==='감리원팀').map(p=>p.name) },
+      { role:'핵심기술', names: portalOrder.filter(p=>p.group==='전문가'&&!p.expertSubGroup.includes('필수')&&!p.expertSubGroup.includes('보안')).map(p=>p.name) },
+      { role:'필수기술', names: portalOrder.filter(p=>p.expertSubGroup.includes('필수')).map(p=>p.name) },
+      { role:'보안진단', names: portalOrder.filter(p=>p.expertSubGroup.includes('보안')).map(p=>p.name) },
+      { role:'테스터',   names: portalOrder.filter(p=>p.group==='테스터').map(p=>p.name) },
+    ]
+    const wrap = document.getElementById('personnel-table-wrap')
+    if(!wrap) return
+    let rows = ''
+    groups.forEach(g => {
+      g.names.forEach(name => {
+        const field = personFieldMap[name] || ''
+        rows += \`<tr><td style="border:1px solid #ccc;padding:5px 8px">\${g.role}</td><td style="border:1px solid #ccc;padding:5px 8px">\${field}</td><td style="border:1px solid #ccc;padding:5px 8px">\${spaceOutName(name)}</td></tr>\`
+      })
+    })
+    wrap.innerHTML = \`<table id="personnel-summary-table" style="border-collapse:collapse;width:100%;font-size:13px;font-family:'Malgun Gothic',sans-serif">
+      <thead><tr><th style="border:1px solid #ccc;padding:5px 8px;background:#1a2e4a;color:#fff">역할</th><th style="border:1px solid #ccc;padding:5px 8px;background:#1a2e4a;color:#fff">분야</th><th style="border:1px solid #ccc;padding:5px 8px;background:#1a2e4a;color:#fff">이름</th></tr></thead>
+      <tbody>\${rows}</tbody>
+    </table>\`
+    const modal = document.getElementById('personnelTableModal')
+    modal.style.display = 'flex'
+  }
+  function closePersonnelTableModal(){
+    document.getElementById('personnelTableModal').style.display = 'none'
+  }
+  function spaceOutName(name){ return (name||'').split('').join(' ') }
+  async function copyPersonnelSummaryTable(){
+    const table = document.getElementById('personnel-summary-table')
+    if(!table){ alert('표를 먼저 열어주세요.'); return }
+    const html = table.outerHTML
+    const text = Array.from(table.rows).map(tr=>Array.from(tr.cells).map(td=>td.textContent.trim()).join('\t')).join('\n')
+    try{
+      if(navigator.clipboard && window.ClipboardItem){
+        await navigator.clipboard.write([new ClipboardItem({'text/plain':new Blob([text],{type:'text/plain'}),'text/html':new Blob([html],{type:'text/html'})})]);
+        alert('✅ 표가 클립보드에 복사되었습니다.')
+        return
+      }
+    }catch(e){}
+    try{
+      if(navigator.clipboard){ await navigator.clipboard.writeText(text); alert('✅ 복사되었습니다.'); return }
+    }catch(e){}
+    const ta = document.createElement('textarea'); ta.value=text; ta.style.position='fixed'; ta.style.top='-9999px'; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); document.body.removeChild(ta); alert('✅ 복사되었습니다.')
+  }
+
+  // ══════════════════════════════════════════════════════════
+  // 하이라이트 / 강조 제어
+  // ══════════════════════════════════════════════════════════
+  function highlightByName(name, field){
+    document.querySelectorAll('.person-chip').forEach(c=>{
+      c.style.background=''; c.style.borderColor='transparent'
+    })
+    document.querySelectorAll('.pool-person').forEach(c=>c.style.background='')
+    document.querySelectorAll(\`.person-chip[data-name="\${CSS.escape(name)}"]\`).forEach(c=>{
+      c.style.background='#fff9c4'; c.style.borderColor='#f9a825'
+    })
+    document.querySelectorAll(\`.pool-person[data-name="\${CSS.escape(name)}"]\`).forEach(c=>{
+      c.style.background='#fff9c4'
+    })
+    if(field){
+      document.querySelectorAll(\`.person-chip[data-field="\${CSS.escape(field)}"]\`).forEach(c=>{
+        if(c.dataset.name!==name){ c.style.background='#e8f5e9'; c.style.borderColor='#43a047' }
+      })
+    }
+  }
+
+  function clearHighlights(){
+    document.querySelectorAll('.person-chip').forEach(c=>{ c.style.background=''; c.style.borderColor='transparent' })
+    document.querySelectorAll('.pool-person').forEach(c=>c.style.background='')
+    document.querySelectorAll('.mds-num').forEach(n=>{ n.style.background=''; n.style.color=''; n.style.borderRadius=''; n.style.padding='' })
+    activeHL=null; correctionMode=null
+  }
+
+  function highlightCorrections(type){
+    if(correctionMode===type){ clearHighlights(); return }
+    clearHighlights(); correctionMode=type
+    const colorMap = { pre:'#1565c0', audit:'#6a1b9a', post:'#c62828' }
+    document.querySelectorAll(\`.mds-num[data-k="\${type}"]\`).forEach(n=>{
+      if((parseInt(n.textContent)||0)>0){
+        n.style.background=colorMap[type]; n.style.color='#fff'
+        n.style.borderRadius='3px'; n.style.padding='0 4px'
+      }
+    })
+  }
+
+  // chip 클릭 → 하이라이트
+  document.addEventListener('click', function(e){
+    const chip = e.target.closest('.person-chip')
+    if(chip){
+      e.stopPropagation()
+      const name=chip.dataset.name, field=chip.dataset.field
+      if(activeHL&&activeHL.name===name){ clearHighlights(); return }
+      activeHL={name,field}; highlightByName(name,field); return
+    }
+    const pool = e.target.closest('.pool-person')
+    if(pool){
+      e.stopPropagation()
+      const name=pool.dataset.name, field=pool.dataset.field
+      if(activeHL&&activeHL.name===name){ clearHighlights(); return }
+      activeHL={name,field}; highlightByName(name,field); return
+    }
+    if(!e.target.closest('#schedule-section')&&!e.target.closest('[id$="Modal"]')&&activeHL){ clearHighlights() }
+  })
+
+  // 전문가 셀 더블클릭 → breakdown 모달
+  document.querySelectorAll('.people-cell[data-ci^="people-expert-"]').forEach(td=>{
+    td.style.cursor='zoom-in'
+    td.addEventListener('dblclick', function(e){
+      if(e.target.closest('.person-chip')) return
+      const si=parseInt(this.dataset.ci.split('-').pop())
+      openExpertBreakdown(si)
+    })
+  })
+
+  function openExpertBreakdown(si){
+    const stage = parsedData.stages[si]
+    if(!stage||!stage.전문가) return
+    const people=stage.전문가.people
+    document.getElementById('ebTitle').textContent=\`\${stage.stage} · 전문가 분류별 인력\`
+    document.getElementById('ebSub').textContent=\`총 \${people.length}명\`
+    const classifyFn = nm => {
+      const info = parsedData.personGradeMap[nm]||{}
+      if(info.group==='테스터') return 'tester'
+      const sub=info.expertSubGroup||''
+      if(sub.includes('보안')) return 'security'
+      if(sub.includes('필수')) return 'required'
+      return 'core'
+    }
+    const buckets={core:[],required:[],security:[],tester:[]}
+    people.forEach(p=>buckets[classifyFn(p.name)].push(p))
+    const groups=[{key:'core',label:'🟢 핵심기술'},{key:'required',label:'🟩 필수기술'},{key:'security',label:'🔴 보안진단'},{key:'tester',label:'🟣 테스터'}]
+    document.getElementById('ebBody').innerHTML=groups.map(g=>\`
+      <div style="margin-bottom:12px">
+        <div style="font-size:13px;font-weight:700;margin-bottom:6px;display:flex;align-items:center;gap:6px">\${g.label}<span style="font-weight:400;color:#888;font-size:12px">\${buckets[g.key].length}명</span></div>
+        <div style="display:flex;flex-wrap:wrap;gap:6px">\${buckets[g.key].length ? buckets[g.key].map(p=>\`
+          <span class="person-chip" data-name="\${p.name}" data-field="\${p.field||''}" data-stage="\${si}" data-pre="\${p.pre}" data-audit="\${p.audit}" data-post="\${p.post}" style="display:inline-flex;flex-direction:column;gap:1px;border:1px solid #e0e0e0;border-radius:5px;padding:4px 9px;cursor:pointer;transition:all .15s">
+            <span class="chip-name" style="font-weight:700;color:#1a2e4a;font-size:13px">\${p.name}</span>
+            <span style="color:#2e7d32;font-size:11.5px">\${p.field||(parsedData.personFieldMap[p.name]||'(분야 미상)')}</span>
+            <span style="color:#999;font-size:11px">\${p.pre}:\${p.audit}:\${p.post}</span>
+          </span>\`).join('') : '<span style="color:#bbb;font-size:12px">없음</span>'}</div>
+      </div>\`).join('')
+    document.getElementById('expertBreakdownModal').style.display='flex'
+  }
+  function closeExpertBreakdown(){ document.getElementById('expertBreakdownModal').style.display='none' }
+
+  // ══════════════════════════════════════════════════════════
+  // 자동화 PPT 모달
+  // ══════════════════════════════════════════════════════════
+  function openAutoModal(){
+    if(typeof PptxGenJS==='undefined'){
+      alert('PPT 라이브러리 로딩 중... 잠시 후 다시 시도해주세요.')
+      return
+    }
+    document.getElementById('autoModal').style.display='flex'
+  }
+  function closeAutoModal(){ document.getElementById('autoModal').style.display='none' }
+
+  function showAutoAlert(msg, ok){
+    const el=document.getElementById('autoModalAlertBox')
+    el.style.display=''; el.textContent=msg
+    el.style.background=ok?'#e8f5e9':'#ffebee'
+    el.style.border=\`1px solid \${ok?'#43a047':'#e53935'}\`
+    el.style.color=ok?'#1b5e20':'#b71c1c'
+  }
+
+  function setBtnState(btn, loading){
+    if(!btn) return
+    if(loading){ btn._orig=btn.textContent; btn.disabled=true; btn.textContent='⏳ 생성 중...' }
+    else { btn.disabled=false; btn.textContent=btn._orig||btn.textContent }
+  }
+
+  function getExtraSet(){
+    return new Set(Array.from(document.querySelectorAll('.st-extra-stage-cb:checked')).map(cb=>cb.value))
+  }
+
+  // ══════════════════════════════════════════════════════════
+  // 공통 유틸
+  // ══════════════════════════════════════════════════════════
+  function xmlEscape(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&apos;') }
+  function extractDates(t){ return ((t||'').match(/\d{4}\.\d{2}\.\d{2}/g)||[]) }
+  function shiftDateStr(ds,delta){
+    const m=(ds||'').match(/(\d{4})\.(\d{2})\.(\d{2})/)
+    if(!m) return ds||''
+    const d=new Date(+m[1],+m[2]-1,+m[3]); d.setDate(d.getDate()+delta)
+    return \`\${d.getFullYear()}.\${String(d.getMonth()+1).padStart(2,'0')}.\${String(d.getDate()).padStart(2,'0')}\`
+  }
+  function fmtCertNo(text){
+    const raw=(text||'').trim()
+    const m=raw.match(/^(\S+)\s+(제\s*\d+\s*호)$/)
+    if(m) return \`\${m[1]}<br>\${m[2].replace(/\s+/g,'')}\`
+    return raw
+  }
+  function getEffectiveGrade(name){
+    if(gradeOverrides[name]) return gradeOverrides[name]
+    const info=parsedData.personGradeMap[name]||{}
+    if(info.grade==='수석감리원') return '수석감리원'
+    if(info.grade==='감리원') return '감리원'
+    return '전문가'
+  }
+
+  // ══════════════════════════════════════════════════════════
+  // 세부 감리 일정 1 PPT
+  // ══════════════════════════════════════════════════════════
+  function computeDetailSchedule1Rows(){
+    const { stages } = parsedData
+    return stages.map(s=>{
+      const ae=s.감리원||{pre:0,audit:0,post:0,total:0}
+      const dates=extractDates(s.date)
+      const startD=dates[0]||'', endD=dates[1]||dates[0]||''
+      const isCompact = ['상주감리','상시감리','검수지원'].some(k=>s.stage.includes(k))
+      const preMD=ae.pre||0, auditMD=ae.audit||0, postMD=ae.post||0
+      const subtotalMD=ae.total||(preMD+auditMD+postMD)
+      const subtotalDays=s.days||0
+      const compactLabel=s.stage.includes('검수')?'검수지원':'상주/상시 감리'
+      const compactDate=startD&&endD?(\`\${startD} ~ \${endD}\`):(s.date||'')
+      return { stage:s.stage, startD, endD, days:s.days||0, preMD, auditMD, postMD, subtotalMD, subtotalDays, isCompact, compactLabel, compactDate }
+    })
+  }
+
+  async function downloadDetailSchedule1Pptx(btn, opts){
+    opts=opts||{}
+    if(typeof PptxGenJS==='undefined'){ alert('PPT 라이브러리 로딩 중입니다. 잠시 후 다시 시도해주세요.'); return null }
+    setBtnState(btn, true)
+    try{
+      const stageRows=computeDetailSchedule1Rows()
+      if(!stageRows.length){ alert('일정 데이터가 없습니다.'); return null }
+      const extraSet=getExtraSet()
+      const pres=new PptxGenJS(); pres.layout='LAYOUT_WIDE'
+      const FONT_BOLD='KoPub돋움체 Bold', FONT_MEDIUM='KoPub돋움체 Medium'
+      const colW=[0.8472,0.8472,1.6944,1.6944,1.5403]
+      const tableX=3.2717, tableY=0.7635
+      const BORDER_COLOR='BFBFBF'
+      const bd={pt:0.5,color:BORDER_COLOR}, bd0={pt:0,color:'FFFFFF',type:'none'}
+      const bMid=[bd,bd,bd,bd], bLeft=[bd,bd,bd,bd0], bRight=[bd,bd0,bd,bd]
+      const baseOpt=e=>Object.assign({align:'center',valign:'middle',margin:[0,0,0,0]},e)
+      const mdLabel=(d,m)=>\`(\${d})일 / (\${m})MD\`
+      const STAGE_FILL='F2F2F2', HILITE_FILL='F2F2F2'
+      const STAGE_ROW_H=[0.1623,0.1298,0.1623,0.1298,0.1298,0.1623,0.1710]
+      const HEADER_H=0.1623, TOTAL_H=0.3254
+      const rows=[], rowH=[]
+      rows.push([
+        {text:'단계',options:baseOpt({fontFace:FONT_BOLD,fontSize:9,color:'000000',fill:{color:'D2F0FF'},border:bLeft})},
+        {text:'수행 활동',options:baseOpt({fontFace:FONT_BOLD,fontSize:9,color:'000000',fill:{color:'D2F0FF'},border:bMid})},
+        {text:'수행 절차',options:baseOpt({fontFace:FONT_BOLD,fontSize:9,color:'000000',fill:{color:'D2F0FF'},border:bMid})},
+        {text:'세부 일정',options:baseOpt({fontFace:FONT_BOLD,fontSize:9,color:'000000',fill:{color:'D2F0FF'},border:bMid})},
+        {text:'소요 일수 및 공수',options:baseOpt({fontFace:FONT_BOLD,fontSize:9,color:'000000',fill:{color:'D2F0FF'},border:bRight})},
+      ]); rowH.push(HEADER_H)
+      let grandTotal=0
+      stageRows.forEach(s=>{
+        grandTotal+=s.subtotalMD
+        if(s.isCompact){
+          rows.push([
+            {text:s.stage,options:baseOpt({fontFace:FONT_BOLD,fontSize:9,color:'000000',rowspan:2,fill:{color:STAGE_FILL},border:bLeft})},
+            {text:'감리시행',options:baseOpt({fontFace:FONT_MEDIUM,fontSize:9,color:'000000',border:bMid})},
+            {text:s.compactLabel,options:baseOpt({fontFace:FONT_BOLD,fontSize:9,color:'000000',fill:{color:HILITE_FILL},border:bMid})},
+            {text:s.compactDate,options:baseOpt({fontFace:FONT_BOLD,fontSize:9,color:'000000',fill:{color:HILITE_FILL},border:bMid})},
+            {text:mdLabel(s.subtotalDays,s.subtotalMD),options:baseOpt({fontFace:FONT_BOLD,fontSize:9,color:'000000',border:bRight})},
+          ]); rowH.push(STAGE_ROW_H[0])
+          rows.push([
+            {text:'소계',options:baseOpt({fontFace:FONT_BOLD,fontSize:10,color:'000000',colspan:3,fill:{color:STAGE_FILL},border:bMid})},
+            {text:mdLabel(s.subtotalDays,s.subtotalMD),options:baseOpt({fontFace:FONT_BOLD,fontSize:9,color:'000000',fill:{color:STAGE_FILL},border:bRight})},
+          ]); rowH.push(STAGE_ROW_H[6])
+          return
+        }
+        const showPre=s.preMD>0, showPost=s.postMD>0
+        const span=5+(showPre?1:0)+(showPost?1:0)
+        let pushed=false
+        const stCell=()=>{
+          pushed=true
+          return {text:s.stage,options:baseOpt({fontFace:FONT_BOLD,fontSize:9,color:'000000',rowspan:span,fill:{color:STAGE_FILL},border:bLeft})}
+        }
+        const auditDate=s.startD&&s.endD?\`\${s.startD} ~ \${s.endD}\`:(s.compactDate||'')
+        if(showPre){
+          const preEnd=s.startD?shiftDateStr(s.startD,-1):''
+          const preDate=s.startD?(\`~ \${preEnd}\`):'예비조사'
+          rows.push([stCell(),{text:'사전준비',options:baseOpt({fontFace:FONT_MEDIUM,fontSize:9,color:'000000',border:bMid})},{text:'예비조사',options:baseOpt({fontFace:FONT_BOLD,fontSize:9,color:'000000',fill:{color:HILITE_FILL},border:bMid})},{text:preDate,options:baseOpt({fontFace:FONT_BOLD,fontSize:9,color:'000000',fill:{color:HILITE_FILL},border:bMid})},{text:mdLabel(1,s.preMD),options:baseOpt({fontFace:FONT_BOLD,fontSize:9,color:'000000',border:bRight})}])
+          rowH.push(STAGE_ROW_H[0])
+        }
+        if(!pushed) rows.push([stCell(),{text:'착수',options:baseOpt({fontFace:FONT_MEDIUM,fontSize:9,color:'000000',border:bMid})},{text:'착수회의',options:baseOpt({fontFace:FONT_MEDIUM,fontSize:9,color:'000000',border:bMid})},{text:s.startD||'',options:baseOpt({fontFace:FONT_MEDIUM,fontSize:9,color:'000000',border:bMid})},{text:'',options:baseOpt({fontFace:FONT_MEDIUM,fontSize:9,color:'000000',border:bRight})}])
+        else rows.push([{text:'착수',options:baseOpt({fontFace:FONT_MEDIUM,fontSize:9,color:'000000',border:bMid})},{text:'착수회의',options:baseOpt({fontFace:FONT_MEDIUM,fontSize:9,color:'000000',border:bMid})},{text:s.startD||'',options:baseOpt({fontFace:FONT_MEDIUM,fontSize:9,color:'000000',border:bMid})},{text:'',options:baseOpt({fontFace:FONT_MEDIUM,fontSize:9,color:'000000',border:bRight})}])
+        rowH.push(STAGE_ROW_H[1])
+        rows.push([{text:'감리시행',options:baseOpt({fontFace:FONT_MEDIUM,fontSize:9,color:'000000',border:bMid})},{text:'현장감리',options:baseOpt({fontFace:FONT_BOLD,fontSize:9,color:'000000',fill:{color:HILITE_FILL},border:bMid})},{text:auditDate,options:baseOpt({fontFace:FONT_BOLD,fontSize:9,color:'000000',fill:{color:HILITE_FILL},border:bMid})},{text:mdLabel(s.days,s.auditMD),options:baseOpt({fontFace:FONT_BOLD,fontSize:9,color:'000000',border:bRight})}]); rowH.push(STAGE_ROW_H[2])
+        rows.push([{text:'종료',options:baseOpt({fontFace:FONT_MEDIUM,fontSize:9,color:'000000',border:bMid})},{text:'종료회의',options:baseOpt({fontFace:FONT_MEDIUM,fontSize:9,color:'000000',border:bMid})},{text:s.endD||'',options:baseOpt({fontFace:FONT_MEDIUM,fontSize:9,color:'000000',border:bMid})},{text:'',options:baseOpt({fontFace:FONT_MEDIUM,fontSize:9,color:'000000',border:bRight})}]); rowH.push(STAGE_ROW_H[3])
+        rows.push([{text:'보고서',options:baseOpt({fontFace:FONT_MEDIUM,fontSize:9,color:'000000',border:bMid})},{text:'감리보고서 제출',options:baseOpt({fontFace:FONT_MEDIUM,fontSize:9,color:'000000',border:bMid})},{text:s.endD?shiftDateStr(s.endD,7):'',options:baseOpt({fontFace:FONT_MEDIUM,fontSize:9,color:'000000',border:bMid})},{text:'',options:baseOpt({fontFace:FONT_MEDIUM,fontSize:9,color:'000000',border:bRight})}]); rowH.push(STAGE_ROW_H[4])
+        if(showPost){
+          rows.push([{text:'조치확인',options:baseOpt({fontFace:FONT_MEDIUM,fontSize:9,color:'000000',border:bMid})},{text:'조치확인',options:baseOpt({fontFace:FONT_BOLD,fontSize:9,color:'000000',fill:{color:HILITE_FILL},border:bMid})},{text:s.endD?(\`\${shiftDateStr(s.endD,14)} ~\`):'',options:baseOpt({fontFace:FONT_BOLD,fontSize:9,color:'000000',fill:{color:HILITE_FILL},border:bMid})},{text:mdLabel(1,s.postMD),options:baseOpt({fontFace:FONT_BOLD,fontSize:9,color:'000000',border:bRight})}]); rowH.push(STAGE_ROW_H[5])
+        }
+        rows.push([{text:'소계',options:baseOpt({fontFace:FONT_BOLD,fontSize:10,color:'000000',colspan:3,fill:{color:STAGE_FILL},border:bMid})},{text:mdLabel(s.days,s.subtotalMD),options:baseOpt({fontFace:FONT_BOLD,fontSize:9,color:'000000',fill:{color:STAGE_FILL},border:bRight})}]); rowH.push(STAGE_ROW_H[6])
+      })
+      rows.push([{text:'합계',options:baseOpt({fontFace:FONT_BOLD,fontSize:10,color:'000000',colspan:4,fill:{color:'D2F0FF'},border:bLeft})},{text:\`\${grandTotal} MD\`,options:baseOpt({fontFace:FONT_BOLD,fontSize:10,color:'000000',fill:{color:'D2F0FF'},border:bRight})}]); rowH.push(TOTAL_H)
+      const sld=pres.addSlide()
+      sld.addTable(rows,{x:tableX,y:tableY,w:colW.reduce((a,b)=>a+b,0),colW,rowH,border:bd})
+      if(opts.returnZip){
+        const ab=await pres.write({outputType:'arraybuffer'})
+        const z=new JSZip(); await z.loadAsync(ab); return {zip:z}
+      }
+      await pres.writeFile({fileName:\`세부감리일정1_\${(parsedData.projectTitle||'').slice(0,10)}.pptx\`})
+      showAutoAlert('✅ 세부 감리 일정 (1) 생성 완료',true)
+      return null
+    } catch(e){ showAutoAlert('❌ 생성 실패: '+e.message,false); return null }
+    finally{ setBtnState(btn,false) }
+  }
+
+  // ══════════════════════════════════════════════════════════
+  // 표장표 PPT
+  // ══════════════════════════════════════════════════════════
+  function computeAssignRows(){
+    const { stages, personGradeMap, personFieldMap, portalOrder } = parsedData
+    return (portalOrder||[]).map(({name})=>{
+      const info=personGradeMap[name]||{}
+      const field=personFieldMap[name]||''
+      const stageNames=[], stagesMD={}
+      let isAudit=false
+      stages.forEach(s=>{
+        const inA=s.감리원&&s.감리원.people.some(p=>p.name===name&&(p.pre+p.audit+p.post)>0)
+        const inE=s.전문가&&s.전문가.people.some(p=>p.name===name&&(p.pre+p.audit+p.post)>0)
+        if(inA) isAudit=true
+        if((inA||inE)&&!stageNames.includes(s.stage)) stageNames.push(s.stage)
+      })
+      const stageLabel=stageNames.join(' / ')
+      const residency=info.residency||''
+      const affil=residency?\`제안사 / \${residency}\`:'제안사'
+      const certNo=(info.certNo||'').trim()
+      const certDisplay=(!certNo||certNo==='-')?'전문가':fmtCertNo(certNo)
+      const grade=getEffectiveGrade(name)
+      return { name, field, stageLabel, affil, certDisplay, grade, heritageLines: isAudit?10:3 }
+    })
+  }
+
+  async function downloadAssignPptx(btn, opts){
+    opts=opts||{}
+    if(typeof PptxGenJS==='undefined'){ alert('PPT 라이브러리 로딩 중입니다.'); return null }
+    setBtnState(btn,true)
+    try{
+      const rows=computeAssignRows()
+      if(!rows.length){ alert('인력 데이터가 없습니다.'); return null }
+      const pres=new PptxGenJS(); pres.layout='LAYOUT_WIDE'
+      const FONT_BOLD='KoPub돋움체 Bold', FONT_MEDIUM='KoPub돋움체 Medium'
+      const bd={pt:0.5,color:'969696'}, bd0={type:'none'}
+      const bMid=[bd,bd,bd,bd], bLeft=[bd,bd,bd,bd0], bRight=[bd,bd0,bd,bd]
+      const base=e=>Object.assign({align:'center',valign:'middle',margin:[0.05,0.05,0.05,0.05]},e)
+      const headFill={color:'1A2E4A'}
+      const sld=pres.addSlide()
+      const tRows=[[
+        {text:'성명',options:base({fontFace:FONT_BOLD,fontSize:10,color:'FFFFFF',fill:headFill,border:bLeft})},
+        {text:'구분',options:base({fontFace:FONT_BOLD,fontSize:10,color:'FFFFFF',fill:headFill,border:bMid})},
+        {text:'담당 분야',options:base({fontFace:FONT_BOLD,fontSize:10,color:'FFFFFF',fill:headFill,border:bMid})},
+        {text:'감리 단계',options:base({fontFace:FONT_BOLD,fontSize:10,color:'FFFFFF',fill:headFill,border:bMid})},
+        {text:'소속 및 상근여부',options:base({fontFace:FONT_BOLD,fontSize:10,color:'FFFFFF',fill:headFill,border:bMid})},
+        {text:'감리원증',options:base({fontFace:FONT_BOLD,fontSize:10,color:'FFFFFF',fill:headFill,border:bMid})},
+        {text:'현장감리 투입율',options:base({fontFace:FONT_BOLD,fontSize:10,color:'FFFFFF',fill:headFill,border:bRight})},
+      ]]
+      rows.forEach(r=>{
+        tRows.push([
+          {text:r.name,options:base({fontFace:FONT_MEDIUM,fontSize:10,color:'222222',border:bLeft})},
+          {text:r.grade,options:base({fontFace:FONT_MEDIUM,fontSize:10,color:'222222',border:bMid})},
+          {text:r.field,options:base({fontFace:FONT_MEDIUM,fontSize:10,color:'222222',align:'l',border:bMid})},
+          {text:r.stageLabel,options:base({fontFace:FONT_MEDIUM,fontSize:10,color:'222222',border:bMid})},
+          {text:r.affil,options:base({fontFace:FONT_MEDIUM,fontSize:10,color:'222222',border:bMid})},
+          {text:r.certDisplay,options:base({fontFace:FONT_MEDIUM,fontSize:10,color:'222222',border:bMid})},
+          {text:'100%',options:base({fontFace:FONT_BOLD,fontSize:10,color:'222222',border:bRight})},
+        ])
+      })
+      const rowH=new Array(tRows.length).fill(0.28); rowH[0]=0.2
+      const colW=[0.8,0.8,2.2,1.2,1.2,0.9,0.9]
+      sld.addTable(tRows,{x:0.4,y:0.5,w:colW.reduce((a,b)=>a+b,0),colW,rowH})
+      if(opts.returnZip){
+        const ab=await pres.write({outputType:'arraybuffer'})
+        const z=new JSZip(); await z.loadAsync(ab); return {zip:z}
+      }
+      await pres.writeFile({fileName:\`표장표_\${(parsedData.projectTitle||'').slice(0,10)}.pptx\`})
+      showAutoAlert('✅ 표장표 생성 완료',true)
+      return null
+    } catch(e){ showAutoAlert('❌ 생성 실패: '+e.message,false); return null }
+    finally{ setBtnState(btn,false) }
+  }
+
+  // ══════════════════════════════════════════════════════════
+  // 사진장표 PPT (간소화 버전 — 9인 그리드)
+  // ══════════════════════════════════════════════════════════
+  async function downloadPhotoAssignPptx(btn, opts){
+    opts=opts||{}
+    if(typeof PptxGenJS==='undefined'){ alert('PPT 라이브러리 로딩 중입니다.'); return null }
+    setBtnState(btn,true)
+    try{
+      const { portalOrder, personFieldMap, personGradeMap } = parsedData
+      const groups=[
+        {label:'감리원', people: portalOrder.filter(p=>p.group==='감리원팀')},
+        {label:'핵심기술 전문가', people: portalOrder.filter(p=>p.group==='전문가'&&!p.expertSubGroup.includes('필수')&&!p.expertSubGroup.includes('보안'))},
+        {label:'필수기술 전문가', people: portalOrder.filter(p=>p.expertSubGroup.includes('필수'))},
+        {label:'보안진단 전문가', people: portalOrder.filter(p=>p.expertSubGroup.includes('보안'))},
+        {label:'테스터', people: portalOrder.filter(p=>p.group==='테스터')},
+      ].filter(g=>g.people.length>0)
+
+      const pres=new PptxGenJS(); pres.layout='LAYOUT_WIDE'
+      const FONT_BOLD='KoPub돋움체 Bold', FONT_MEDIUM='KoPub돋움체 Medium'
+
+      for(const g of groups){
+        const people=g.people
+        const cols=Math.min(3, people.length), rows=Math.ceil(people.length/cols)
+        const cardW=3.8, cardH=1.4, gapX=0.2, gapY=0.2
+        const totalW=cols*cardW+(cols-1)*gapX
+        const startX=(13.33-totalW)/2, startY=1.2
+        const sld=pres.addSlide()
+        sld.addText(g.label, {x:0.4,y:0.3,w:12.5,h:0.5,fontFace:FONT_BOLD,fontSize:18,color:'1A2E4A',bold:true})
+        people.forEach((p,i)=>{
+          const col=i%cols, row=Math.floor(i/cols)
+          const x=startX+col*(cardW+gapX), y=startY+row*(cardH+gapY)
+          const info=personGradeMap[p.name]||{}
+          const field=personFieldMap[p.name]||p.field||''
+          const grade=getEffectiveGrade(p.name)
+          const gradeColor=grade==='수석감리원'?'1A2E4A':grade==='감리원'?'3A6EA8':'2E7D32'
+          sld.addShape('rect',{x,y,w:cardW,h:cardH,fill:{color:'F8F9FC'},line:{color:'E5E8F0',pt:1}})
+          sld.addText(field||'(분야 미상)',{x:x+0.12,y:y+0.08,w:cardW-0.24,h:0.25,fontFace:FONT_MEDIUM,fontSize:9,color:'2E7D32',italic:true,valign:'top'})
+          sld.addText(p.name,{x:x+0.12,y:y+0.35,w:cardW-0.24,h:0.4,fontFace:FONT_BOLD,fontSize:16,color:'1A2E4A',bold:true,valign:'middle'})
+          sld.addShape('rect',{x:x+0.12,y:y+0.82,w:0.7,h:0.24,fill:{color:gradeColor},line:{color:gradeColor,pt:0}})
+          sld.addText(grade,{x:x+0.12,y:y+0.82,w:0.7,h:0.24,fontFace:FONT_BOLD,fontSize:9,color:'FFFFFF',bold:true,align:'center',valign:'middle'})
+        })
+      }
+      if(opts.returnZip){
+        const ab=await pres.write({outputType:'arraybuffer'})
+        const z=new JSZip(); await z.loadAsync(ab); return {zip:z}
+      }
+      await pres.writeFile({fileName:\`사진장표_\${(parsedData.projectTitle||'').slice(0,10)}.pptx\`})
+      showAutoAlert('✅ 사진장표 생성 완료',true)
+      return null
+    } catch(e){ showAutoAlert('❌ 생성 실패: '+e.message,false); return null }
+    finally{ setBtnState(btn,false) }
+  }
+
+  // ══════════════════════════════════════════════════════════
+  // 요약표 PPT
+  // ══════════════════════════════════════════════════════════
+  async function downloadSummaryTablePptx(btn, opts){
+    opts=opts||{}
+    if(typeof PptxGenJS==='undefined'){ alert('PPT 라이브러리 로딩 중입니다.'); return null }
+    setBtnState(btn,true)
+    try{
+      const extraSet=getExtraSet()
+      const { stages } = parsedData
+      const extraStages=stages.filter(s=>extraSet.has(s.stage))
+      const baselineStages=stages.filter(s=>!extraSet.has(s.stage))
+      const baselineMD=baselineStages.reduce((s,st)=>s+(st.감리원?.total||0),0)
+      const extraMD=extraStages.reduce((s,st)=>s+(st.감리원?.total||0),0)
+      let expertMD=0, testerMD=0
+      stages.forEach(s=>(s.전문가?.people||[]).forEach(p=>{
+        const md=p.pre+p.audit+p.post
+        const grp=(parsedData.personGradeMap[p.name]||{}).group||''
+        if(grp==='테스터') testerMD+=md; else expertMD+=md
+      }))
+      const totalMD=baselineMD+extraMD+expertMD+testerMD
+      const baselineNames=baselineStages.map(s=>s.stage)
+      const baselineDaysSum=baselineStages.reduce((s,st)=>s+(st.days||0),0)
+      const extraNames=extraStages.map(s=>s.stage)
+
+      const pres=new PptxGenJS(); pres.layout='LAYOUT_WIDE'
+      const FONT_BOLD='KoPub돋움체 Bold', FONT_MEDIUM='KoPub돋움체 Medium'
+      const bd={pt:0.5,color:'BFBFBF'}, bd0={type:'none'}
+      const bMid=[bd,bd,bd,bd], bLeft=[bd,bd,bd,bd0], bRight=[bd,bd0,bd,bd]
+      const colW=[1.2,2.3,0.8,5.3]
+      const base=e=>Object.assign({fontFace:FONT_MEDIUM,fontSize:10,color:'222222',valign:'middle',margin:[0.04,0.04,0.04,0.1]},e)
+      const headOpt={fontFace:FONT_BOLD,fontSize:11,color:'222222',bold:true,fill:{color:'D2F0FF'},align:'center',valign:'middle',margin:[0.04,0.04,0.04,0.04]}
+      const fulfillOpt={fontFace:FONT_BOLD,fontSize:12,color:'FFFFFF',bold:true,fill:{color:'1482CD'},align:'center',valign:'middle'}
+
+      const mdText=\`감리원: \${baselineMD}\${extraMD>0?' + 추가 '+extraMD:''} MD\\n전문가: \${expertMD} MD\\n테스터: \${testerMD} MD\\n합계: \${totalMD} MD\`
+      const methodText=\`\${baselineNames.length}단계 감리 (현장감리 \${baselineDaysSum}일)\${extraNames.length>0?' + 추가 단계: '+extraNames.join(', '):''}\`
+
+      const tRows=[
+        [{text:'요청 구분',options:Object.assign({},headOpt,{border:bLeft})},{text:'제안요청 내용 (RFP)',options:Object.assign({},headOpt,{border:bMid})},{text:'충족 여부',options:Object.assign({},headOpt,{border:bMid})},{text:'제안 내역',options:Object.assign({},headOpt,{border:bRight})}],
+        [{text:'감리 방법 및 일수',options:base({bold:true,align:'center',fill:{color:'F2F2F2'},border:bLeft})},{text:\`\${baselineNames.length}단계 감리 실시\n최소 감리 일수: \${baselineDaysSum}일\`,options:base({align:'l',border:bMid})},{text:'충족',options:Object.assign({},fulfillOpt,{border:bMid})},{text:methodText,options:base({align:'l',border:bRight})}],
+        [{text:'투입 공수',options:base({bold:true,align:'center',fill:{color:'F2F2F2'},border:bLeft})},{text:'요청 공수 이상 투입',options:base({align:'l',border:bMid})},{text:'충족',options:Object.assign({},fulfillOpt,{border:bMid})},{text:mdText,options:base({align:'l',border:bRight})}],
+        [{text:'감리 인력',options:base({bold:true,align:'center',fill:{color:'F2F2F2'},border:bLeft})},{text:'요건에 맞는 감리원 구성',options:base({align:'l',border:bMid})},{text:'충족',options:Object.assign({},fulfillOpt,{border:bMid})},{text:computeAssignRows().map(r=>\`\${r.grade} \${r.name} (\${r.field||'분야미상'})\`).join('\\n'),options:base({align:'l',border:bRight})}],
+      ]
+      const rowH=[0.22,0.8,0.8,Math.max(0.8,computeAssignRows().length*0.22)]
+      const sld=pres.addSlide()
+      sld.addTable(tRows,{x:1.8,y:1.4,w:colW.reduce((a,b)=>a+b,0),colW,rowH})
+      if(opts.returnZip){
+        const ab=await pres.write({outputType:'arraybuffer'})
+        const z=new JSZip(); await z.loadAsync(ab); return {zip:z}
+      }
+      await pres.writeFile({fileName:\`요약표_\${(parsedData.projectTitle||'').slice(0,10)}.pptx\`})
+      showAutoAlert('✅ 요약표 생성 완료',true)
+      return null
+    } catch(e){ showAutoAlert('❌ 생성 실패: '+e.message,false); return null }
+    finally{ setBtnState(btn,false) }
+  }
+
+  // ══════════════════════════════════════════════════════════
+  // 자동화 전체 합본 생성
+  // ══════════════════════════════════════════════════════════
+  async function downloadAllPptx(btn){
+    if(typeof PptxGenJS==='undefined'||typeof JSZip==='undefined'){ alert('PPT 라이브러리 로딩 중입니다. 잠시 후 다시 시도해주세요.'); return }
+    setBtnState(btn,true)
+    showAutoAlert('⏳ 생성 중... 완료될 때까지 잠시 기다려주세요.',false)
+    try{
+      const parts=await Promise.all([
+        downloadDetailSchedule1Pptx(null,{returnZip:true}),
+        downloadAssignPptx(null,{returnZip:true}),
+        downloadPhotoAssignPptx(null,{returnZip:true}),
+        downloadSummaryTablePptx(null,{returnZip:true}),
+      ])
+      const usable=parts.filter(p=>p&&p.zip)
+      if(!usable.length){ showAutoAlert('❌ 생성할 슬라이드가 없습니다.',false); return }
+
+      // 단순 합본: 각 PPT의 슬라이드 XML만 복사
+      const baseZip=usable[0].zip
+      let presXml=await baseZip.file('ppt/presentation.xml').async('string')
+      let presRelsXml=await baseZip.file('ppt/_rels/presentation.xml.rels').async('string')
+      let ctXml=await baseZip.file('[Content_Types].xml').async('string')
+      let maxRid=0; presRelsXml.replace(/Id="rId(\d+)"/g,(_,n)=>{maxRid=Math.max(maxRid,+n);return _})
+      let maxSldId=255; presXml.replace(/<p:sldId id="(\d+)"/g,(_,n)=>{maxSldId=Math.max(maxSldId,+n);return _})
+      let newRels='', newIds='', newCt='', sc=0
+
+      for(let i=1;i<usable.length;i++){
+        const srcZip=usable[i].zip
+        const srcPresXml=await srcZip.file('ppt/presentation.xml').async('string')
+        const srcRelsXml=await srcZip.file('ppt/_rels/presentation.xml.rels').async('string')
+        const relMap={}
+        srcRelsXml.replace(/<Relationship\b[^>]*\/>/g,tag=>{
+          const id=tag.match(/\bId="([^"]+)"/)?.[1]
+          const tgt=tag.match(/\bTarget="([^"]+)"/)?.[1]
+          const type=tag.match(/\bType="([^"]+)"/)?.[1]||''
+          if(id&&tgt) relMap[id]={target:tgt,type}; return tag
+        })
+        const sldIds=[]; srcPresXml.replace(/<p:sldId\b[^>]*\/>/g,tag=>{
+          const ridM=tag.match(/r:id="([^"]+)"/)
+          if(ridM){ const rel=relMap[ridM[1]]; if(rel&&/\/slide$/.test(rel.type)) sldIds.push('ppt/'+rel.target) }
+          return tag
+        })
+        for(const sp of sldIds){
+          const xml=await srcZip.file(sp).async('string')
+          let rels=''; const rf=srcZip.file(sp.replace('slides/','slides/_rels/')+''.replace(/ppt\/slides\//,'')+'')
+          // rels path
+          const rp=sp.slice(0,sp.lastIndexOf('/'))+'/_rels/'+sp.slice(sp.lastIndexOf('/')+1)+'.rels'
+          const rfile=srcZip.file(rp.replace('ppt/',''))
+          if(rfile) rels=await rfile.async('string')
+          else{
+            const rfile2=srcZip.file(rp)
+            if(rfile2) rels=await rfile2.async('string')
+          }
+          rels=rels.replace(/<Relationship[^>]*Type="[^"]*\/notesSlide"[^>]*\/>/g,'')
+          const newName=\`slideM\${++sc}.xml\`
+          baseZip.file(\`ppt/slides/\${newName}\`,xml)
+          if(rels) baseZip.file(\`ppt/slides/_rels/\${newName}.rels\`,rels)
+          const rid=\`rId\${++maxRid}\`; const sldId=++maxSldId
+          newRels+=\`<Relationship Id="\${rid}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide" Target="slides/\${newName}"/>\`
+          newIds+=\`<p:sldId id="\${sldId}" r:id="\${rid}"/>\`
+          newCt+=\`<Override PartName="/ppt/slides/\${newName}" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slide+xml"/>\`
+        }
+      }
+      presRelsXml=presRelsXml.replace('</Relationships>',newRels+'</Relationships>')
+      presXml=presXml.replace('</p:sldIdLst>',newIds+'</p:sldIdLst>')
+      ctXml=ctXml.replace('</Types>',newCt+'</Types>')
+      baseZip.file('ppt/presentation.xml',presXml)
+      baseZip.file('ppt/_rels/presentation.xml.rels',presRelsXml)
+      baseZip.file('[Content_Types].xml',ctXml)
+
+      const blob=await baseZip.generateAsync({type:'blob',mimeType:'application/vnd.openxmlformats-officedocument.presentationml.presentation',compression:'DEFLATE',compressionOptions:{level:6}})
+      const url=URL.createObjectURL(blob)
+      const a=document.createElement('a'); a.href=url; a.download=\`자동화PPT_\${(parsedData.projectTitle||'').slice(0,10)}_\${new Date().toLocaleDateString('ko-KR').replace(/\s/g,'').replace(/\\./g,'').slice(0,-1)}.pptx\`; a.click()
+      setTimeout(()=>URL.revokeObjectURL(url),2000)
+      showAutoAlert('✅ 자동화 PPT 생성 완료!',true)
+    } catch(e){ showAutoAlert('❌ 생성 실패: '+e.message,false); console.error(e) }
+    finally{ setBtnState(btn,false) }
+  }
+
+  // ══════════════════════════════════════════════════════════
+  // 인원 상세 모달
+  // ══════════════════════════════════════════════════════════
   async function openPersonModal(personnelId) {
     document.getElementById('personModal').classList.remove('hidden')
     document.getElementById('personModalBody').innerHTML =
@@ -624,7 +1530,6 @@ app.get('/proposals/:id', async (c) => {
       if (!json.ok) throw new Error(json.error)
       const { keywords, rows, mappingMap } = json
 
-      // 키워드 태그 목록
       const kwTags = keywords.map((k, i) => \`
         <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs border
           \${i < 3 ? 'bg-teal-50 border-teal-300 text-teal-700 font-semibold' : 'bg-slate-50 border-slate-200 text-slate-500'}">
@@ -637,7 +1542,6 @@ app.get('/proposals/:id', async (c) => {
           <span class="inline-block px-1.5 py-0.5 bg-teal-100 text-teal-700 rounded text-xs font-medium mr-0.5">\${mk}</span>\`).join('')
         const origBadges = h.matched_keywords.map((ok) =>
           mappingMap[ok] ? \`<span class="text-slate-400 text-xs line-through mr-0.5">\${ok}</span>\` : '').join('')
-
         const matchClass = h.match_count >= 3 ? 'bg-teal-50'
                          : h.match_count >= 1 ? 'bg-indigo-50/40'
                          : ''
@@ -656,8 +1560,6 @@ app.get('/proposals/:id', async (c) => {
       }).join('')
 
       const matchedCount = rows.filter(r => r.match_count > 0).length
-
-      // 텍스트박스용 복사 텍스트 생성: 매칭된 이력만, 상위키워드 순 정렬 유지
       const copyLines = rows
         .filter(r => r.match_count > 0)
         .map(r => {
@@ -733,7 +1635,10 @@ app.get('/proposals/:id', async (c) => {
 
   // ESC 키로 모달 닫기
   document.addEventListener('keydown', e => {
-    if (e.key === 'Escape') { closePersonModal(); closeKModal() }
+    if (e.key === 'Escape') {
+      closePersonModal(); closeKModal()
+      closeAutoModal(); closePersonnelTableModal(); closeExpertBreakdown()
+    }
   })
   </script>`
 
