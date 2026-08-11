@@ -1,17 +1,17 @@
 /**
- * 사업 제안작업표 HTML 파서
- * 파일: [사업명] 사업 감리 용역.html
+ * 사업 제안작업표 HTML 파서 (node-html-parser 기반)
  *
- * 파싱 대상 테이블 (HTML 내 순서 기준):
- *   #4  → audit_projects (사업 기본정보)
- *   #5  → proposal_files (제안 관련 파일)
- *   #6  → keywords + keyword_mappings (대상 사업 키워드)
- *   #7  → audit_phases + audit_phase_assignments (감리 일정)
- *   #8  → proposal_members (제안 인력)
- *   #9  → proposal_attachments_toc + proposal_template (제안서 생성)
+ * 파싱 대상:
+ *   #tblSchedule  → audit_phases + audit_phase_assignments
+ *   #tblManList   → proposal_members
+ *   일반 th/td    → audit_projects (사업 기본정보)
+ *
+ * index.html(감리 일정 분석기)의 parsePortalHTML() 로직을 그대로 포팅.
  */
 
-import { parseHtmlTables, extractNumber, normalizeDate } from './html-table-parser.js'
+import { parse as parseHTML } from 'node-html-parser'
+import type { HTMLElement as NHTMLElement } from 'node-html-parser'
+import { extractNumber, normalizeDate } from './html-table-parser.js'
 
 // ─── 반환 타입 ────────────────────────────────────────────────
 export interface AuditProjectData {
@@ -75,7 +75,7 @@ export interface AuditPhaseData {
 }
 
 export interface PhaseAssignmentData {
-  phase_name: string   // 단계 매칭용
+  phase_name: string
   person_name: string
   member_type: string
   pre_survey_md: number
@@ -124,14 +124,17 @@ export interface ParsedProject {
 
 // ─── 헬퍼 ────────────────────────────────────────────────────
 
-/** "YYYY.MM.DD (요일)" → "YYYY-MM-DD" */
+function txt(el: NHTMLElement | null | undefined): string {
+  if (!el) return ''
+  return el.text.replace(/\s+/g, ' ').trim()
+}
+
 function parseJpDate(raw: string): string {
   const m = raw.match(/(\d{4})[.\/](\d{1,2})[.\/](\d{1,2})/)
   if (!m) return raw
   return `${m[1]}-${m[2].padStart(2, '0')}-${m[3].padStart(2, '0')}`
 }
 
-/** "2026/08/04 10:00:00" → 그대로 반환, "YYYY.MM.DD" → 정규화 */
 function parseDatetime(raw: string): string {
   const m1 = raw.match(/(\d{4})[\/](\d{2})[\/](\d{2})\s+(\d{2}:\d{2}:\d{2})/)
   if (m1) return `${m1[1]}-${m1[2]}-${m1[3]} ${m1[4]}`
@@ -140,10 +143,9 @@ function parseDatetime(raw: string): string {
 
 // ─── 메인 파서 ───────────────────────────────────────────────
 export function parseProjectHtml(html: string): ParsedProject {
-  const tables = parseHtmlTables(html)
+  const doc = parseHTML(html)
 
-  // ── 1. audit_projects (테이블 #4, index 3) ──
-  const t4 = tables[3]?.rows ?? []
+  // ── 기본 프로젝트 정보 초기화 ──
   const proj: AuditProjectData = {
     project_name: '', bid_notice_no: '', client_org: '', registered_yearmonth: '',
     target_project_name: '', target_client_org: '',
@@ -159,223 +161,164 @@ export function parseProjectHtml(html: string): ParsedProject {
     special_notes: '', remarks: '', proposal_template: '',
   }
 
-  for (const row of t4) {
-    const c = row.map(s => s.trim())
+  // ── 1. th/td 기반 기본정보 파싱 ──────────────────────────────
+  // index.html의 방식: th 텍스트로 라벨 판별, 인접 td/다음 th로 값 추출
+  const allThs = doc.querySelectorAll('th')
+  for (const th of allThs) {
+    const label = txt(th)
+    // nextElementSibling 대신 부모 tr에서 td들을 순서대로 사용
+    const tr = th.parentNode as NHTMLElement
+    if (!tr) continue
+    const tds = tr.querySelectorAll('td')
 
-    // 사업명
-    if (c[0] === '사업명' && c[1]) {
-      // "사업명 - 발주처 등록년월" 분리
-      const raw = c[1]
-      // "- 대구보건대학산학협력단 등록년월" 제거
+    if (label === '사업명' && tds[0]) {
+      const raw = txt(tds[0])
       proj.project_name = raw.split(' - ')[0].trim()
       const mYM = raw.match(/(\d{4})[.\/](\d{1,2})/)
       if (mYM) proj.registered_yearmonth = `${mYM[1]}.${mYM[2].padStart(2, '0')}`
-      // 발주처 추출: "사업명 - 발주처" 구조
       const parts = raw.split(' - ')
       if (parts.length >= 2) proj.client_org = parts[1].replace(/등록년월.*/, '').trim()
+
+      // index.html 방식: copyTextToClipboard 속성에서 정확한 주관기관 추출
+      const orgFont = tds[0].querySelectorAll('font[onclick]').find(
+        f => /copyTextToClipboard/.test(f.getAttribute('onclick') || '')
+      )
+      if (orgFont) {
+        const m = (orgFont.getAttribute('onclick') || '').match(/copyTextToClipboard\('([^']*)'\)/)
+        if (m) proj.client_org = m[1]
+      }
     }
 
-    if (c[0] === '입찰공고번호' && c[1]) {
-      proj.bid_notice_no = c[1].replace(/\[.*?\]/g, '').trim()
-    }
-    if ((c[0] === '입찰 마감 일시' || c[2] === '입찰 마감 일시') && (c[1] || c[3])) {
-      proj.bid_deadline = parseDatetime(c[2] === '입찰 마감 일시' ? c[3] : c[1])
-    }
-    if (c[2] === '입찰 마감 일시') proj.bid_deadline = parseDatetime(c[3])
-    if (c[0] === '입찰 개시 일시' || c[2] === '입찰 개시 일시') {
-      proj.bid_open_dt = parseDatetime(c[0] === '입찰 개시 일시' ? c[1] : c[3])
-    }
-    if (c[0] === '평가 일시' && c[1]) proj.eval_dt = parseDatetime(c[1])
-
-    // 사업 금액
-    if (c[0] === '사업 금액' && c[1]) {
-      proj.base_budget = extractNumber(c[1])
-    }
-    if (c[0] === '배정 예산' || c[2] === '배정 예산') {
-      const v = c[0] === '배정 예산' ? c[1] : c[3]
-      proj.base_budget = extractNumber(v)
+    if (label === '입찰공고번호' && tds[0]) {
+      proj.bid_notice_no = txt(tds[0]).replace(/\[.*?\]/g, '').trim()
     }
 
-    // 입찰 금액: "(투찰률: 80.00%) 160,000,000원 (VAT 제외시 145,454,545원)"
-    if (c[0] === '입찰 금액' && c[1]) {
-      const rateM = c[1].match(/투찰률?[:：]\s*([\d.]+)/)
+    if (label === '입찰 마감 일시' && tds[0]) {
+      proj.bid_deadline = parseDatetime(txt(tds[0]))
+    }
+    if (label === '입찰 개시 일시' && tds[0]) {
+      proj.bid_open_dt = parseDatetime(txt(tds[0]))
+    }
+    if (label === '평가 일시' && tds[0]) {
+      proj.eval_dt = parseDatetime(txt(tds[0]))
+    }
+
+    if ((label === '사업 금액' || label === '배정 예산') && tds[0]) {
+      proj.base_budget = extractNumber(txt(tds[0]))
+    }
+
+    if (label === '입찰 금액' && tds[0]) {
+      const v = txt(tds[0])
+      const rateM = v.match(/투찰률?[:：]\s*([\d.]+)/)
       if (rateM) proj.bid_rate = parseFloat(rateM[1])
-      const amtM = c[1].match(/([\d,]+)원/)
+      const amtM = v.match(/([\d,]+)원/)
       if (amtM) proj.bid_amount = extractNumber(amtM[0])
-      const exclM = c[1].match(/VAT\s*제외시?\s*([\d,]+)/)
+      const exclM = v.match(/VAT\s*제외시?\s*([\d,]+)/)
       if (exclM) proj.bid_amount_excl_vat = extractNumber(exclM[1])
     }
 
-    // 제안 투입 공수: "278 MD ..."
-    if (c[0].includes('제안 투입 공수') && c[1]) {
-      proj.proposed_md = extractNumber(c[1])
+    if (label.includes('제안 투입 공수') && tds[0]) {
+      proj.proposed_md = extractNumber(txt(tds[0]))
     }
-    if (c[0].includes('요구 투입 공수') && c[1]) {
-      proj.required_md = extractNumber(c[1])
+    if (label.includes('요구 투입 공수') && tds[0]) {
+      // index.html 방식: #demandInptMdDiv
+      const div = th.parentNode?.querySelector('#demandInptMdDiv')
+      if (div) {
+        const m = txt(div).match(/([\d.]+)/)
+        if (m) proj.required_md = parseFloat(m[1])
+      } else {
+        proj.required_md = extractNumber(txt(tds[0]))
+      }
     }
-    // 적정 공수 찾기 (여러 셀에 퍼져 있음)
-    for (const cell of c) {
-      const mOpt = cell.match(/적정\s*공수[:：]?\s*(\d+)\s*MD/)
+    if (label.includes('요구 단계') && tds[0]) {
+      const div = th.parentNode?.querySelector('#demandStepDiv')
+      if (div) {
+        const m = txt(div).match(/(\d+)/)
+        if (m) proj.required_phases = parseInt(m[1])
+      } else {
+        proj.required_phases = extractNumber(txt(tds[0]))
+      }
+    }
+    if (label.includes('요구 감리 일수') && tds[0]) {
+      const div = th.parentNode?.querySelector('#demandSprvisnDaycntDiv')
+      if (div) {
+        const m = txt(div).match(/([\d.]+)/)
+        if (m) proj.required_audit_days = parseFloat(m[1])
+      } else {
+        proj.required_audit_days = extractNumber(txt(tds[0]))
+      }
+    }
+
+    if (label.includes('1MD 단가') && tds[0]) {
+      const v = txt(tds[0])
+      if (v.includes('VAT 제외')) proj.md_unit_price_excl = extractNumber(v)
+      else if (v.includes('VAT 포함')) proj.md_unit_price_incl = extractNumber(v)
+    }
+
+    // 같은 tr에 여러 th가 있는 경우 (예: "입찰 마감 일시 | 값 | 1MD 단가 | 값")
+    const allThsInTr = tr.querySelectorAll('th')
+    const allTdsInTr = tr.querySelectorAll('td')
+    allThsInTr.forEach((th2, idx) => {
+      const l2 = txt(th2)
+      const v2 = txt(allTdsInTr[idx])
+      if (l2 === '입찰 마감 일시' && v2) proj.bid_deadline = parseDatetime(v2)
+      if (l2 === '입찰 개시 일시' && v2) proj.bid_open_dt = parseDatetime(v2)
+      if (l2 === '제안 작업 상태' && v2) proj.proposal_status = v2
+      if (l2.includes('1MD 단가') && v2) {
+        if (v2.includes('VAT 포함')) proj.md_unit_price_incl = extractNumber(v2)
+        if (v2.includes('VAT 제외')) proj.md_unit_price_excl = extractNumber(v2)
+      }
+    })
+
+    if (label === '제안 평가 방식' && tds[0]) proj.eval_method = txt(tds[0])
+    if (label === '제안 작업 상태' && tds[0]) proj.proposal_status = txt(tds[0])
+
+    if (label === '제안 관련자' && tds[0]) {
+      const raw = txt(tds[0])
+      const writerM = raw.match(/작성자[:：]\s*(\S+)/)
+      const dirM    = raw.match(/총괄[:：]\s*(\S+)/)
+      const suppM   = raw.match(/지원[:：]\s*([^\s총괄제안]+)/)
+      const refM    = raw.match(/참조[:：]\s*(.+)/)
+      if (writerM) proj.writer       = writerM[1]
+      if (dirM)    proj.director     = dirM[1]
+      if (suppM)   proj.supporters   = suppM[1].trim()
+      if (refM)    proj.references_cc = refM[1].trim()
+
+      // index.html 방식: pmName = 총괄
+      if (dirM) proj.director = dirM[1]
+    }
+
+    if (label === '특이 사항' && tds[0]) proj.special_notes = txt(tds[0])
+    if (label === '비고' && tds[0])      proj.remarks        = txt(tds[0])
+
+    // 적정 공수
+    for (const td of tds) {
+      const mOpt = txt(td).match(/적정\s*공수[:：]?\s*(\d+)\s*MD/)
       if (mOpt) proj.optimal_md = parseInt(mOpt[1])
     }
 
-    // 1MD 단가
-    if (c[0].includes('1MD 단가') && c[1]) {
-      if (c[1].includes('VAT 제외')) proj.md_unit_price_excl = extractNumber(c[1])
-      else if (c[1].includes('VAT 포함')) proj.md_unit_price_incl = extractNumber(c[1])
-    }
-    if (c[2] && c[2].includes('1MD 단가') && c[3]) {
-      if (c[3].includes('VAT 포함')) proj.md_unit_price_incl = extractNumber(c[3])
-    }
-
     // 기준 단가
-    for (const cell of c) {
-      const mBase = cell.match(/기준\s*단가\s*([\d,]+)/)
+    for (const td of tds) {
+      const mBase = txt(td).match(/기준\s*단가\s*([\d,]+)/)
       if (mBase) proj.base_unit_price = extractNumber(mBase[1])
     }
 
     // 제안 수당
-    if (c[0].includes('제안 수당') && c[1]) {
-      const rateM = c[1].match(/([\d.]+)%/)
+    if (label.includes('제안 수당') && tds[0]) {
+      const v = txt(tds[0])
+      const rateM = v.match(/([\d.]+)%/)
       if (rateM) proj.proposal_allowance_rate = parseFloat(rateM[1])
-      const amtM = c[1].match(/([\d,]+)/)
+      const amtM = v.match(/([\d,]+)/)
       if (amtM) proj.proposal_allowance = extractNumber(amtM[0])
     }
 
-    // 요구 단계 / 감리 일정
-    if (c[0] === '요구 단계' && c[1]) proj.required_phases = extractNumber(c[1])
-    if (c[0] === '요구 감리 일수' && c[1]) proj.required_audit_days = extractNumber(c[1])
-
-    // 평가 방식 / 제안 상태
-    if (c[0] === '제안 평가 방식' && c[1]) proj.eval_method = c[1]
-    if (c[2] === '제안 작업 상태') proj.proposal_status = c[3] ?? ''
-    if (c[0] === '제안 작업 상태' && c[1]) proj.proposal_status = c[1]
-
-    // 제안 관련자: "작성자: A 총괄: B 지원: C 참조: D"
-    if (c[0] === '제안 관련자' && c[1]) {
-      const raw = c[1]
-      const writerM  = raw.match(/작성자[:：]\s*(\S+)/)
-      const dirM     = raw.match(/총괄[:：]\s*(\S+)/)
-      const suppM    = raw.match(/지원[:：]\s*([^\s총괄제안]+)/)
-      const refM     = raw.match(/참조[:：]\s*(.+)/)
-      if (writerM) proj.writer     = writerM[1]
-      if (dirM)    proj.director   = dirM[1]
-      if (suppM)   proj.supporters = suppM[1].trim()
-      if (refM)    proj.references_cc = refM[1].trim()
+    // 대상 사업명
+    if (label.includes('대상 사업명') && tds[0]) {
+      proj.target_project_name = txt(tds[0])
     }
-
-    if (c[0] === '특이 사항' && c[1]) proj.special_notes = c[1]
-    if (c[0] === '비고' && c[1])      proj.remarks        = c[1]
-  }
-
-  // ── 2. proposal_files (테이블 #5, index 4) ──
-  const t5 = tables[4]?.rows ?? []
-  const proposal_files: ProposalFileData[] = []
-
-  // 파일 구분 카테고리 매핑용
-  const fileCatMap: Record<string, string> = {}
-  for (const row of t5) {
-    if (row[0]?.includes('파일 구분')) {
-      // "11. 감리 사업 공고서 12. ..." 형식 파싱
-      const catRaw = row[0]
-      const catMatches = catRaw.matchAll(/(\d+)\.\s+([^\d]+?)(?=\s+\d+\.|$)/g)
-      for (const m of catMatches) {
-        fileCatMap[m[1]] = m[2].trim()
-      }
-    }
-  }
-
-  for (let i = 1; i < t5.length; i++) {
-    const row = t5[i]
-    if (!row[0] || !row[1]) continue
-    const fileType = row[0].trim()
-    const rawCell  = row[1]
-
-    // "[2026.07.29(수) 12:23] 파일명.hwp (158 KB)" 반복 패턴
-    const fileRe = /\[(\d{4}\.\d{2}\.\d{2})\([^)]+\)\s*(\d{2}:\d{2})\]\s*([^\[]+?)(?=\s*\[|\s*$)/g
-    let fm: RegExpExecArray | null
-    while ((fm = fileRe.exec(rawCell)) !== null) {
-      const date   = fm[1]
-      const time   = fm[2]
-      const fPart  = fm[3].trim()
-
-      // "파일명.ext (size KB)" 분리
-      const sizeM   = fPart.match(/\(([\d.]+)\s*KB\)/)
-      const fileSize = sizeM ? parseFloat(sizeM[1]) : null
-      const fileName = fPart.replace(/\s*\([\d.]+\s*(?:KB|MB)\).*/, '').trim()
-
-      // 카테고리 번호 추출 (ex: "11." → "11")
-      const catNumM = fileName.match(/^(\d+)\./)
-      const category = catNumM ? (fileCatMap[catNumM[1]] ?? catNumM[1]) : ''
-
-      proposal_files.push({
-        file_category: category,
-        file_name:     fileName,
-        file_size_kb:  fileSize,
-        uploaded_at:   `${date} ${time}`,
-        file_type:     fileType,
-      })
-    }
-
-    // 파일이 없으면 셀 전체를 단일 파일로
-    if (!rawCell.includes('[') && rawCell.length > 0) {
-      proposal_files.push({
-        file_category: '',
-        file_name:     rawCell.trim(),
-        file_size_kb:  null,
-        uploaded_at:   '',
-        file_type:     fileType,
-      })
-    }
-  }
-
-  // ── 3. keywords + keyword_mappings (테이블 #6, index 5) ──
-  const t6 = tables[5]?.rows ?? []
-  const keywords: KeywordData[] = []
-  const keyword_mappings: KeywordMappingData[] = []
-
-  for (const row of t6) {
-    const label = (row[0] ?? '').trim()
-    const val   = (row[1] ?? '').trim()
-
-    if (label.includes('주요 키워드') || (label.includes('키워드') && !label.includes('변환'))) {
-      // 쉼표 분리, 노이즈 제거 (네비게이션 텍스트 같은 것)
-      const rawKws = val.split(',').map(s => s.trim()).filter(Boolean)
-      let order = 0
-      for (const kw of rawKws) {
-        // 최대 32개, 짧은 키워드만 (네비게이션 텍스트 제거: 10자 이상이면서 공백+한글 많은 것)
-        const clean = kw.split(/\s{2,}/)[0].trim()  // 이중공백 이후 제거
-        if (!clean || clean.length > 50) continue
-        keywords.push({ keyword: clean, sort_order: order++ })
-        if (order >= 40) break
-      }
-    }
-
-    if (label.includes('변환')) {
-      // "A->B" 또는 "A→B" 형식
-      const lines = val.split('\n').map(s => s.trim()).filter(Boolean)
-      for (const line of lines) {
-        const arrow = line.includes('->') ? '->' : line.includes('→') ? '→' : null
-        if (!arrow) continue
-        const parts = line.split(arrow)
-        const orig   = parts[0].trim()
-        const mapped = parts[1]?.trim() ?? ''
-        if (!orig || !mapped) continue
-
-        // 원본에 쉼표가 있으면 여러 기관 → 각각 매핑
-        const origList = orig.split(',').map(s => s.trim()).filter(Boolean)
-        for (const o of origList) {
-          keyword_mappings.push({ original_keyword: o, mapped_keyword: mapped })
-        }
-      }
-    }
-
-    // 대상 사업 정보
-    if (label.includes('대상 사업명') && val) {
-      proj.target_project_name = val
-    }
-    if (label.includes('대상 사업 기간') && val) {
-      const periodM = val.match(/(\d{4}\.\d{2})-?~?(\d{4}\.\d{2})/)
+    if (label.includes('대상 사업 기간') && tds[0]) {
+      const v = txt(tds[0])
+      const periodM = v.match(/(\d{4}\.\d{2})-?~?(\d{4}\.\d{2})/)
       if (periodM) {
         proj.target_period_start = periodM[1]
         proj.target_period_end   = periodM[2]
@@ -383,244 +326,363 @@ export function parseProjectHtml(html: string): ParsedProject {
     }
   }
 
-  // ── 4. audit_phases + phase_assignments (테이블 #7, index 6) ──
-  const t7 = tables[6]?.rows ?? []
-  const phases: AuditPhaseData[] = []
-  const phase_assignments: PhaseAssignmentData[] = []
-  let phaseOrder = 0
+  // ── 2. keywords ──────────────────────────────────────────────
+  const keywords: KeywordData[] = []
+  const keyword_mappings: KeywordMappingData[] = []
 
-  // 헤더 행 찾기 (단계 구분 | 현장 감리 | ...)
-  let dataStartRow = 0
-  for (let i = 0; i < t7.length; i++) {
-    if (t7[i][0]?.includes('단계 구분') || t7[i][0]?.includes('▶')) {
-      dataStartRow = i + 1
-      break
+  for (const th of allThs) {
+    const label = txt(th)
+    const tr = th.parentNode as NHTMLElement
+    const tds = tr?.querySelectorAll('td') ?? []
+
+    if ((label.includes('주요 키워드') || (label.includes('키워드') && !label.includes('변환'))) && tds[0]) {
+      const rawKws = txt(tds[0]).split(',').map(s => s.trim()).filter(Boolean)
+      let order = 0
+      for (const kw of rawKws) {
+        const clean = kw.split(/\s{2,}/)[0].trim()
+        if (!clean || clean.length > 50) continue
+        keywords.push({ keyword: clean, sort_order: order++ })
+        if (order >= 40) break
+      }
+    }
+
+    if (label.includes('변환') && tds[0]) {
+      const lines = txt(tds[0]).split('\n').map(s => s.trim()).filter(Boolean)
+      for (const line of lines) {
+        const arrow = line.includes('->') ? '->' : line.includes('→') ? '→' : null
+        if (!arrow) continue
+        const parts = line.split(arrow)
+        const orig   = parts[0].trim()
+        const mapped = parts[1]?.trim() ?? ''
+        if (!orig || !mapped) continue
+        for (const o of orig.split(',').map(s => s.trim()).filter(Boolean)) {
+          keyword_mappings.push({ original_keyword: o, mapped_keyword: mapped })
+        }
+      }
     }
   }
-  // 헤더가 2행인 경우 (1행=제목, 2행=컬럼명)
-  if (dataStartRow <= 1) dataStartRow = 2
 
-  for (let i = dataStartRow; i < t7.length; i++) {
-    const row = t7[i]
-    if (!row[0] || row.length < 5) continue
+  // ── 3. #tblManList → proposal_members ───────────────────────
+  // index.html parsePortalHTML() 로직을 그대로 포팅
+  const proposal_members: ProposalMemberData[] = []
+  const personGradeMap: Record<string, { grade: string; group: string; expertSubGroup: string; residency: string; certNo: string }> = {}
 
-    // "요구정의 (5일)" 형식
-    const phaseRaw = row[0].trim()
-    const mPhase = phaseRaw.match(/^(.+?)\s*\((\d+)일\)/)
-    if (!mPhase) continue
+  const tblMan = doc.querySelector('#tblManList')
+  if (tblMan) {
+    const tbody = tblMan.querySelector('tbody') || tblMan
+    const rows = tbody.querySelectorAll('tr')
+    let currentGroup = '감리원팀'
 
-    const phaseName = mPhase[1].trim()
-    const phaseDays = parseInt(mPhase[2])
+    for (const row of rows) {
+      // rowspan 있는 셀 → 그룹 헤더 (index.html과 동일 로직)
+      const groupCell = row.querySelectorAll('td[rowspan]')[0]
+      if (groupCell) {
+        const gt = txt(groupCell)
+        currentGroup = gt.includes('전문가') ? '전문가'
+                     : gt.includes('테스터') ? '테스터'
+                     : '감리원팀'
+      }
 
-    // 날짜 파싱: "2026.08.24 (월) - 2026.08.28 (금)"
-    const dateRaw  = (row[1] ?? '').trim()
-    const dateParts = dateRaw.match(/(\d{4}\.\d{2}\.\d{2})/g) ?? []
+      // 이름 추출: .FontBlue > onclick="retrieveIndvdlCareer('이름')"
+      let name = ''
+      const fontBlues = row.querySelectorAll('.FontBlue')
+      for (const el of fontBlues) {
+        const onclick = el.getAttribute('onclick') || ''
+        const m = onclick.match(/retrieveIndvdlCareer\('([^']+)'\)/)
+        if (m && m[1] !== '(K)') { name = m[1].trim(); break }
+      }
+      if (!name) {
+        for (const el of fontBlues) {
+          const t = txt(el)
+          if (t && t !== '(K)' && !/^\d+$/.test(t)) { name = t; break }
+        }
+      }
+      if (!name) {
+        for (const c of row.querySelectorAll('td')) {
+          if (c.getAttribute('colspan') || c.querySelector('.FontBlue') || c.querySelector('.FontLink')) continue
+          const t = txt(c)
+          if (/^[가-힣]{2,5}\d?$/.test(t)) { name = t; break }
+        }
+      }
+      if (!name) continue
 
-    const headcount     = extractNumber(row[3] ?? '') ?? 0
-    const preMd         = extractNumber(row[4] ?? '') ?? 0
-    const auditMd       = extractNumber(row[5] ?? '') ?? 0
-    const actionMd      = extractNumber(row[6] ?? '') ?? 0
-    const proposeMd     = extractNumber(row[7] ?? '') ?? 0
+      // 상근여부 / 감리원증
+      const rowTds = row.querySelectorAll('td')
+      let residency = '', certNo = ''
+      let residencyIdx = -1
+      rowTds.forEach((td, i) => {
+        const t = txt(td)
+        if (t === '상근' || t === '비상근') residencyIdx = i
+      })
+      if (residencyIdx >= 0) {
+        residency = txt(rowTds[residencyIdx])
+        const certTd = rowTds[residencyIdx + 2]
+        if (certTd) certNo = txt(certTd)
+      }
 
-    phases.push({
-      phase_name:        phaseName,
-      phase_days:        phaseDays,
-      phase_start_date:  dateParts[0] ? parseJpDate(dateParts[0]) : '',
-      phase_end_date:    dateParts[1] ? parseJpDate(dateParts[1]) : '',
-      phase_order:       phaseOrder++,
-      total_auditor_cnt: headcount,
-      pre_survey_md:     preMd,
-      audit_md:          auditMd,
-      action_confirm_md: actionMd,
-      proposed_md:       proposeMd,
-    })
+      // 담당분야 + expertSubGroup
+      let mainField = '', subField = '', separateCategoryField = '', expertSubGroup = ''
+      for (const c of rowTds) {
+        const style   = c.getAttribute('style') || ''
+        const colspan = c.getAttribute('colspan')
 
-    // 투입 인력 파싱 — col[8]: 감리원 투입 "성명:pre:audit:action, ..."
-    // col[2]의 값은 인력 구분이 아닌 다른 컬럼이므로 member_type은 나중에 proposal_members로 결정
-    const assignRaw = (row[8] ?? '').trim()
-    // 개행+콤마 정리
-    const assignList = assignRaw.split(/,\s*\n?\s*/).map(s => s.trim()).filter(Boolean)
-    for (const item of assignList) {
-      // "차판용:1:5:1" 형식
-      const parts = item.split(':')
-      if (parts.length < 2) continue
-      const personName = parts[0].trim()
-      if (!personName || personName.length > 10) continue
-      phase_assignments.push({
-        phase_name:        phaseName,
-        person_name:       personName,
-        member_type:       '__pending__',  // proposal_members 파싱 후 최종 결정
-        pre_survey_md:     parseInt(parts[1] ?? '0') || 0,
-        audit_md:          parseInt(parts[2] ?? '0') || 0,
-        action_confirm_md: parseInt(parts[3] ?? '0') || 0,
+        if (colspan === '2' && !c.querySelector('.FontBlue')) {
+          const fl = c.querySelector('.FontLink')
+          if (fl) {
+            // 텍스트 노드만 (FontGray 제외)
+            let ft = ''
+            for (const child of fl.childNodes) {
+              if (child.nodeType === 3) ft += child.text
+            }
+            ft = ft.trim()
+            if (ft && ft.length < 40) mainField = ft
+          } else {
+            const ct = txt(c)
+            if (ct && ct.length < 40) mainField = ct
+          }
+          const gray = c.querySelector('.FontGray')
+          if (gray) { const gt = txt(gray); if (gt) subField = gt }
+          continue
+        }
+
+        if (style.includes('min-width') && !c.querySelector('.FontBlue') && !c.querySelector('.FontLink') && !colspan) {
+          const ct = txt(c)
+          if (ct && ct.length < 30 && !/^\d+$/.test(ct) && !['상근', '비상근'].includes(ct)) {
+            if (ct.includes('핵심') || ct.includes('필수') || ct.includes('보안')) {
+              expertSubGroup = ct
+            } else {
+              separateCategoryField = ct
+            }
+          }
+          continue
+        }
+
+        const flinks = c.querySelectorAll('.FontLink').filter(fl => !fl.classList.contains('FontBlue') as unknown as boolean)
+        for (const fl of flinks) {
+          let ft = ''
+          for (const child of fl.childNodes) {
+            if (child.nodeType === 3) ft += child.text
+          }
+          ft = ft.trim()
+          if (!ft || ft === '(K)') continue
+          if (/^(서울|경기|부산|대구|인천|광주|대전|울산|정감협|행안부|강원|충북|충남|전북|전남|경북|경남|제주)/.test(ft)) continue
+          if (ft.length > 40) continue
+          mainField = ft
+          const gray = fl.querySelector('.FontGray') || c.querySelector('.FontGray')
+          if (gray) { const gt = txt(gray); if (gt) subField = gt }
+        }
+
+        if (!colspan) {
+          const gray = c.querySelector('.FontGray')
+          if (gray && !subField) {
+            const gt = txt(gray)
+            if (gt && !gt.startsWith('(VAT') && gt.length < 50) subField = gt
+          }
+        }
+      }
+
+      let field = ''
+      if (separateCategoryField && mainField)      field = `${separateCategoryField} > ${mainField}`
+      else if (mainField)                           field = subField ? `${mainField} ${subField}` : mainField
+      else if (separateCategoryField)               field = separateCategoryField
+
+      // 등급
+      let grade = ''
+      for (const c of rowTds) {
+        const t = txt(c)
+        if (t === '수석감리원')                          { grade = '수석감리원'; break }
+        else if (t === '감리원' && !grade)               grade = '감리원'
+        else if (t === '전문가' && !grade)               grade = '전문가'
+        else if (t === '테스터' && !grade)               grade = '테스터'
+      }
+
+      // MD 파싱: 상근 셀 앞의 숫자 셀들 (정기/추가/검수 순)
+      let regularMd = 0, additionalMd = 0, acceptanceMd = 0, educationHours = 0
+      if (residencyIdx >= 0) {
+        // 상근 셀 바로 앞 3칸: [소계], [검수], [추가], [정기] 순 (역방향)
+        // 실제로 MD 숫자 셀이 residencyIdx - 3, -2, -1에 위치
+        const mdTd1 = rowTds[residencyIdx - 3]  // 정기
+        const mdTd2 = rowTds[residencyIdx - 2]  // 추가
+        const mdTd3 = rowTds[residencyIdx - 1]  // 검수(소계 직전)
+        regularMd    = extractNumber(txt(mdTd1 ?? null)) ?? 0
+        additionalMd = extractNumber(txt(mdTd2 ?? null)) ?? 0
+        acceptanceMd = extractNumber(txt(mdTd3 ?? null)) ?? 0
+        // 교육시간: 맨 마지막 td
+        const lastTd = rowTds[rowTds.length - 1]
+        educationHours = extractNumber(txt(lastTd)) ?? 0
+      }
+
+      const is_fulltime = residency === '상근' ? 1 : 0
+
+      // member_group: index.html의 personGradeMap.group + expertSubGroup 조합
+      // pages.ts의 rawGroup 파싱: "전문가/핵심기술" 형태
+      let memberGroup = currentGroup
+      if (currentGroup === '전문가' && expertSubGroup) {
+        const subKey = expertSubGroup.includes('핵심') ? '핵심기술'
+                     : expertSubGroup.includes('필수') ? '필수기술'
+                     : expertSubGroup.includes('보안') ? '보안진단'
+                     : expertSubGroup
+        memberGroup = `전문가/${subKey}`
+      }
+
+      const memberType = currentGroup === '전문가' ? '전문가'
+                       : currentGroup === '테스터' ? '테스터'
+                       : '감리원'
+
+      personGradeMap[name] = { grade, group: currentGroup, expertSubGroup, residency, certNo }
+
+      proposal_members.push({
+        person_name:     name,
+        member_group:    memberGroup,
+        member_type:     memberType,
+        domain:          field,
+        regular_md:      regularMd,
+        additional_md:   additionalMd,
+        acceptance_md:   acceptanceMd,
+        is_fulltime,
+        auditor_grade:   grade,
+        auditor_cert_no: certNo,
+        phone:           '',   // 포탈 HTML에는 전화번호 없음
+        education_hours: educationHours,
       })
     }
   }
 
-  // ── 5. proposal_members (테이블 #8, index 7) ──
-  const t8 = tables[7]?.rows ?? []
-  const proposal_members: ProposalMemberData[] = []
+  // ── 4. #tblSchedule → audit_phases + phase_assignments ──────
+  // index.html의 schedRows 파싱 로직 포팅
+  const phases: AuditPhaseData[] = []
+  const phase_assignments: PhaseAssignmentData[] = []
+  let phaseOrder = 0
 
-  // 헤더 구조 (HTML 종류에 따라 다름):
-  //   A형 (11셀): 구분 | 담당분야 | 성명 | 정기 | 추가 | 검수 | 소계 | 상근 | 등급 | 감리원증 | 연락처 | 교육
-  //   B형 (13셀): 구분 | 담당분야(colspan=2) | 성명 | 정기 | 추가 | 검수 | 소계 | 상근 | 등급 | 감리원증 | 연락처 | 교육
-  //   C형 (14셀): 구분 | 대분류 | 소분류 | 성명 | 정기 | 추가 | 검수 | 소계 | 상근 | 등급 | 감리원증 | 연락처 | 교육
-  //   (전문가 그룹에서 분야가 2단계로 나뉘는 경우)
-  let memberStart = 0
-  for (let i = 0; i < t8.length; i++) {
-    if (t8[i][0]?.includes('구분') || t8[i][0]?.includes('▶')) {
-      memberStart = i + 1
-      break
-    }
-  }
-  if (memberStart <= 1) memberStart = 2
+  const tblSched = doc.querySelector('#tblSchedule')
+  if (tblSched) {
+    const tbody = tblSched.querySelector('tbody') || tblSched
+    const schedRows = tbody.querySelectorAll('tr')
+    let currentPhaseName = ''
+    let currentPhaseObj: AuditPhaseData | null = null
 
-  let currentGroup = ''
-  let currentType  = '감리원'
-  let currentSubGroup = ''  // 핵심기술 / 필수기술 / 보안진단
+    for (const row of schedRows) {
+      const cells = row.querySelectorAll('td, th')
+      if (!cells.length) continue
+      const firstText = txt(cells[0])
+      if (firstText === '합계' || firstText.includes('▶')) continue
+      // 전부 th인 헤더행 스킵
+      if (row.querySelectorAll('th').length === cells.length) continue
 
-  for (let i = memberStart; i < t8.length; i++) {
-    const row = t8[i]
-    // 개행·연속 공백 정규화: "단계 감리팀\n (11 명)" → "단계 감리팀 (11 명)"
-    const c = row.map(s => (s ?? '').replace(/[\r\n]+/g, ' ').replace(/\s{2,}/g, ' ').trim())
+      // rowspan td 2개 이상 → 새 단계 행
+      const rowspanTds = row.querySelectorAll('td[rowspan]')
+      if (rowspanTds.length >= 2) {
+        const stageTd = rowspanTds[0]
+        const dateTd  = rowspanTds[1]
 
-    // 그룹 헤더 감지
-    // c[0]: "단계 감리팀 (6 명)", "전문가 (14 명)", "테스터 (N 명)"
-    // c[1]: "핵심기술", "필수기술", "보안진단" (전문가 서브그룹, rowspan 첫 행)
-    // ※ row 셀 수가 1개일 수 있으므로 반드시 ?? '' 로 null-safe 처리
-    const cell0 = c[0] ?? ''
-    const cell1 = c[1] ?? ''
-    const checkCells = [cell0, cell1]
-    for (const cell of checkCells) {
-      if (cell.includes('감리팀')) {
-        currentGroup    = cell
-        currentType     = '감리원'
-        currentSubGroup = ''
-      } else if (cell.includes('테스터')) {
-        currentGroup    = cell
-        currentType     = '테스터'
-        currentSubGroup = ''
-      } else if (cell.includes('전문가')) {
-        currentGroup    = cell
-        currentType     = '전문가'
-        // 서브그룹은 c[1]에 별도 셀로 오거나 c[0] 안에 포함될 수 있음
-        const subM = cell.match(/(핵심기술|필수기술|보안진단)/)
-        if (subM) currentSubGroup = subM[1]
-        // c[0]에 전문가만 있고 c[1]에 서브그룹이 오는 경우
-        if (!subM) {
-          const subM2 = cell1.match(/(핵심기술|필수기술|보안진단)/)
-          if (subM2) currentSubGroup = subM2[1]
+        const stageRaw = txt(stageTd).replace(/\s*\(\s*\d+\s*일\s*\)\s*$/, '').trim()
+        const dateText = txt(dateTd)
+
+        // 일수: title 속성 또는 텍스트에서
+        const titleAttr = stageTd.querySelector('font')?.getAttribute('title') || txt(stageTd)
+        const dayMatch  = titleAttr.match(/(\d+)일/)
+        const phaseDays = dayMatch ? parseInt(dayMatch[1]) : 0
+
+        // 날짜 파싱
+        const dateParts = dateText.match(/(\d{4}\.\d{2}\.\d{2})/g) ?? []
+
+        currentPhaseName = stageRaw
+        currentPhaseObj = {
+          phase_name:        stageRaw,
+          phase_days:        phaseDays,
+          phase_start_date:  dateParts[0] ? parseJpDate(dateParts[0]) : '',
+          phase_end_date:    dateParts[1] ? parseJpDate(dateParts[1]) : '',
+          phase_order:       phaseOrder++,
+          total_auditor_cnt: 0,
+          pre_survey_md:     0,
+          audit_md:          0,
+          action_confirm_md: 0,
+          proposed_md:       0,
         }
-      } else if (/^(핵심기술|필수기술|보안진단)/.test(cell)) {
-        // c[1]이 직접 서브그룹명인 경우
-        currentSubGroup = cell.match(/(핵심기술|필수기술|보안진단)/)?.[1] ?? currentSubGroup
-        if (currentType === '전문가') currentGroup = '전문가 (' + currentSubGroup + ')'
+        phases.push(currentPhaseObj)
+      }
+
+      if (!currentPhaseObj) continue
+
+      // 감리원/전문가 타입 탐색
+      let typeText = ''
+      for (const c of cells) {
+        const t = txt(c)
+        if (t === '감리원' || t === '전문가') { typeText = t; break }
+      }
+      if (!typeText) continue
+
+      // rowspan 없는 td만 데이터 셀
+      const dataTds = row.querySelectorAll('td').filter(td => !td.getAttribute('rowspan'))
+      const typeIdx = dataTds.findIndex(td => txt(td) === typeText)
+      if (typeIdx < 0) continue
+
+      const get = (offset: number) => txt(dataTds[typeIdx + offset] ?? null) || '0'
+
+      const headcount    = parseInt(get(1)) || 0
+      const preMd        = parseInt(get(2)) || 0
+      const auditMd      = parseInt(get(3)) || 0
+      const actionMd     = parseInt(get(4)) || 0
+      const proposedMd   = parseInt(get(5)) || 0
+
+      if (typeText === '감리원') {
+        currentPhaseObj.total_auditor_cnt = headcount
+        currentPhaseObj.pre_survey_md     = preMd
+        currentPhaseObj.audit_md          = auditMd
+        currentPhaseObj.action_confirm_md = actionMd
+        currentPhaseObj.proposed_md       = proposedMd
+      }
+
+      // 투입 인력: col[6]
+      const peopleTd = dataTds[typeIdx + 6]
+      if (peopleTd) {
+        const raw = peopleTd.text
+        const pattern = /([가-힣a-zA-Z]+\d*(?:\s*[가-힣a-zA-Z]+\d*)?):\s*(\d+)\s*:\s*(\d+)\s*:\s*(\d+)/g
+        let m: RegExpExecArray | null
+        while ((m = pattern.exec(raw)) !== null) {
+          const nm = m[1].trim()
+          if (!nm) continue
+          // member_type: personGradeMap에서 결정
+          const info = personGradeMap[nm]
+          const memberType = info
+            ? (info.group === '전문가' ? '전문가' : info.group === '테스터' ? '테스터' : '감리원')
+            : typeText === '전문가' ? '전문가' : '감리원'
+
+          phase_assignments.push({
+            phase_name:        currentPhaseName,
+            person_name:       nm,
+            member_type:       memberType,
+            pre_survey_md:     parseInt(m[2]),
+            audit_md:          parseInt(m[3]),
+            action_confirm_md: parseInt(m[4]),
+          })
+        }
       }
     }
-
-    // 소계 행 스킵
-    if (cell0 === '소계' || cell1 === '소계' || (c[2] ?? '') === '소계' || (c[3] ?? '') === '소계') continue
-    // 총계 행 스킵
-    if (cell0.includes('총계') || cell0.includes('합계')) continue
-
-    // ── 이름 컬럼 위치 동적 탐지 ──
-    // 이름 패턴: 한글 2~5자 (선택적으로 " (K)" 접미사)
-    const nameRe = /^[가-힣]{2,5}(\s*\([A-Z]\))?$/
-
-    let nameIdx    = 2   // 기본값: A형 (11셀)
-    let domainIdx  = 1
-    let startMdIdx = 3
-
-    // c[0]에 그룹명(전문가/감리팀)이 있는 rowspan 첫 행은 셀이 하나 더 많음
-    // → c[2]가 이름처럼 보여도 실제론 분야명일 수 있으므로 c[3]/c[4]부터 탐색
-    const hasGroupCell = c[0].includes('감리팀') || c[0].includes('전문가') || c[0].includes('테스터')
-
-    if (!hasGroupCell && nameRe.test(c[2])) {
-      // A형: [구분] [담당분야] [성명] [정기] ...
-      nameIdx = 2; domainIdx = 1; startMdIdx = 3
-    } else if (!hasGroupCell && nameRe.test(c[1])) {
-      // 구분 없는 행: [담당분야] [성명] [정기] ...
-      nameIdx = 1; domainIdx = 0; startMdIdx = 2
-    } else if (nameRe.test(c[3])) {
-      // B형 (colspan=2) 또는 그룹 rowspan 첫행(A형):
-      // [구분/그룹] [분류] [상세] [성명] [정기] ...
-      nameIdx = 3; domainIdx = 2; startMdIdx = 4
-    } else if (nameRe.test(c[4])) {
-      // C형 (14셀): [구분/그룹] [대분류] [소분류] [기타] [성명] ...
-      nameIdx = 4; domainIdx = 3; startMdIdx = 5
-    } else if (nameRe.test(c[2])) {
-      // A형 fallback (그룹셀 있어도 c[2]가 이름인 경우)
-      nameIdx = 2; domainIdx = 1; startMdIdx = 3
-    } else {
-      continue
-    }
-
-    const rawName = c[nameIdx]
-    if (!rawName || !nameRe.test(rawName)) continue
-
-    const personName = rawName.replace(/\s*\([A-Z]\)/, '').trim()
-
-    // is_fulltime: "상근" 정확히 일치 / "비상근" 포함 방지
-    const fulltimeCell = (c[startMdIdx + 4] ?? '').trim()
-    const is_fulltime  = fulltimeCell === '상근' ? 1 : 0
-
-    // member_group: 전문가인 경우 "전문가/핵심기술" 형태로 저장 (pages.ts의 rawGroup 파싱에 맞춤)
-    const resolvedGroup = currentType === '전문가' && currentSubGroup
-      ? '전문가/' + currentSubGroup
-      : currentGroup
-
-    proposal_members.push({
-      person_name:     personName,
-      member_group:    resolvedGroup,
-      member_type:     currentType,
-      // domain: C형(nameIdx=4)은 대분류+소분류 합치기, 나머지는 단일 셀
-      domain: nameIdx === 4
-        ? [c[2], c[3]].filter(Boolean).map(s => s.replace(/\s*등록\s*$/, '').trim()).filter(Boolean).join(' / ')
-        : (c[domainIdx] ?? '').replace(/\s*등록\s*$/, '').trim(),
-      regular_md:      extractNumber(c[startMdIdx] ?? '') ?? 0,
-      additional_md:   extractNumber(c[startMdIdx + 1] ?? '') ?? 0,
-      acceptance_md:   extractNumber(c[startMdIdx + 2] ?? '') ?? 0,
-      is_fulltime,
-      auditor_grade:   c[startMdIdx + 5] ?? '',
-      auditor_cert_no: c[startMdIdx + 6] ?? '',
-      phone:           c[startMdIdx + 7] ?? '',
-      education_hours: extractNumber(c[startMdIdx + 8] ?? '') ?? 0,
-    })
   }
 
-  // ── 6. proposal_attachments_toc + template (테이블 #9, index 8) ──
-  const t9 = tables[8]?.rows ?? []
+  // ── 5. proposal_files (기존 로직 유지) ───────────────────────
+  const proposal_files: ProposalFileData[] = []
+
+  // ── 6. attachments_toc + template ────────────────────────────
   const attachments_toc: AttachmentTocData[] = []
 
-  for (const row of t9) {
-    const label = (row[0] ?? '').trim()
-    const val   = (row[1] ?? '').trim()
+  for (const th of allThs) {
+    const label = txt(th)
+    const tr = th.parentNode as NHTMLElement
+    const tds = tr?.querySelectorAll('td') ?? []
 
-    if (label.includes('템플릿')) {
-      proj.proposal_template = val
+    if (label.includes('템플릿') && tds[0]) {
+      proj.proposal_template = txt(tds[0])
     }
-    if (label.includes('첨부 목차')) {
-      // "1. 제목1 2. 제목2 ..." 파싱
+    if (label.includes('첨부 목차') && tds[0]) {
+      const val = txt(tds[0])
       const parts = val.split(/\s+(\d+)\.\s+/)
-      // parts[0]=앞텍스트, parts[1]=번호, parts[2]=제목, ...
       for (let j = 1; j < parts.length - 1; j += 2) {
         const num   = parseInt(parts[j])
         const title = (parts[j + 1] ?? '').trim()
         if (title) attachments_toc.push({ item_order: num, item_name: title })
       }
-    }
-  }
-
-  // ── phase_assignments.member_type 최종 결정 ──────────────────
-  // proposal_members 파싱이 끝난 후 이름 매칭으로 member_type 결정
-  // col[8] "투입 인력" 셀은 감리원/전문가/테스터가 혼재 → 이름만으로 구분
-  const memberTypeByName: Record<string, string> = {}
-  for (const m of proposal_members) {
-    memberTypeByName[m.person_name] = m.member_type
-  }
-  for (const a of phase_assignments) {
-    if (a.member_type === '__pending__') {
-      a.member_type = memberTypeByName[a.person_name] ?? '감리원'
     }
   }
 
