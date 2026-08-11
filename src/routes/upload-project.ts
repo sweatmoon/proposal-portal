@@ -5,10 +5,62 @@
  */
 import { Hono } from 'hono'
 import { parseProjectHtml } from '../parsers/project-parser.js'
+import { parseHtmlTables } from '../parsers/html-table-parser.js'
 import { transaction } from '../db/client.js'
 import type pg from 'pg'
 
 const app = new Hono()
+
+/** 디버그: DB 저장 없이 파싱 결과만 반환 */
+app.post('/debug', async (c) => {
+  let html: string
+  try {
+    const formData = await c.req.formData()
+    const file = formData.get('file') as File | null
+    if (!file) return c.json({ ok: false, error: 'file 필드 없음' }, 400)
+    html = await file.text()
+  } catch (e) {
+    return c.json({ ok: false, error: String(e) }, 400)
+  }
+
+  // 테이블 raw 구조 확인
+  const tables = parseHtmlTables(html)
+  const tablesSummary = tables.map((t, i) => ({
+    index: i,
+    rowCount: t.rows.length,
+    // 첫 3행 미리보기
+    preview: t.rows.slice(0, 3).map(r => r.slice(0, 5)),
+  }))
+
+  let parsed
+  try {
+    parsed = parseProjectHtml(html)
+  } catch (e) {
+    return c.json({ ok: false, error: `파싱 실패: ${String(e)}`, tablesSummary }, 422)
+  }
+
+  const { proposal_members, phase_assignments } = parsed
+
+  return c.json({
+    ok: true,
+    tableCount: tables.length,
+    tablesSummary,
+    // t8 (index 7) 전체 raw rows
+    t8_raw: tables[7]?.rows ?? [],
+    proposal_members: proposal_members.map(m => ({
+      name: m.person_name,
+      type: m.member_type,
+      group: m.member_group,
+      domain: m.domain,
+      regular_md: m.regular_md,
+    })),
+    phase_assignments: phase_assignments.map(a => ({
+      phase: a.phase_name,
+      name: a.person_name,
+      type: a.member_type,
+    })),
+  })
+})
 
 app.post('/', async (c) => {
   // ── 파일 수신 ──
