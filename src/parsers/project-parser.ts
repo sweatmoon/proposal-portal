@@ -347,16 +347,19 @@ export function parseProjectHtml(html: string): ParsedProject {
     }
 
     if (label.includes('변환') && tds[0]) {
-      const lines = txt(tds[0]).split('\n').map(s => s.trim()).filter(Boolean)
+      // txt()는 \s+를 공백으로 뭉개므로 줄바꿈이 사라짐 → .text를 직접 사용해 줄바꿈 보존
+      const rawText = tds[0].text
+      const lines = rawText.split('\n').map(s => s.trim()).filter(Boolean)
       for (const line of lines) {
         const arrow = line.includes('->') ? '->' : line.includes('→') ? '→' : null
         if (!arrow) continue
-        const parts = line.split(arrow)
-        const orig   = parts[0].trim()
-        const mapped = parts[1]?.trim() ?? ''
+        // arrow 첫 번째 등장 기준으로 분리 (mapped_keyword에 → 포함 방지)
+        const arrowIdx = line.indexOf(arrow)
+        const orig   = line.slice(0, arrowIdx).trim()
+        const mapped = line.slice(arrowIdx + arrow.length).trim()
         if (!orig || !mapped) continue
         for (const o of orig.split(',').map(s => s.trim()).filter(Boolean)) {
-          keyword_mappings.push({ original_keyword: o, mapped_keyword: mapped })
+          if (o) keyword_mappings.push({ original_keyword: o, mapped_keyword: mapped })
         }
       }
     }
