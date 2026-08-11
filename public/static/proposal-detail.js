@@ -732,7 +732,7 @@ async function downloadPhotoAssignPptx(btn, opts) {
     // 감리원: 2인 장표 고정
     const auditPeople = (cache.audit || []).map(p => ({
       name: p.name,
-      field: p.field || '감리원',
+      field: (parsedData.personFieldMap || {})[p.name] || '감리원',
       grade: getEffectiveGrade(p.name),
     }))
     if (auditPeople.length) {
@@ -761,7 +761,7 @@ async function downloadPhotoAssignPptx(btn, opts) {
         ;(cache[catKey] || []).forEach(p => {
           people.push({
             name: p.name,
-            field: p.field || catLabel,
+            field: (parsedData.personFieldMap || {})[p.name] || catLabel,
             grade: getEffectiveGrade(p.name),
           })
         })

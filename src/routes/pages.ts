@@ -601,7 +601,7 @@ app.get('/proposals/:id', async (c) => {
                 <span class="chip-mds" style="color:#666;font-size:11px">
                   <span class="mds-num" data-k="pre">${p.pre}</span>:<span class="mds-num" data-k="audit">${p.audit}</span>:<span class="mds-num" data-k="post">${p.post}</span>
                 </span>
-                ${p.field ? `<span style="color:#2e7d32;font-size:10px;font-style:italic">[${p.field}]</span>` : ''}
+  
               </span>`
             ).join('')
             return `<tr data-stage="${si}">
