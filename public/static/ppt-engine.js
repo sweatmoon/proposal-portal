@@ -396,160 +396,116 @@ async function _injectMaster({ baseZip, masterZip, presXmlRef, presRelsXmlRef, c
  * FOREIGN_TEMPLATE 병합 내부 함수
  * master / theme / layout / media 참조 구조를 그대로 복사
  */
+/**
+ * FOREIGN_TEMPLATE 병합 — prefix 방식
+ * 
+ * src PPTX의 slides/layouts/masters/themes/media 파일 전체를
+ * "p{partIdx}_" prefix 를 붙여 baseZip으로 복사한다.
+ * 
+ * prefix가 고정되므로:
+ *   - 파일명 충돌이 구조적으로 불가능
+ *   - rels XML 교체도 단순 문자열 치환 한 방법으로 완결
+ */
 async function _mergeForeign({ baseZip, srcZip, srcPresXml, srcPresRels, counters,
                                 foreignPathMap, presXmlRef, presRelsXmlRef, ctXmlRef,
                                 newRels_ref, newIds_ref, newCt_ref }) {
-  let { maxRid, maxSldId, masterIdx, themeIdx, layoutIdx, sc } = counters;
+  let { maxRid, maxSldId, sc } = counters;
   let newRels = newRels_ref.val, newIds = newIds_ref.val, newCt = newCt_ref.val;
   let presXml = presXmlRef.val, presRelsXml = presRelsXmlRef.val, ctXml = ctXmlRef.val;
 
-  // src의 slide → master/layout 관계 맵을 재귀적으로 구축
-  async function getFileText(path) {
-    const f = srcZip.file(path);
-    return f ? f.async('string') : null;
+  // ── 이 파트에 고유한 prefix ──────────────────────────────────────
+  // foreignPathMap에 이미 처리된 파트 수를 기록해 prefix 결정
+  if (!foreignPathMap._partCount) foreignPathMap._partCount = 0;
+  const px = `p${++foreignPathMap._partCount}_`;  // e.g. "p1_", "p2_", ...
+
+  // ── src ZIP 내 모든 ppt/ 파일 목록 ───────────────────────────────
+  const srcFiles = {};  // { 'ppt/slides/slide1.xml': <ZipObject>, ... }
+  srcZip.forEach((relPath, file) => {
+    if (relPath.startsWith('ppt/')) srcFiles[relPath] = file;
+  });
+
+  // ── 파일명에 prefix 적용하는 헬퍼 ───────────────────────────────
+  // ppt/slides/slide1.xml  → ppt/slides/p1_slide1.xml
+  // ppt/media/image3.png   → ppt/media/p1_image3.png
+  // ppt/theme/theme1.xml   → ppt/theme/p1_theme1.xml
+  // ppt/slideLayouts/slideLayout1.xml → ppt/slideLayouts/p1_slideLayout1.xml
+  // ppt/slideMasters/slideMaster1.xml → ppt/slideMasters/p1_slideMaster1.xml
+  // ppt/slides/_rels/slide1.xml.rels  → ppt/slides/_rels/p1_slide1.xml.rels
+  function prefixedPath(origPath) {
+    // _rels 폴더 안은 파일명만 prefix
+    const m = origPath.match(/^(ppt\/[^/]+\/_rels\/)(.+)$/);
+    if (m) return m[1] + px + m[2];
+    // 나머지는 마지막 세그먼트에 prefix
+    const slash = origPath.lastIndexOf('/');
+    return origPath.slice(0, slash + 1) + px + origPath.slice(slash + 1);
   }
-  async function getFileBytes(path) {
-    const f = srcZip.file(path);
-    return f ? f.async('uint8array') : null;
+
+  // ── XML 내 내부 참조를 prefix 적용 경로로 치환 ──────────────────
+  // 대상: Target="..." 속성값 안의 파일명
+  // 단, 외부 URL(http)이나 이미 처리된 경로는 스킵
+  function applyPrefixToXml(xml) {
+    // Target="...slideLayouts/slideLayout1.xml" 형태를 Target="...slideLayouts/p1_slideLayout1.xml" 로
+    // Target="...slideMasters/slideMaster1.xml" → "...slideMasters/p1_slideMaster1.xml"
+    // Target="...theme/theme1.xml"              → "...theme/p1_theme1.xml"
+    // Target="...media/image3.png"              → "...media/p1_image3.png"
+    // Target="...slides/slide1.xml"             → "...slides/p1_slide1.xml"
+    // Target="../media/image3.png"              → "../media/p1_image3.png"
+    // (relative path 패턴도 처리)
+    return xml.replace(/Target="([^"]+)"/g, (match, target) => {
+      // http / 절대경로 스킵
+      if (target.startsWith('http') || target.startsWith('/')) return match;
+      // 이미 prefix 적용된 것 스킵
+      if (target.includes('/' + px) || target.startsWith(px)) return match;
+      // 마지막 / 뒤 파일명에 prefix 삽입
+      const slash = target.lastIndexOf('/');
+      if (slash < 0) return `Target="${px}${target}"`;
+      return `Target="${target.slice(0, slash + 1)}${px}${target.slice(slash + 1)}"`;
+    });
   }
 
-  // slideLayout → slideMaster → theme 체인 복사
-  // ── 공통: .rels XML에서 media 파일 복사 ──────────────────────
-  async function copyMediaFromRels(relsXml, basePath) {
-    if (!relsXml) return relsXml;
-    let updatedRelsXml = relsXml;
-    const mediaMatches = [...relsXml.matchAll(/Target="([^"]*media\/[^"]+)"/g)];
-    for (const mm of mediaMatches) {
-      const origRelTarget = mm[1];
-      let absTarget = origRelTarget;
-      // 상대경로 → 절대경로(ppt/media/xxx) 변환
-      if (!absTarget.startsWith('ppt/')) {
-        const baseDir = basePath.replace(/[^/]+$/, '');
-        absTarget = (baseDir + absTarget).replace(/\/[^/]+\/\.\.\//g, '/').replace(/^\//, '');
-        if (!absTarget.startsWith('ppt/')) absTarget = 'ppt/' + absTarget;
-      }
+  // ── 1단계: ppt/ 파일 전체 복사 (slide, layout, master, theme, media) ──
+  // _rels 파일 포함, 텍스트 파일은 내부 참조에 prefix 적용
+  const textExts = new Set(['.xml', '.rels', '.vml', '.vmx']);
 
-      if (foreignPathMap[absTarget]) {
-        // 이미 처리된 파일 → rels 내 참조를 실제 저장 경로로 교체
-        const destPath = foreignPathMap[absTarget];
-        if (destPath !== absTarget) {
-          updatedRelsXml = updatedRelsXml.split(origRelTarget).join('../' + destPath.replace(/^ppt\//, ''));
-        }
-        continue;
-      }
+  for (const [origPath, zipObj] of Object.entries(srcFiles)) {
+    const destPath = prefixedPath(origPath);
 
-      const bytes = await getFileBytes(absTarget);
-      if (!bytes) continue;
-
-      const existing = baseZip.file(absTarget);
-      let destPath = absTarget;
-      if (existing) {
-        // 충돌: 새 이름 생성
-        const mediaFile = absTarget.split('/').pop();
-        const dotIdx    = mediaFile.lastIndexOf('.');
-        const base      = dotIdx >= 0 ? mediaFile.slice(0, dotIdx) : mediaFile;
-        const ext       = dotIdx >= 0 ? mediaFile.slice(dotIdx)    : '';
-        let   idx       = 1;
-        while (baseZip.file(`ppt/media/${base}_f${idx}${ext}`)) idx++;
-        destPath = `ppt/media/${base}_f${idx}${ext}`;
-      }
+    const ext = origPath.slice(origPath.lastIndexOf('.')).toLowerCase();
+    if (textExts.has(ext)) {
+      let xml = await zipObj.async('string');
+      xml = applyPrefixToXml(xml);
+      baseZip.file(destPath, xml);
+    } else {
+      // 미디어 파일(png/jpg/gif/svg 등) — 바이너리 그대로
+      const bytes = await zipObj.async('uint8array');
       baseZip.file(destPath, bytes);
-      foreignPathMap[absTarget] = destPath;
-
-      // 충돌로 이름이 바뀐 경우 rels 내 참조 교체
-      if (destPath !== absTarget) {
-        updatedRelsXml = updatedRelsXml.split(origRelTarget).join('../' + destPath.replace(/^ppt\//, ''));
-      }
     }
-    return updatedRelsXml;
   }
 
-  async function ensureMaster(origMasterPath) {
-    if (foreignPathMap[origMasterPath]) return foreignPathMap[origMasterPath];
-
-    const masterXml = await getFileText(origMasterPath);
-    if (!masterXml) return null;
-
-    const newMasterName = `slideMasterF${++masterIdx}.xml`;
-    const newMasterPath = `ppt/slideMasters/${newMasterName}`;
-
-    // master의 .rels 파싱 (theme, layout 참조)
-    const origMasterRelsPath = origMasterPath.replace(/([^/]+)$/, '_rels/$1.rels').replace('ppt/', 'ppt/');
-    let masterRelsXml = await getFileText(origMasterRelsPath) || '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"></Relationships>';
-
-    // theme 복사
-    let newMasterRels = masterRelsXml;
-    const themeMatches = [...masterRelsXml.matchAll(/<Relationship\b[^>]*Target="[^"]*theme[^"]*"[^>]*\/>/g)];
-    for (const m of themeMatches) {
-      const origRelTarget = m[0].match(/Target="([^"]+)"/)?.[1];
-      if (!origRelTarget) continue;
-      const origThemePath = 'ppt/slideMasters/' + origRelTarget;
-      const absThemePath  = origThemePath.replace(/\/[^/]+\/\.\.\//g, '/');
-
-      if (!foreignPathMap[absThemePath]) {
-        const themeBytes = await getFileBytes(absThemePath);
-        if (themeBytes) {
-          const newThemeName = `themeF${++themeIdx}.xml`;
-          const newThemePath = `ppt/theme/${newThemeName}`;
-          baseZip.file(newThemePath, themeBytes);
-          foreignPathMap[absThemePath] = newThemePath;
-          newCt += `<Override PartName="/${newThemePath}" ContentType="application/vnd.openxmlformats-officedocument.theme+xml"/>`;
-        }
-      }
-      if (foreignPathMap[absThemePath]) {
-        const relNewTarget = '../../' + foreignPathMap[absThemePath];
-        newMasterRels = newMasterRels.replace(origRelTarget, relNewTarget);
-      }
+  // ── 2단계: presentation.xml 에 master/slide 등록 ────────────────
+  // src의 presentation.xml.rels에서 slideMaster 참조 추출
+  const masterRids = [];
+  srcPresRels.replace(/<Relationship\b[^>]*\/>/g, tag => {
+    const type = tag.match(/\bType="([^"]+)"/)?.[1] || '';
+    const tgt  = tag.match(/\bTarget="([^"]+)"/)?.[1] || '';
+    if (type.includes('/slideMaster') && tgt) {
+      // tgt = "slideMasters/slideMaster1.xml" → prefix 적용
+      const slash = tgt.lastIndexOf('/');
+      const prefixedTgt = slash >= 0
+        ? tgt.slice(0, slash + 1) + px + tgt.slice(slash + 1)
+        : px + tgt;
+      const newRid = `rId${++maxRid}`;
+      masterRids.push({ rid: newRid, target: prefixedTgt });
+      presRelsXml = presRelsXml.replace('</Relationships>',
+        `<Relationship Id="${newRid}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideMaster" Target="${prefixedTgt}"/></Relationships>`);
+      presXml = presXml.replace('</p:sldMasterIdLst>',
+        `<p:sldMasterId id="${700 + foreignPathMap._partCount * 10}" r:id="${newRid}"/></p:sldMasterIdLst>`);
     }
+    return tag;
+  });
 
-    // master .rels에서 미디어 복사 (배경 이미지, 로고 등) — 참조 교체된 rels 사용
-    newMasterRels = await copyMediaFromRels(newMasterRels, origMasterPath);
-
-    baseZip.file(newMasterPath, masterXml);
-    baseZip.file(newMasterPath.replace(/([^/]+)$/, '_rels/$1.rels').replace('ppt/', 'ppt/'), newMasterRels);
-    newCt += `<Override PartName="/${newMasterPath}" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slideMaster+xml"/>`;
-
-    // presentation.xml.rels에 master 등록
-    const masterRid = `rId${++maxRid}`;
-    presRelsXml = presRelsXml.replace('</Relationships>',
-      `<Relationship Id="${masterRid}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideMaster" Target="slideMasters/${newMasterName}"/></Relationships>`);
-    presXml = presXml.replace('</p:sldMasterIdLst>',
-      `<p:sldMasterId id="${700 + masterIdx}" r:id="${masterRid}"/></p:sldMasterIdLst>`);
-
-    foreignPathMap[origMasterPath] = { newPath: newMasterPath, masterRid, newMasterName };
-    return foreignPathMap[origMasterPath];
-  }
-
-  async function ensureLayout(origLayoutPath, masterInfo) {
-    if (foreignPathMap[origLayoutPath]) return foreignPathMap[origLayoutPath];
-
-    const layoutXml = await getFileText(origLayoutPath);
-    if (!layoutXml) return null;
-
-    const newLayoutName = `slideLayoutF${++layoutIdx}.xml`;
-    const newLayoutPath = `ppt/slideLayouts/${newLayoutName}`;
-
-    // layout .rels: master 참조를 새 master로 교체
-    const origLayoutRelsPath = origLayoutPath.replace(/([^/]+)$/, '_rels/$1.rels').replace('ppt/', 'ppt/');
-    let layoutRelsXml = await getFileText(origLayoutRelsPath) || '';
-    if (masterInfo?.newMasterName && layoutRelsXml) {
-      layoutRelsXml = layoutRelsXml.replace(/Target="[^"]*slideMasters\/[^"]+"/g,
-        `Target="../slideMasters/${masterInfo.newMasterName}"`);
-    }
-
-    // layout .rels에서 미디어 복사 (배경 이미지 등) — 참조 교체된 rels 사용
-    if (layoutRelsXml) layoutRelsXml = await copyMediaFromRels(layoutRelsXml, origLayoutPath);
-
-    baseZip.file(newLayoutPath, layoutXml);
-    if (layoutRelsXml) baseZip.file(`ppt/slideLayouts/_rels/${newLayoutName}.rels`, layoutRelsXml);
-    newCt += `<Override PartName="/${newLayoutPath}" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slideLayout+xml"/>`;
-
-    foreignPathMap[origLayoutPath] = { newPath: newLayoutPath, newLayoutName };
-    return foreignPathMap[origLayoutPath];
-  }
-
-  // src 슬라이드 순회 — sldIdLst 순서 우선, 없으면 rels 순서 fallback
-  // rels에서 rId → Target 매핑 구축
+  // ── 3단계: 슬라이드 순서대로 presentation.xml 에 등록 ──────────
+  // rels에서 rId → Target 매핑
   const relIdToTarget = {};
   srcPresRels.replace(/<Relationship\b[^>]*\/>/g, tag => {
     const id   = tag.match(/\bId="([^"]+)"/)?.[1];
@@ -561,76 +517,53 @@ async function _mergeForeign({ baseZip, srcZip, srcPresXml, srcPresRels, counter
     return tag;
   });
 
-  // sldIdLst에서 rId 순서 추출 → 정확한 슬라이드 순서 보장
+  // sldIdLst 순서로 정렬
   let orderedTargets = [];
   if (srcPresXml) {
-    const sldIdMatches = [...srcPresXml.matchAll(/<p:sldId\b[^>]+>/g)];
-    for (const m of sldIdMatches) {
+    for (const m of [...srcPresXml.matchAll(/<p:sldId\b[^>]+>/g)]) {
       const rid = m[0].match(/r:id="([^"]+)"/)?.[1];
       if (rid && relIdToTarget[rid]) orderedTargets.push(relIdToTarget[rid]);
     }
   }
-  // sldIdLst에서 못 가져왔으면 rels 순서 그대로 fallback
-  if (!orderedTargets.length) {
-    orderedTargets = Object.values(relIdToTarget);
-  }
+  if (!orderedTargets.length) orderedTargets = Object.values(relIdToTarget);
 
   for (const tgt of orderedTargets) {
-    const slideXml = await getFileText('ppt/' + tgt);
-    if (!slideXml) continue;
+    // tgt = "slides/slide1.xml"
+    const slash = tgt.lastIndexOf('/');
+    const prefixedTgt = slash >= 0
+      ? tgt.slice(0, slash + 1) + px + tgt.slice(slash + 1)
+      : px + tgt;
 
-    const slideRelsPath = 'ppt/' + tgt.replace(/([^/]+)$/, '_rels/$1.rels');
-    let slideRelsXml = await getFileText(slideRelsPath) || '';
+    const newName = `p${foreignPathMap._partCount}_s${++sc}.xml`;
+    // 이미 prefixedPath로 복사됐으므로 rename이 필요하면 이동
+    // (slide 파일은 prefixedPath = ppt/slides/p1_slide1.xml 이지만
+    //  presentation.xml에는 slides/ 상대경로로 등록해야 함)
+    // → 이미 복사된 파일을 그대로 사용, newName은 등록용만
 
-    // 슬라이드 .rels에서 layout 참조 추적
-    const layoutMatch = slideRelsXml.match(/Target="[^"]*slideLayouts\/([^"]+)"/);
-    const origLayoutFileName = layoutMatch?.[1];
-
-    if (origLayoutFileName) {
-      const origLayoutPath = `ppt/slideLayouts/${origLayoutFileName}`;
-      const layoutRelsPath = `ppt/slideLayouts/_rels/${origLayoutFileName}.rels`;
-      const layoutRelsXml2 = await getFileText(layoutRelsPath) || '';
-
-      // layout → master 추적
-      const masterMatch = layoutRelsXml2.match(/Target="[^"]*slideMasters\/([^"]+)"/);
-      const origMasterFileName = masterMatch?.[1];
-
-      let masterInfo = null;
-      if (origMasterFileName) {
-        const origMasterPath = `ppt/slideMasters/${origMasterFileName}`;
-        masterInfo = await ensureMaster(origMasterPath);
-      }
-
-      const layoutInfo = await ensureLayout(origLayoutPath, masterInfo);
-
-      // 슬라이드 .rels의 layout 참조 교체
-      if (layoutInfo?.newLayoutName) {
-        slideRelsXml = slideRelsXml.replace(
-          /Target="[^"]*slideLayouts\/[^"]+"/g,
-          `Target="../slideLayouts/${layoutInfo.newLayoutName}"`
-        );
-      }
-    }
-
-    // 미디어 파일 복사 — copyMediaFromRels로 통합 처리
-    // (마스터/레이아웃에서 이미 처리된 파일도 동일 foreignPathMap 키로 중복 방지)
-    // basePath를 'ppt/slides/_dummy'로 하면 '../media/xxx' → 'ppt/media/xxx' 로 올바르게 변환됨
-    slideRelsXml = await copyMediaFromRels(slideRelsXml, 'ppt/slides/_dummy');
-
-    const newName = `slideF${++sc}.xml`;
-    baseZip.file(`ppt/slides/${newName}`, slideXml);
-    baseZip.file(`ppt/slides/_rels/${newName}.rels`, slideRelsXml);
-
-    const rid    = `rId${++maxRid}`;
-    const sldId  = ++maxSldId;
-    newRels += `<Relationship Id="${rid}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide" Target="slides/${newName}"/>`;
+    // presentation.xml.rels에 slide 등록
+    const rid   = `rId${++maxRid}`;
+    const sldId = ++maxSldId;
+    newRels += `<Relationship Id="${rid}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide" Target="${prefixedTgt}"/>`;
     newIds  += `<p:sldId id="${sldId}" r:id="${rid}"/>`;
-    newCt   += `<Override PartName="/ppt/slides/${newName}" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slide+xml"/>`;
+    newCt   += `<Override PartName="/ppt/${prefixedTgt}" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slide+xml"/>`;
+  }
+
+  // master/theme/layout ContentType 등록
+  for (const [origPath] of Object.entries(srcFiles)) {
+    const destPath = prefixedPath(origPath);
+    if (origPath.includes('_rels/') || origPath.includes('/media/')) continue;
+    let ct = '';
+    if (origPath.match(/slideMasters\/[^/]+\.xml$/))  ct = 'application/vnd.openxmlformats-officedocument.presentationml.slideMaster+xml';
+    else if (origPath.match(/slideLayouts\/[^/]+\.xml$/)) ct = 'application/vnd.openxmlformats-officedocument.presentationml.slideLayout+xml';
+    else if (origPath.match(/theme\/[^/]+\.xml$/))    ct = 'application/vnd.openxmlformats-officedocument.theme+xml';
+    if (ct) newCt += `<Override PartName="/${destPath}" ContentType="${ct}"/>`;
   }
 
   // 카운터 공유
-  Object.assign(_counters, { maxRid, maxSldId, masterIdx, themeIdx, layoutIdx, sc,
-                              newRels, newIds, newCt, presXml, presRelsXml, ctXml });
+  Object.assign(_counters, { maxRid, maxSldId,
+    masterIdx: counters.masterIdx, themeIdx: counters.themeIdx,
+    layoutIdx: counters.layoutIdx, sc,
+    newRels, newIds, newCt, presXml, presRelsXml, ctXml });
 }
 
 // ═══════════════════════════════════════════════════════════════
