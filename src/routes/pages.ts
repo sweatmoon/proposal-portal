@@ -1700,6 +1700,9 @@ app.get('/ppt-templates', async (c) => {
         <button onclick="openAddMenu()" class="px-3 py-1.5 text-xs rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white transition">
           <i class="fas fa-plus mr-1"></i>메뉴 추가
         </button>
+        <button onclick="openPresetModal()" class="px-3 py-1.5 text-xs rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white transition">
+          <i class="fas fa-bookmark mr-1"></i>프리셋
+        </button>
       </div>
     </div>
 
@@ -1731,6 +1734,43 @@ app.get('/ppt-templates', async (c) => {
         </div>
       </div>
 
+    </div>
+
+    <!-- 프리셋 저장/불러오기 모달 -->
+    <div id="presetModal" class="hidden fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
+      <div class="bg-white rounded-2xl shadow-xl w-full max-w-lg">
+        <div class="px-6 py-4 border-b border-slate-200 flex items-center justify-between">
+          <h3 class="font-bold text-slate-800"><i class="fas fa-bookmark mr-2 text-emerald-500"></i>규칙 설정 프리셋</h3>
+          <button onclick="closePresetModal()" class="text-slate-400 hover:text-slate-700"><i class="fas fa-times"></i></button>
+        </div>
+        <div class="px-6 py-4">
+          <!-- 현재 설정 저장 -->
+          <div class="mb-4 bg-emerald-50 rounded-xl p-4 border border-emerald-200">
+            <div class="text-xs font-semibold text-emerald-700 mb-2"><i class="fas fa-save mr-1"></i>현재 규칙 설정 저장</div>
+            <div class="text-xs text-slate-500 mb-3">현재 선택된 메뉴의 규칙 설정값을 이름을 붙여 저장합니다.</div>
+            <div class="flex gap-2">
+              <input id="presetNameInput" type="text" placeholder="프리셋 이름 (예: 표준 사진장표 규칙)" class="flex-1 border border-slate-300 rounded-lg px-3 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-emerald-300">
+              <button onclick="savePreset()" class="px-3 py-1.5 text-xs rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 whitespace-nowrap">
+                <i class="fas fa-save mr-1"></i>저장
+              </button>
+            </div>
+          </div>
+          <!-- 저장된 프리셋 목록 -->
+          <div>
+            <div class="text-xs font-semibold text-slate-700 mb-2"><i class="fas fa-list mr-1"></i>저장된 프리셋</div>
+            <div id="presetList" class="space-y-2 max-h-72 overflow-y-auto">
+              <div class="text-center text-slate-400 text-xs py-4">저장된 프리셋이 없습니다</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 팝오버 요소 (툴팁) -->
+    <div id="tipPopover" class="hidden fixed z-[100] bg-slate-800 text-white text-xs rounded-xl shadow-2xl p-4 w-72 pointer-events-none">
+      <div id="tipTitle" class="font-bold text-sm mb-1 text-emerald-300"></div>
+      <div id="tipDesc" class="text-slate-200 leading-relaxed mb-2"></div>
+      <div id="tipExample" class="bg-slate-700 rounded-lg px-3 py-2 text-slate-300 font-mono text-xs"></div>
     </div>
 
     <!-- 메뉴 추가/수정 모달 -->
@@ -2194,6 +2234,195 @@ app.get('/ppt-templates', async (c) => {
       loadTree()
     }
   }
+
+  // ── 프리셋 저장/불러오기 ─────────────────────────────────────
+  const PRESET_KEY = 'ppt_rule_presets'
+
+  function loadPresets() {
+    try { return JSON.parse(localStorage.getItem(PRESET_KEY) || '[]') }
+    catch (e) { return [] }
+  }
+
+  function savePresets(list) {
+    localStorage.setItem(PRESET_KEY, JSON.stringify(list))
+  }
+
+  function openPresetModal() {
+    renderPresetList()
+    document.getElementById('presetNameInput').value = ''
+    document.getElementById('presetModal').classList.remove('hidden')
+  }
+
+  function closePresetModal() {
+    document.getElementById('presetModal').classList.add('hidden')
+  }
+
+  function getCurrentRuleValues() {
+    const get = id => { const el = document.getElementById(id); return el ? el.value : null }
+    return {
+      generation_mode:   get('ruleMode'),
+      template_strategy: get('ruleStrategy'),
+      pagination_mode:   get('rulePagination'),
+      merge_strategy:    get('ruleMerge'),
+      calculator_code:   get('ruleCalc'),
+      renderer_code:     get('ruleRenderer'),
+      postprocess_mode:  get('rulePostprocess'),
+      rule_config:       get('ruleConfig'),
+    }
+  }
+
+  function savePreset() {
+    const name = document.getElementById('presetNameInput').value.trim()
+    if (!name) { alert('프리셋 이름을 입력하세요'); return }
+    const vals = getCurrentRuleValues()
+    if (!vals.generation_mode) { alert('먼저 왼쪽 트리에서 메뉴를 선택하고 규칙을 불러오세요'); return }
+    const list = loadPresets()
+    const existing = list.findIndex(p => p.name === name)
+    const entry = { name, values: vals, savedAt: new Date().toISOString(), menuId: _selectedMenuId }
+    if (existing >= 0) {
+      if (!confirm('"' + name + '" 프리셋이 이미 있습니다. 덮어쓰시겠습니까?')) return
+      list[existing] = entry
+    } else {
+      list.unshift(entry)
+    }
+    savePresets(list)
+    renderPresetList()
+    document.getElementById('presetNameInput').value = ''
+    showAlert('✅ 프리셋 "' + name + '" 저장 완료', true)
+  }
+
+  function applyPreset(name) {
+    const list = loadPresets()
+    const preset = list.find(p => p.name === name)
+    if (!preset) { alert('프리셋을 찾을 수 없습니다'); return }
+    const v = preset.values
+    const setVal = (id, val) => { const el = document.getElementById(id); if (el && val !== null) el.value = val }
+    setVal('ruleMode',        v.generation_mode)
+    setVal('ruleStrategy',    v.template_strategy)
+    setVal('rulePagination',  v.pagination_mode)
+    setVal('ruleMerge',       v.merge_strategy)
+    setVal('ruleCalc',        v.calculator_code)
+    setVal('ruleRenderer',    v.renderer_code)
+    setVal('rulePostprocess', v.postprocess_mode)
+    setVal('ruleConfig',      v.rule_config)
+    closePresetModal()
+    showAlert('✅ 프리셋 "' + name + '" 적용 완료 — 저장 버튼을 눌러 반영하세요', true)
+  }
+
+  function deletePreset(name) {
+    if (!confirm('"' + name + '" 프리셋을 삭제하시겠습니까?')) return
+    const list = loadPresets().filter(p => p.name !== name)
+    savePresets(list)
+    renderPresetList()
+  }
+
+  function renderPresetList() {
+    const list = loadPresets()
+    const container = document.getElementById('presetList')
+    if (!list.length) {
+      container.innerHTML = '<div class="text-center text-slate-400 text-xs py-4">저장된 프리셋이 없습니다</div>'
+      return
+    }
+    container.innerHTML = list.map(p => {
+      const dt = new Date(p.savedAt)
+      const dtStr = dt.getFullYear() + '.' + String(dt.getMonth()+1).padStart(2,'0') + '.' + String(dt.getDate()).padStart(2,'0') + ' ' + String(dt.getHours()).padStart(2,'0') + ':' + String(dt.getMinutes()).padStart(2,'0')
+      const modeLabel = { BUILD_TABLE:'테이블', BUILD_OBJECTS:'객체', CLONE_SLIDE:'복제', REPLACE:'교체', HYBRID:'복합' }[p.values.generation_mode] || p.values.generation_mode || '-'
+      const safeName = p.name.replace(/'/g, "\\\\'")
+      return '<div class="flex items-center gap-2 bg-slate-50 rounded-lg px-3 py-2 border border-slate-200">' +
+        '<div class="flex-1 min-w-0">' +
+          '<div class="text-xs font-semibold text-slate-800 truncate">' + p.name + '</div>' +
+          '<div class="text-xs text-slate-400 mt-0.5">' + modeLabel + ' · ' + dtStr + '</div>' +
+        '</div>' +
+        '<button onclick="applyPreset(\'' + safeName + '\')" class="px-2 py-1 text-xs rounded bg-indigo-600 text-white hover:bg-indigo-700 whitespace-nowrap"><i class="fas fa-check mr-1"></i>적용</button>' +
+        '<button onclick="deletePreset(\'' + safeName + '\')" class="px-2 py-1 text-xs rounded bg-red-50 text-red-500 hover:bg-red-100 border border-red-200 whitespace-nowrap"><i class="fas fa-trash"></i></button>' +
+      '</div>'
+    }).join('')
+  }
+
+  // ── 툴팁 팝오버 ──────────────────────────────────────────────────
+  const TIP_DATA = {
+    mode: {
+      title: '슬라이드 생성 방식 (Generation Mode)',
+      desc: '데이터를 슬라이드로 변환하는 핵심 알고리즘을 선택합니다. 장표 유형에 따라 적합한 방식이 다릅니다.',
+      example: 'BUILD_TABLE: 인원 배정표, 감리 일정\nBUILD_OBJECTS: 사진·프로필 장표\nCLONE_SLIDE: 반복 구조 장표\nREPLACE: 표지·고정 양식\nHYBRID: 표+사진 복합',
+    },
+    strategy: {
+      title: '템플릿 종류 (Template Strategy)',
+      desc: '슬라이드 생성 시 사용하는 템플릿 파일/구조의 종류입니다. PPTX 파일 기반인지 XML 구조인지 선택합니다.',
+      example: 'PPTX_TEMPLATE: .pptx 파일을 직접 사용\nPPTX_XML_TEMPLATE: XML 조각 조합\nFRAME_TEMPLATE: 프레임 레이아웃 기반\nVARIANT_TEMPLATE: 인원 수별 변형 템플릿',
+    },
+    pagination: {
+      title: '페이지 분할 방식 (Pagination Mode)',
+      desc: '데이터가 많아 슬라이드를 여러 장으로 나눠야 할 때 분할하는 기준을 지정합니다.',
+      example: 'NONE: 분할 없음 (단일 슬라이드)\nROW_LIMIT: 행 수 기준 분할\n  → rule_config: {"maxRowsPerSlide": 15}\nSECTION: 섹션/그룹 단위 분할\nCUSTOM: 커스텀 분할 함수 사용',
+    },
+    merge: {
+      title: '합본(병합) 방식 (Merge Strategy)',
+      desc: '여러 장표를 하나의 PPTX 파일로 합칠 때 사용하는 방식입니다.',
+      example: 'STANDARD: 현재 파일에 슬라이드 추가\nFOREIGN_TEMPLATE: 다른 템플릿 파일에\n  슬라이드를 복사하여 병합',
+    },
+    calc: {
+      title: '데이터 계산 함수명 (Calculator Code)',
+      desc: '슬라이드에 들어갈 데이터를 준비·가공하는 JavaScript 함수의 이름입니다. ppt-engine.js 또는 proposal-detail.js에 정의된 함수명을 입력합니다.',
+      example: 'computeAssignRows  → 인원배정 행 계산\ncomputeScheduleRows → 감리일정 행 계산\ncomputeComplianceRows → 적합성 데이터\n(없으면 빈칸)',
+    },
+    renderer: {
+      title: '슬라이드 렌더 함수명 (Renderer Code)',
+      desc: '계산된 데이터를 PPTX 슬라이드 XML로 변환하는 JavaScript 함수명입니다.',
+      example: 'renderAssignTable   → 인원배정표 렌더\nrenderPhotoSlide    → 사진 슬라이드 렌더\nrenderScheduleTable → 일정표 렌더\n(없으면 빈칸)',
+    },
+    postprocess: {
+      title: '후처리 방식 (Postprocess Mode)',
+      desc: '슬라이드 생성 완료 후 추가로 수행하는 처리 단계를 지정합니다.',
+      example: 'NONE: 후처리 없음\nWATERMARK: 워터마크 삽입\nCOMPRESS: 이미지 압축\nSIGN: 전자서명 삽입\nCUSTOM: 커스텀 후처리',
+    },
+    config: {
+      title: '추가 설정값 (Rule Config)',
+      desc: '위 설정만으로 표현할 수 없는 세부 동작을 JSON 형식으로 지정합니다. 템플릿 capacity 목록, 최대 행 수, 특수 옵션 등을 설정할 수 있습니다.',
+      example: '{"maxRowsPerSlide": 15}\n{"variants": [2, 4, 6, 9]}\n{"photoSize": "large", "nameFontSize": 14}\n{"groupBy": "field", "sortKey": "grade"}',
+    },
+  }
+
+  let _activeTipKey = null
+  const tipEl = document.getElementById('tipPopover')
+
+  document.addEventListener('click', function(e) {
+    const icon = e.target.closest('.tip-icon')
+    if (icon) {
+      e.stopPropagation()
+      const key = icon.dataset.tip
+      if (_activeTipKey === key) {
+        tipEl.classList.add('hidden')
+        _activeTipKey = null
+        return
+      }
+      const data = TIP_DATA[key]
+      if (!data) return
+      document.getElementById('tipTitle').textContent = data.title
+      document.getElementById('tipDesc').textContent = data.desc
+      document.getElementById('tipExample').textContent = data.example
+      const rect = icon.getBoundingClientRect()
+      const scrollY = window.scrollY || document.documentElement.scrollTop
+      const scrollX = window.scrollX || document.documentElement.scrollLeft
+      tipEl.classList.remove('hidden')
+      tipEl.style.pointerEvents = 'none'
+      const tipW = 288
+      const tipH = tipEl.offsetHeight || 200
+      let left = rect.right + scrollX + 8
+      let top  = rect.top  + scrollY
+      if (left + tipW > window.innerWidth + scrollX - 10) left = rect.left + scrollX - tipW - 8
+      if (top + tipH > window.innerHeight + scrollY - 10) top = window.innerHeight + scrollY - tipH - 10
+      if (top < scrollY) top = scrollY + 8
+      tipEl.style.left = left + 'px'
+      tipEl.style.top  = top  + 'px'
+      _activeTipKey = key
+      return
+    }
+    if (!e.target.closest('#tipPopover')) {
+      tipEl.classList.add('hidden')
+      _activeTipKey = null
+    }
+  })
 
   // ── 초기 로드 ─────────────────────────────────────────────────
   loadTree()
