@@ -1989,35 +1989,35 @@ app.get('/ppt-templates', async (c) => {
             <div class="col-span-2">
               <label class="text-xs text-slate-500 font-medium mb-1 flex items-center gap-1 block">
                 슬라이드 생성 방식
-                <span class="text-slate-300 cursor-help" title="PPT 슬라이드를 어떤 방법으로 만드는지 결정합니다"><i class="fas fa-question-circle"></i></span>
+                <span class="tip-icon" data-tip="mode"><i class="fas fa-question-circle text-slate-300 cursor-help"></i></span>
               </label>
               <select id="ruleMode" class="w-full border border-slate-300 rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-indigo-300">\${modeOpts}</select>
             </div>
             <div class="col-span-2">
               <label class="text-xs text-slate-500 font-medium mb-1 flex items-center gap-1 block">
                 템플릿 종류
-                <span class="text-slate-300 cursor-help" title="슬라이드 디자인을 어디서 가져오는지 결정합니다"><i class="fas fa-question-circle"></i></span>
+                <span class="tip-icon" data-tip="strategy"><i class="fas fa-question-circle text-slate-300 cursor-help"></i></span>
               </label>
               <select id="ruleStrategy" class="w-full border border-slate-300 rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-indigo-300">\${stratOpts}</select>
             </div>
             <div>
               <label class="text-xs text-slate-500 font-medium mb-1 flex items-center gap-1 block">
                 페이지 분할 방식
-                <span class="text-slate-300 cursor-help" title="데이터가 많을 때 슬라이드를 어떻게 나눌지 결정합니다"><i class="fas fa-question-circle"></i></span>
+                <span class="tip-icon" data-tip="pagination"><i class="fas fa-question-circle text-slate-300 cursor-help"></i></span>
               </label>
               <select id="rulePagination" class="w-full border border-slate-300 rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-indigo-300">\${paginOpts}</select>
             </div>
             <div>
               <label class="text-xs text-slate-500 font-medium mb-1 flex items-center gap-1 block">
                 합본(병합) 방식
-                <span class="text-slate-300 cursor-help" title="전체 PPT 합본 시 이 장표를 어떻게 붙이는지 결정합니다"><i class="fas fa-question-circle"></i></span>
+                <span class="tip-icon" data-tip="merge"><i class="fas fa-question-circle text-slate-300 cursor-help"></i></span>
               </label>
               <select id="ruleMerge" class="w-full border border-slate-300 rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-indigo-300">\${mergeOpts}</select>
             </div>
             <div>
               <label class="text-xs text-slate-500 font-medium mb-1 flex items-center gap-1 block">
                 데이터 계산 함수명
-                <span class="text-slate-300 cursor-help" title="이 장표의 데이터를 준비하는 JS 함수 이름 (proposal-detail.js 내 함수)"><i class="fas fa-question-circle"></i></span>
+                <span class="tip-icon" data-tip="calc"><i class="fas fa-question-circle text-slate-300 cursor-help"></i></span>
               </label>
               <input id="ruleCalc" type="text" value="\${rule.calculator_code||''}" placeholder="예: computeAssignRows"
                 class="w-full border border-slate-300 rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-indigo-300">
@@ -2025,7 +2025,7 @@ app.get('/ppt-templates', async (c) => {
             <div>
               <label class="text-xs text-slate-500 font-medium mb-1 flex items-center gap-1 block">
                 슬라이드 렌더 함수명
-                <span class="text-slate-300 cursor-help" title="실제 슬라이드를 그리는 JS 함수 이름 (proposal-detail.js 내 함수)"><i class="fas fa-question-circle"></i></span>
+                <span class="tip-icon" data-tip="renderer"><i class="fas fa-question-circle text-slate-300 cursor-help"></i></span>
               </label>
               <input id="ruleRenderer" type="text" value="\${rule.renderer_code||''}" placeholder="예: renderAssignTable"
                 class="w-full border border-slate-300 rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-indigo-300">
@@ -2034,14 +2034,14 @@ app.get('/ppt-templates', async (c) => {
           <div class="mb-3">
             <label class="text-xs text-slate-500 font-medium mb-1 flex items-center gap-1 block">
               후처리 방식
-              <span class="text-slate-300 cursor-help" title="생성 후 XML을 직접 수정해야 하는 경우에만 OOXML 패치를 선택하세요"><i class="fas fa-question-circle"></i></span>
+              <span class="tip-icon" data-tip="postprocess"><i class="fas fa-question-circle text-slate-300 cursor-help"></i></span>
             </label>
             <select id="rulePostprocess" class="w-full border border-slate-300 rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-indigo-300">\${postOpts}</select>
           </div>
           <div class="mb-3">
             <label class="text-xs text-slate-500 font-medium mb-1 flex items-center gap-1 block">
               추가 설정값 (JSON)
-              <span class="text-slate-300 cursor-help" title='규칙 동작에 필요한 세부 값. 예: {&quot;maxRowsPerSlide&quot;:15} 또는 {&quot;variants&quot;:[2,4,6,9]}'><i class="fas fa-question-circle"></i></span>
+              <span class="tip-icon" data-tip="config"><i class="fas fa-question-circle text-slate-300 cursor-help"></i></span>
             </label>
             <textarea id="ruleConfig" rows="3" placeholder='예: {"maxRowsPerSlide":15,"variants":[2,4,6,9]}'
               class="w-full border border-slate-300 rounded-lg px-2 py-1.5 text-xs font-mono focus:outline-none focus:ring-2 focus:ring-indigo-300">\${rule.rule_config||''}</textarea>
