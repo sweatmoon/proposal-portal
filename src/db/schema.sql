@@ -288,6 +288,8 @@ CREATE TABLE IF NOT EXISTS ppt_templates (
   variant_code    TEXT    NOT NULL DEFAULT 'DEFAULT',  -- DEFAULT, PERSON_2, PERSON_4 ...
   pptx_file_path  TEXT,                                -- 파일 저장 경로 (null = 코드 생성)
   pptx_b64_key    TEXT,                                -- js 전역변수명 (b64 템플릿용)
+  pptx_b64_data   TEXT,                                -- 업로드된 PPTX Base64 원본 데이터
+  pptx_file_name  TEXT,                                -- 원본 파일명 (예: auditor_profile_2.pptx)
   capacity        INTEGER,                             -- variant별 슬롯 수
   slide_count     INTEGER,                             -- 템플릿 슬라이드 수
   version         INTEGER NOT NULL DEFAULT 1,
