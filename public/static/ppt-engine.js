@@ -186,11 +186,12 @@ async function mergePresentationZips(parts) {
     const isForeign = isMasterFirst || (part.mergeStrategy === 'FOREIGN_TEMPLATE');
 
     const srcPresRels = await srcZip.file('ppt/_rels/presentation.xml.rels').async('string');
+    const srcPresXml  = await srcZip.file('ppt/presentation.xml').async('string').catch(() => null);
 
     if (isForeign) {
       // ── FOREIGN_TEMPLATE: master/theme/layout/media까지 복사 ──
       await _mergeForeign({
-        baseZip, srcZip, srcPresRels,
+        baseZip, srcZip, srcPresXml, srcPresRels,
         presXmlRef: { val: presXml },
         presRelsXmlRef: { val: presRelsXml },
         ctXmlRef: { val: ctXml },
@@ -214,17 +215,27 @@ async function mergePresentationZips(parts) {
       presRelsXml = _counters.presRelsXml;
       ctXml       = _counters.ctXml;
     } else {
-      // ── STANDARD: slide + rels만 복사 ──
-      const relMap = {};
+      // ── STANDARD: slide + rels만 복사 — sldIdLst 순서 보장 ──
+      const relIdToTgt = {};
       srcPresRels.replace(/<Relationship\b[^>]*\/>/g, tag => {
         const id   = tag.match(/\bId="([^"]+)"/)?.[1];
         const tgt  = tag.match(/\bTarget="([^"]+)"/)?.[1];
         const type = tag.match(/\bType="([^"]+)"/)?.[1] || '';
-        if (id && tgt && type.includes('slide') && !type.includes('slideLayout') && !type.includes('slideMaster')) relMap[id] = tgt;
+        if (id && tgt && type.includes('slide') && !type.includes('slideLayout') && !type.includes('slideMaster')) relIdToTgt[id] = tgt;
         return tag;
       });
 
-      for (const [, tgt] of Object.entries(relMap)) {
+      // sldIdLst 순서로 정렬
+      let orderedTgts = [];
+      if (srcPresXml) {
+        for (const m of [...srcPresXml.matchAll(/<p:sldId\b[^>]+>/g)]) {
+          const rid = m[0].match(/r:id="([^"]+)"/)?.[1];
+          if (rid && relIdToTgt[rid]) orderedTgts.push(relIdToTgt[rid]);
+        }
+      }
+      if (!orderedTgts.length) orderedTgts = Object.values(relIdToTgt);
+
+      for (const tgt of orderedTgts) {
         const xml  = await srcZip.file('ppt/' + tgt).async('string').catch(() => null);
         if (!xml) continue;
         const relsPath = 'ppt/' + tgt.replace(/([^/]+)$/, '_rels/$1.rels');
@@ -385,7 +396,7 @@ async function _injectMaster({ baseZip, masterZip, presXmlRef, presRelsXmlRef, c
  * FOREIGN_TEMPLATE 병합 내부 함수
  * master / theme / layout / media 참조 구조를 그대로 복사
  */
-async function _mergeForeign({ baseZip, srcZip, srcPresRels, counters,
+async function _mergeForeign({ baseZip, srcZip, srcPresXml, srcPresRels, counters,
                                 foreignPathMap, presXmlRef, presRelsXmlRef, ctXmlRef,
                                 newRels_ref, newIds_ref, newCt_ref }) {
   let { maxRid, maxSldId, masterIdx, themeIdx, layoutIdx, sc } = counters;
@@ -520,19 +531,34 @@ async function _mergeForeign({ baseZip, srcZip, srcPresRels, counters,
     return foreignPathMap[origLayoutPath];
   }
 
-  // src 슬라이드 순회
-  const slideRelMap = {};
+  // src 슬라이드 순회 — sldIdLst 순서 우선, 없으면 rels 순서 fallback
+  // rels에서 rId → Target 매핑 구축
+  const relIdToTarget = {};
   srcPresRels.replace(/<Relationship\b[^>]*\/>/g, tag => {
     const id   = tag.match(/\bId="([^"]+)"/)?.[1];
     const tgt  = tag.match(/\bTarget="([^"]+)"/)?.[1];
     const type = tag.match(/\bType="([^"]+)"/)?.[1] || '';
     if (id && tgt && type.includes('/slide') && !type.includes('Layout') && !type.includes('Master')) {
-      slideRelMap[id] = tgt;
+      relIdToTarget[id] = tgt;
     }
     return tag;
   });
 
-  for (const [, tgt] of Object.entries(slideRelMap)) {
+  // sldIdLst에서 rId 순서 추출 → 정확한 슬라이드 순서 보장
+  let orderedTargets = [];
+  if (srcPresXml) {
+    const sldIdMatches = [...srcPresXml.matchAll(/<p:sldId\b[^>]+>/g)];
+    for (const m of sldIdMatches) {
+      const rid = m[0].match(/r:id="([^"]+)"/)?.[1];
+      if (rid && relIdToTarget[rid]) orderedTargets.push(relIdToTarget[rid]);
+    }
+  }
+  // sldIdLst에서 못 가져왔으면 rels 순서 그대로 fallback
+  if (!orderedTargets.length) {
+    orderedTargets = Object.values(relIdToTarget);
+  }
+
+  for (const tgt of orderedTargets) {
     const slideXml = await getFileText('ppt/' + tgt);
     if (!slideXml) continue;
 
