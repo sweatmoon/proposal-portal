@@ -1903,29 +1903,29 @@ app.get('/ppt-templates', async (c) => {
   function renderDetail(menu, templates) {
     const rule = menu.rule || {}
     const cfg = (() => { try { return JSON.parse(rule.rule_config || '{}') } catch (_) { return {} } })()
-    const MODE_LABELS: Record<string,string> = {
+    const MODE_LABELS = {
       'BUILD_TABLE':   '표 직접 생성 (PptxGenJS로 표 그리기)',
       'BUILD_OBJECTS': '도형 직접 생성 (PptxGenJS로 개별 객체)',
       'CLONE_SLIDE':   '슬라이드 복제 (템플릿 슬라이드를 복사·치환)',
       'REPLACE':       '변수 치환 (템플릿 placeholder 값만 교체)',
       'HYBRID':        '혼합 (치환 + 표/도형 추가)',
     }
-    const STRAT_LABELS: Record<string,string> = {
+    const STRAT_LABELS = {
       'PPTX_TEMPLATE':     'PPTX 파일 템플릿 (업로드된 .pptx 파일 기반)',
       'PPTX_XML_TEMPLATE': 'XML 직접 편집 (슬라이드 XML을 코드로 수정)',
       'FRAME_TEMPLATE':    '프레임 생성 (PptxGenJS로 빈 슬라이드에 직접 그리기)',
       'VARIANT_TEMPLATE':  'Variant 선택 (인원 수·조건에 따라 템플릿 자동 선택)',
     }
-    const PAGIN_LABELS: Record<string,string> = {
+    const PAGIN_LABELS = {
       'SINGLE':           '단일 슬라이드 (무조건 1장)',
       'MAX_ROWS':         '행 수 초과 시 분할 (maxRowsPerSlide 기준)',
       'VARIANT_OVERFLOW': 'Variant 슬롯 초과 시 새 슬라이드 추가',
     }
-    const POST_LABELS: Record<string,string> = {
+    const POST_LABELS = {
       'NONE':        '없음',
       'OOXML_PATCH': 'OOXML 직접 패치 (XML 후처리)',
     }
-    const MERGE_LABELS: Record<string,string> = {
+    const MERGE_LABELS = {
       'STANDARD':        '기본 합본 (슬라이드만 복사, 폰트·테마 공유)',
       'FOREIGN_TEMPLATE':'외부 템플릿 합본 (마스터/테마/레이아웃까지 복사)',
     }
