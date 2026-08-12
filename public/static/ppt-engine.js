@@ -134,49 +134,56 @@ async function mergePresentationZips(parts) {
   const usable = parts.filter(p => p && p.zip);
   if (!usable.length) throw new Error('병합할 슬라이드가 없습니다.');
 
-  const baseZip = usable[0].zip;
+  // ── MASTER_ONLY 전략 ──────────────────────────────────────────
+  // 맨 앞 파트가 MASTER_ONLY면 해당 ZIP을 baseZip으로 사용하고
+  // 기존 슬라이드(sldIdLst)를 비운 뒤 콘텐츠 파트 전체를
+  // FOREIGN_TEMPLATE 방식으로 병합한다.
+  // 이렇게 하면 마스터의 slideMaster/Theme/Layout은 그대로 유지되고
+  // 콘텐츠 슬라이드들은 _mergeForeign()의 검증된 로직으로 안전하게 추가된다.
+  const isMasterFirst = usable[0].mergeStrategy === 'MASTER_ONLY';
+  const baseZip       = isMasterFirst ? usable[0].zip : usable[0].zip;
+  const contentParts  = isMasterFirst ? usable.slice(1) : usable.slice(1);
+  // contentParts[0] = baseZip의 원본 (마스터 없는 경우 index 0, 마스터 있는 경우 index 1)
+  // 단, 마스터가 없으면 usable[0]이 그대로 baseZip이므로
+  // 아래 루프는 항상 index 0 부터 (baseZip 슬라이드 포함 여부 다름)
 
-  let presXml    = await baseZip.file('ppt/presentation.xml').async('string');
+  if (isMasterFirst && contentParts.length === 0) throw new Error('생성할 슬라이드가 없습니다.');
+
+  let presXml     = await baseZip.file('ppt/presentation.xml').async('string');
   let presRelsXml = await baseZip.file('ppt/_rels/presentation.xml.rels').async('string');
-  let ctXml      = await baseZip.file('[Content_Types].xml').async('string');
+  let ctXml       = await baseZip.file('[Content_Types].xml').async('string');
+
+  // MASTER_ONLY: baseZip(마스터)의 기존 슬라이드 목록을 비운다
+  // → slideMaster/Theme/Layout 체인은 유지, 슬라이드만 제거
+  if (isMasterFirst) {
+    presXml     = presXml.replace(/<p:sldIdLst>[\s\S]*?<\/p:sldIdLst>/, '<p:sldIdLst></p:sldIdLst>');
+    presRelsXml = presRelsXml.replace(/<Relationship\b[^/]*Type="[^"]*\/slide"[^/]*\/>/g, '');
+    console.log('[PptEngine] 마스터 baseZip 슬라이드 초기화 완료');
+  }
 
   let maxRid   = 0; presRelsXml.replace(/Id="rId(\d+)"/g, (_, n) => { maxRid   = Math.max(maxRid,   +n); return _; });
   let maxSldId = 255; presXml.replace(/<p:sldId id="(\d+)"/g, (_, n) => { maxSldId = Math.max(maxSldId, +n); return _; });
 
   // master/theme/layout 중복 방지용 경로 → 새 rId 맵
-  const foreignPathMap = {};   // origPath → { newPath, newRid }
+  const foreignPathMap = {};
   let   masterIdx = 100, themeIdx = 100, layoutIdx = 100;
 
   let newRels = '', newIds = '', newCt = '';
   let sc = 0;
 
-  // MASTER_ONLY 전략: parts[0]이 마스터 전용 PPTX일 때
-  // → 슬라이드는 복사하지 않고, 나머지 parts[1..]를 FOREIGN_TEMPLATE으로 병합
-  // → 모든 콘텐츠 슬라이드가 baseZip(마스터 PPTX)의 slideMaster를 참조하게 됨
-  const isMasterOnly = usable[0].mergeStrategy === 'MASTER_ONLY';
-  const startIdx = 1; // 항상 1부터 시작 (baseZip은 마스터 소스 역할)
+  // ── 콘텐츠 파트 병합 ───────────────────────────────────────────
+  // 마스터 있으면 contentParts(slice(1)) 전체 순회
+  // 마스터 없으면 usable[0]은 baseZip이므로 index 1부터 순회
+  // 단, 마스터 있는 경우 baseZip에 슬라이드가 없으므로
+  // contentParts는 모두 FOREIGN_TEMPLATE으로 처리해야 layout 체인이 올바름
+  const mergeParts = isMasterFirst ? contentParts : usable.slice(1);
 
-  // MASTER_ONLY: baseZip(마스터 PPTX)에서 기존 슬라이드 참조를 제거
-  // (마스터/테마/레이아웃만 남기고 빈 슬라이드 덱으로 시작)
-  if (isMasterOnly) {
-    // presentation.xml에서 sldIdLst 비우기
-    presXml = presXml.replace(/<p:sldIdLst>[\s\S]*?<\/p:sldIdLst>/, '<p:sldIdLst></p:sldIdLst>');
-    // presentation.xml.rels에서 슬라이드 rel 제거 (slideMaster는 유지)
-    presRelsXml = presRelsXml.replace(/<Relationship\b[^>]*Type="[^"]*\/slide"[^>]*\/>/g, '');
-    // 슬라이드 파일은 baseZip에 남아있어도 참조 없으면 무시됨
-    maxSldId = 255;
-    maxRid = 0; presRelsXml.replace(/Id="rId(\d+)"/g, (_, n) => { maxRid = Math.max(maxRid, +n); return _; });
-    // masterIdx: baseZip의 마스터를 재활용하므로 높은 번호에서 시작
-    masterIdx = 0; themeIdx = 0; layoutIdx = 0;
-    console.log('[PptEngine] MASTER_ONLY 모드 — 마스터 PPTX를 baseZip으로 사용');
-  }
-
-  for (let i = startIdx; i < usable.length; i++) {
-    const part      = usable[i];
-    const srcZip    = part.zip;
-    // 마스터 PPTX가 있으면 모든 파트를 FOREIGN_TEMPLATE으로 처리하여
-    // baseZip의 slideMaster를 재사용하게 함
-    const isForeign = isMasterOnly || (part.mergeStrategy === 'FOREIGN_TEMPLATE');
+  for (let i = 0; i < mergeParts.length; i++) {
+    const part = mergeParts[i];
+    const srcZip = part.zip;
+    // 마스터가 있을 때: 모든 콘텐츠를 FOREIGN_TEMPLATE으로 처리
+    // (마스터의 레이아웃과 원본의 레이아웃 이름이 달라도 _mergeForeign이 올바르게 처리)
+    const isForeign = isMasterFirst || (part.mergeStrategy === 'FOREIGN_TEMPLATE');
 
     const srcPresRels = await srcZip.file('ppt/_rels/presentation.xml.rels').async('string');
 
@@ -194,22 +201,20 @@ async function mergePresentationZips(parts) {
         newIds_ref: { val: newIds },
       });
       // 카운터 동기화
-      ({ maxRid, maxSldId, masterIdx, themeIdx, layoutIdx, sc } = {
-        maxRid:     _counters.maxRid,
-        maxSldId:   _counters.maxSldId,
-        masterIdx:  _counters.masterIdx,
-        themeIdx:   _counters.themeIdx,
-        layoutIdx:  _counters.layoutIdx,
-        sc:         _counters.sc,
-      });
-      newRels = _counters.newRels;
-      newIds  = _counters.newIds;
-      newCt   = _counters.newCt;
+      maxRid      = _counters.maxRid;
+      maxSldId    = _counters.maxSldId;
+      masterIdx   = _counters.masterIdx;
+      themeIdx    = _counters.themeIdx;
+      layoutIdx   = _counters.layoutIdx;
+      sc          = _counters.sc;
+      newRels     = _counters.newRels;
+      newIds      = _counters.newIds;
+      newCt       = _counters.newCt;
       presXml     = _counters.presXml;
       presRelsXml = _counters.presRelsXml;
       ctXml       = _counters.ctXml;
     } else {
-      // ── STANDARD: slide + rels만 복사 (기존 방식) ──
+      // ── STANDARD: slide + rels만 복사 ──
       const relMap = {};
       srcPresRels.replace(/<Relationship\b[^>]*\/>/g, tag => {
         const id   = tag.match(/\bId="([^"]+)"/)?.[1];
@@ -235,6 +240,8 @@ async function mergePresentationZips(parts) {
     }
   }
 
+  // 마스터 없는 경우: baseZip(usable[0])의 기존 슬라이드는 presXml/presRelsXml에 이미 포함돼 있으므로
+  // newRels/newIds/newCt 만 append하면 된다
   presRelsXml = presRelsXml.replace('</Relationships>', newRels + '</Relationships>');
   presXml     = presXml.replace('</p:sldIdLst>', newIds + '</p:sldIdLst>');
   ctXml       = ctXml.replace('</Types>', newCt + '</Types>');
@@ -247,6 +254,123 @@ async function mergePresentationZips(parts) {
 
 // foreign merge 전용 내부 카운터 공유 객체
 const _counters = {};
+
+/**
+ * _injectMaster: 마스터 PPTX의 slideMaster/theme를 baseZip에 이식
+ * baseZip 기존 slideMaster를 제거하고 masterZip의 것으로 교체
+ */
+async function _injectMaster({ baseZip, masterZip, presXmlRef, presRelsXmlRef, ctXmlRef }) {
+  let presXml     = presXmlRef.val;
+  let presRelsXml = presRelsXmlRef.val;
+  let ctXml       = ctXmlRef.val;
+
+  // 1. baseZip 기존 slideMaster rel 목록 수집 후 제거
+  const oldMasterRids = [];
+  presRelsXml.replace(/<Relationship\b[^>]*\/>/g, tag => {
+    if (tag.includes('/slideMaster')) {
+      const rid = tag.match(/\bId="([^"]+)"/)?.[1];
+      if (rid) oldMasterRids.push(rid);
+    }
+    return tag;
+  });
+  // presentation.xml.rels에서 기존 master rel 제거
+  presRelsXml = presRelsXml.replace(/<Relationship\b[^>]*\/slideMaster[^>]*\/>/g, '');
+  // presentation.xml에서 기존 sldMasterIdLst 비우기
+  presXml = presXml.replace(/<p:sldMasterIdLst>[\s\S]*?<\/p:sldMasterIdLst>/, '<p:sldMasterIdLst></p:sldMasterIdLst>');
+
+  // 2. masterZip에서 slideMaster/theme/layout/media 복사
+  let maxRid = 0; presRelsXml.replace(/Id="rId(\d+)"/g, (_, n) => { maxRid = Math.max(maxRid, +n); return _; });
+  let masterIdx = 100, themeIdx = 100, layoutIdx = 100;
+  let newMasterCt = '';
+
+  const masterPresRels = await masterZip.file('ppt/_rels/presentation.xml.rels')?.async('string') ?? '';
+  const masterRels = [...masterPresRels.matchAll(/<Relationship\b[^>]*\/>/g)].map(m => m[0]);
+
+  for (const relTag of masterRels) {
+    if (!relTag.includes('/slideMaster')) continue;
+    const origTarget = relTag.match(/Target="([^"]+)"/)?.[1];
+    if (!origTarget) continue;
+    const origMasterPath = origTarget.startsWith('ppt/') ? origTarget : 'ppt/' + origTarget.replace(/^slideMasters\//, 'slideMasters/');
+    const absOrigPath    = origMasterPath.replace(/^ppt\/ppt\//, 'ppt/');
+
+    // master XML 복사
+    const masterXml = await masterZip.file(absOrigPath)?.async('string') ?? null;
+    if (!masterXml) continue;
+    const newMasterName = `slideMasterI${++masterIdx}.xml`;
+    const newMasterPath = `ppt/slideMasters/${newMasterName}`;
+
+    // master .rels 처리
+    const origMasterRelsPath = absOrigPath.replace(/([^/]+)$/, '_rels/$1.rels');
+    let masterRelsXml = await masterZip.file(origMasterRelsPath)?.async('string') ?? '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"></Relationships>';
+
+    // theme 복사
+    const themeMatches = [...masterRelsXml.matchAll(/<Relationship\b[^>]*Target="[^"]*theme[^"]*"[^>]*\/>/g)];
+    for (const tm of themeMatches) {
+      const themeRelTarget = tm[0].match(/Target="([^"]+)"/)?.[1];
+      if (!themeRelTarget) continue;
+      const origThemePath = ('ppt/slideMasters/' + themeRelTarget).replace(/\/[^/]+\/\.\.\//g, '/');
+      const themeBytes = await masterZip.file(origThemePath)?.async('uint8array') ?? null;
+      if (themeBytes) {
+        const newThemeName = `themeI${++themeIdx}.xml`;
+        const newThemePath = `ppt/theme/${newThemeName}`;
+        baseZip.file(newThemePath, themeBytes);
+        masterRelsXml = masterRelsXml.replace(themeRelTarget, '../../' + newThemePath);
+        newMasterCt += `<Override PartName="/${newThemePath}" ContentType="application/vnd.openxmlformats-officedocument.theme+xml"/>`;
+      }
+    }
+
+    // layout 복사
+    const layoutMatches = [...masterRelsXml.matchAll(/<Relationship\b[^>]*Target="[^"]*slideLayout[^"]*"[^>]*\/>/g)];
+    let newMasterRelsForLayouts = masterRelsXml;
+    for (const lm of layoutMatches) {
+      const layoutRelTarget = lm[0].match(/Target="([^"]+)"/)?.[1];
+      if (!layoutRelTarget) continue;
+      const origLayoutPath = ('ppt/slideMasters/' + layoutRelTarget).replace(/\/[^/]+\/\.\.\//g, '/');
+      const layoutXml = await masterZip.file(origLayoutPath)?.async('string') ?? null;
+      if (!layoutXml) continue;
+      const newLayoutName = `slideLayoutI${++layoutIdx}.xml`;
+      const newLayoutPath = `ppt/slideLayouts/${newLayoutName}`;
+
+      // layout .rels
+      const origLayoutRelsPath = origLayoutPath.replace(/([^/]+)$/, '_rels/$1.rels');
+      let layoutRelsXml = await masterZip.file(origLayoutRelsPath)?.async('string') ?? '';
+      if (layoutRelsXml) {
+        layoutRelsXml = layoutRelsXml.replace(/Target="[^"]*slideMasters\/[^"]+"/g, `Target="../slideMasters/${newMasterName}"`);
+        baseZip.file(`ppt/slideLayouts/_rels/${newLayoutName}.rels`, layoutRelsXml);
+      }
+      baseZip.file(newLayoutPath, layoutXml);
+      newMasterCt += `<Override PartName="/${newLayoutPath}" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slideLayout+xml"/>`;
+      newMasterRelsForLayouts = newMasterRelsForLayouts.replace(layoutRelTarget, `../slideLayouts/${newLayoutName}`);
+    }
+
+    // media 복사 (master .rels 기준)
+    const mediaMatches = [...masterRelsXml.matchAll(/Target="([^"]*media\/[^"]+)"/g)];
+    for (const mm of mediaMatches) {
+      let mTarget = mm[1];
+      if (!mTarget.startsWith('ppt/')) {
+        mTarget = ('ppt/slideMasters/' + mTarget).replace(/\/[^/]+\/\.\.\//g, '/');
+        if (!mTarget.startsWith('ppt/')) mTarget = 'ppt/' + mTarget;
+      }
+      const mBytes = await masterZip.file(mTarget)?.async('uint8array') ?? null;
+      if (mBytes && !baseZip.file(mTarget)) baseZip.file(mTarget, mBytes);
+    }
+
+    baseZip.file(newMasterPath, masterXml);
+    baseZip.file(newMasterPath.replace(/([^/]+)$/, '_rels/$1.rels'), newMasterRelsForLayouts);
+    newMasterCt += `<Override PartName="/${newMasterPath}" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slideMaster+xml"/>`;
+
+    // presentation.xml.rels + sldMasterIdLst 에 새 master 등록
+    const masterRid = `rId${++maxRid}`;
+    presRelsXml = presRelsXml.replace('</Relationships>',
+      `<Relationship Id="${masterRid}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideMaster" Target="slideMasters/${newMasterName}"/></Relationships>`);
+    presXml = presXml.replace('</p:sldMasterIdLst>',
+      `<p:sldMasterId id="${700 + masterIdx}" r:id="${masterRid}"/></p:sldMasterIdLst>`);
+  }
+
+  ctXml = ctXml.replace('</Types>', newMasterCt + '</Types>');
+  Object.assign(_counters, { presXml, presRelsXml, ctXml, masterIdx, themeIdx, layoutIdx });
+}
+
 
 /**
  * FOREIGN_TEMPLATE 병합 내부 함수
