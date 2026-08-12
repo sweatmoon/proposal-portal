@@ -2381,7 +2381,7 @@ app.get('/ppt-templates', async (c) => {
     closePresetModal()
     showAlert('⏳ 프리셋 적용 중... (' + preset.menuCount + '개 메뉴)', true)
 
-    let ok = 0, fail = 0
+    let ok = 0, skip = 0, fail = 0
     for (const item of preset.snapshot) {
       try {
         const r = await fetch('/api/ppt-menus/' + item.menu_id + '/rule', {
@@ -2389,6 +2389,7 @@ app.get('/ppt-templates', async (c) => {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(item.rule)
         })
+        if (r.status === 404) { skip++; continue }   // 삭제된 메뉴 → 조용히 스킵
         const j = await r.json()
         if (j.ok) ok++; else fail++
       } catch(_) { fail++ }
@@ -2396,7 +2397,9 @@ app.get('/ppt-templates', async (c) => {
 
     await loadTree()
     if (_selectedMenuId) selectMenu(_selectedMenuId)
-    showAlert('✅ 프리셋 "' + preset.name + '" 적용 완료 — ' + ok + '개 성공' + (fail ? ', ' + fail + '개 실패' : ''), ok > 0)
+    const skipNote = skip ? ' (삭제된 메뉴 ' + skip + '개 건너뜀)' : ''
+    const failNote = fail ? ', ' + fail + '개 실패' : ''
+    showAlert('✅ 프리셋 "' + preset.name + '" 적용 완료 — ' + ok + '개 성공' + failNote + skipNote, ok > 0)
   }
 
   function deletePreset(idx) {
