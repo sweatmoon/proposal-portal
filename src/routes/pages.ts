@@ -1750,7 +1750,7 @@ app.get('/ppt-templates', async (c) => {
             <div class="text-xs text-slate-500 mb-3">현재 선택된 메뉴의 규칙 설정값을 이름을 붙여 저장합니다.</div>
             <div class="flex gap-2">
               <input id="presetNameInput" type="text" placeholder="프리셋 이름 (예: 표준 사진장표 규칙)" class="flex-1 border border-slate-300 rounded-lg px-3 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-emerald-300">
-              <button onclick="savePreset()" class="px-3 py-1.5 text-xs rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 whitespace-nowrap">
+              <button id="presetSaveBtn" onclick="savePreset()" class="px-3 py-1.5 text-xs rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed">
                 <i class="fas fa-save mr-1"></i>저장
               </button>
             </div>
@@ -2308,56 +2308,95 @@ app.get('/ppt-templates', async (c) => {
     document.getElementById('presetModal').classList.add('hidden')
   }
 
-  function getCurrentRuleValues() {
-    const get = id => { const el = document.getElementById(id); return el ? el.value : null }
-    return {
-      generation_mode:   get('ruleMode'),
-      template_strategy: get('ruleStrategy'),
-      pagination_mode:   get('rulePagination'),
-      merge_strategy:    get('ruleMerge'),
-      calculator_code:   get('ruleCalc'),
-      renderer_code:     get('ruleRenderer'),
-      postprocess_mode:  get('rulePostprocess'),
-      rule_config:       get('ruleConfig'),
-    }
-  }
-
-  function savePreset() {
+  // ── 전체 목차 스냅샷 저장 ────────────────────────────────────
+  async function savePreset() {
     const name = document.getElementById('presetNameInput').value.trim()
     if (!name) { alert('프리셋 이름을 입력하세요'); return }
-    const vals = getCurrentRuleValues()
-    if (!vals.generation_mode) { alert('먼저 왼쪽 트리에서 메뉴를 선택하고 규칙을 불러오세요'); return }
-    const list = loadPresets()
-    const existing = list.findIndex(p => p.name === name)
-    const entry = { name, values: vals, savedAt: new Date().toISOString(), menuId: _selectedMenuId }
-    if (existing >= 0) {
-      if (!confirm('"' + name + '" 프리셋이 이미 있습니다. 덮어쓰시겠습니까?')) return
-      list[existing] = entry
-    } else {
-      list.unshift(entry)
+
+    // API에서 전체 메뉴 트리(rules 포함) 조회
+    const btn = document.getElementById('presetSaveBtn')
+    btn.disabled = true
+    btn.textContent = '저장 중...'
+    try {
+      const r = await fetch('/api/ppt-menus')
+      const j = await r.json()
+      if (!j.ok) throw new Error(j.error)
+
+      // 트리를 평탄화하여 menu_id → rule 맵 생성
+      const snapshot = []
+      function flattenTree(nodes) {
+        nodes.forEach(n => {
+          if (n.rule) {
+            snapshot.push({
+              menu_id:   n.id,
+              menu_code: n.menu_code,
+              menu_name: n.menu_name,
+              rule: {
+                generation_mode:   n.rule.generation_mode,
+                template_strategy: n.rule.template_strategy,
+                pagination_mode:   n.rule.pagination_mode,
+                merge_strategy:    n.rule.merge_strategy,
+                calculator_code:   n.rule.calculator_code,
+                renderer_code:     n.rule.renderer_code,
+                postprocess_mode:  n.rule.postprocess_mode,
+                rule_config:       n.rule.rule_config,
+              }
+            })
+          }
+          if (n.children && n.children.length) flattenTree(n.children)
+        })
+      }
+      flattenTree(j.data)
+
+      if (!snapshot.length) { alert('저장할 규칙이 있는 메뉴가 없습니다. 먼저 각 메뉴의 규칙을 설정하세요.'); return }
+
+      const list = loadPresets()
+      const existing = list.findIndex(p => p.name === name)
+      const entry = { name, snapshot, menuCount: snapshot.length, savedAt: new Date().toISOString() }
+      if (existing >= 0) {
+        if (!confirm('"' + name + '" 프리셋이 이미 있습니다. 덮어쓰시겠습니까?')) return
+        list[existing] = entry
+      } else {
+        list.unshift(entry)
+      }
+      savePresets(list)
+      renderPresetList()
+      document.getElementById('presetNameInput').value = ''
+      showAlert('✅ 프리셋 "' + name + '" 저장 완료 (' + snapshot.length + '개 메뉴 규칙)', true)
+    } catch(e) {
+      alert('저장 실패: ' + e.message)
+    } finally {
+      btn.disabled = false
+      btn.innerHTML = '<i class="fas fa-save mr-1"></i>저장'
     }
-    savePresets(list)
-    renderPresetList()
-    document.getElementById('presetNameInput').value = ''
-    showAlert('✅ 프리셋 "' + name + '" 저장 완료', true)
   }
 
-  function applyPreset(idx) {
+  // ── 전체 목차 스냅샷 적용 ────────────────────────────────────
+  async function applyPreset(idx) {
     const list = loadPresets()
     const preset = list[idx]
     if (!preset) { alert('프리셋을 찾을 수 없습니다'); return }
-    const v = preset.values
-    const setVal = (id, val) => { const el = document.getElementById(id); if (el && val !== null) el.value = val }
-    setVal('ruleMode',        v.generation_mode)
-    setVal('ruleStrategy',    v.template_strategy)
-    setVal('rulePagination',  v.pagination_mode)
-    setVal('ruleMerge',       v.merge_strategy)
-    setVal('ruleCalc',        v.calculator_code)
-    setVal('ruleRenderer',    v.renderer_code)
-    setVal('rulePostprocess', v.postprocess_mode)
-    setVal('ruleConfig',      v.rule_config)
+    if (!confirm('"' + preset.name + '" 프리셋을 적용하시겠습니까? ' + preset.menuCount + '개 메뉴의 규칙이 일괄 변경됩니다.')) return
+
     closePresetModal()
-    showAlert('✅ 프리셋 "' + preset.name + '" 적용 완료 — 저장 버튼을 눌러 반영하세요', true)
+    showAlert('⏳ 프리셋 적용 중... (' + preset.menuCount + '개 메뉴)', true)
+
+    let ok = 0, fail = 0
+    for (const item of preset.snapshot) {
+      try {
+        const r = await fetch('/api/ppt-menus/' + item.menu_id + '/rule', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(item.rule)
+        })
+        const j = await r.json()
+        if (j.ok) ok++; else fail++
+      } catch(_) { fail++ }
+    }
+
+    await loadTree()
+    if (_selectedMenuId) selectMenu(_selectedMenuId)
+    showAlert('✅ 프리셋 "' + preset.name + '" 적용 완료 — ' + ok + '개 성공' + (fail ? ', ' + fail + '개 실패' : ''), ok > 0)
   }
 
   function deletePreset(idx) {
@@ -2380,11 +2419,11 @@ app.get('/ppt-templates', async (c) => {
     container.innerHTML = list.map((p, idx) => {
       const dt = new Date(p.savedAt)
       const dtStr = dt.getFullYear() + '.' + String(dt.getMonth()+1).padStart(2,'0') + '.' + String(dt.getDate()).padStart(2,'0') + ' ' + String(dt.getHours()).padStart(2,'0') + ':' + String(dt.getMinutes()).padStart(2,'0')
-      const modeLabel = { BUILD_TABLE:'테이블', BUILD_OBJECTS:'객체', CLONE_SLIDE:'복제', REPLACE:'교체', HYBRID:'복합' }[p.values.generation_mode] || p.values.generation_mode || '-'
+      const menuCount = p.menuCount || (p.snapshot ? p.snapshot.length : 0)
       return '<div class="flex items-center gap-2 bg-slate-50 rounded-lg px-3 py-2 border border-slate-200">' +
         '<div class="flex-1 min-w-0">' +
           '<div class="text-xs font-semibold text-slate-800 truncate">' + p.name + '</div>' +
-          '<div class="text-xs text-slate-400 mt-0.5">' + modeLabel + ' · ' + dtStr + '</div>' +
+          '<div class="text-xs text-slate-400 mt-0.5">메뉴 ' + menuCount + '개 · ' + dtStr + '</div>' +
         '</div>' +
         '<button onclick="applyPreset(' + idx + ')" class="px-2 py-1 text-xs rounded bg-indigo-600 text-white hover:bg-indigo-700 whitespace-nowrap"><i class="fas fa-check mr-1"></i>적용</button>' +
         '<button onclick="deletePreset(' + idx + ')" class="px-2 py-1 text-xs rounded bg-red-50 text-red-500 hover:bg-red-100 border border-red-200 whitespace-nowrap"><i class="fas fa-trash"></i></button>' +
