@@ -2342,9 +2342,9 @@ app.get('/ppt-templates', async (c) => {
     showAlert('✅ 프리셋 "' + name + '" 저장 완료', true)
   }
 
-  function applyPreset(name) {
+  function applyPreset(idx) {
     const list = loadPresets()
-    const preset = list.find(p => p.name === name)
+    const preset = list[idx]
     if (!preset) { alert('프리셋을 찾을 수 없습니다'); return }
     const v = preset.values
     const setVal = (id, val) => { const el = document.getElementById(id); if (el && val !== null) el.value = val }
@@ -2357,12 +2357,15 @@ app.get('/ppt-templates', async (c) => {
     setVal('rulePostprocess', v.postprocess_mode)
     setVal('ruleConfig',      v.rule_config)
     closePresetModal()
-    showAlert('✅ 프리셋 "' + name + '" 적용 완료 — 저장 버튼을 눌러 반영하세요', true)
+    showAlert('✅ 프리셋 "' + preset.name + '" 적용 완료 — 저장 버튼을 눌러 반영하세요', true)
   }
 
-  function deletePreset(name) {
-    if (!confirm('"' + name + '" 프리셋을 삭제하시겠습니까?')) return
-    const list = loadPresets().filter(p => p.name !== name)
+  function deletePreset(idx) {
+    const list = loadPresets()
+    const preset = list[idx]
+    if (!preset) return
+    if (!confirm('"' + preset.name + '" 프리셋을 삭제하시겠습니까?')) return
+    list.splice(idx, 1)
     savePresets(list)
     renderPresetList()
   }
@@ -2374,18 +2377,17 @@ app.get('/ppt-templates', async (c) => {
       container.innerHTML = '<div class="text-center text-slate-400 text-xs py-4">저장된 프리셋이 없습니다</div>'
       return
     }
-    container.innerHTML = list.map(p => {
+    container.innerHTML = list.map((p, idx) => {
       const dt = new Date(p.savedAt)
       const dtStr = dt.getFullYear() + '.' + String(dt.getMonth()+1).padStart(2,'0') + '.' + String(dt.getDate()).padStart(2,'0') + ' ' + String(dt.getHours()).padStart(2,'0') + ':' + String(dt.getMinutes()).padStart(2,'0')
       const modeLabel = { BUILD_TABLE:'테이블', BUILD_OBJECTS:'객체', CLONE_SLIDE:'복제', REPLACE:'교체', HYBRID:'복합' }[p.values.generation_mode] || p.values.generation_mode || '-'
-      const safeName = p.name.replace(/'/g, "\\\\'")
       return '<div class="flex items-center gap-2 bg-slate-50 rounded-lg px-3 py-2 border border-slate-200">' +
         '<div class="flex-1 min-w-0">' +
           '<div class="text-xs font-semibold text-slate-800 truncate">' + p.name + '</div>' +
           '<div class="text-xs text-slate-400 mt-0.5">' + modeLabel + ' · ' + dtStr + '</div>' +
         '</div>' +
-        '<button onclick="applyPreset(\'' + safeName + '\')" class="px-2 py-1 text-xs rounded bg-indigo-600 text-white hover:bg-indigo-700 whitespace-nowrap"><i class="fas fa-check mr-1"></i>적용</button>' +
-        '<button onclick="deletePreset(\'' + safeName + '\')" class="px-2 py-1 text-xs rounded bg-red-50 text-red-500 hover:bg-red-100 border border-red-200 whitespace-nowrap"><i class="fas fa-trash"></i></button>' +
+        '<button onclick="applyPreset(' + idx + ')" class="px-2 py-1 text-xs rounded bg-indigo-600 text-white hover:bg-indigo-700 whitespace-nowrap"><i class="fas fa-check mr-1"></i>적용</button>' +
+        '<button onclick="deletePreset(' + idx + ')" class="px-2 py-1 text-xs rounded bg-red-50 text-red-500 hover:bg-red-100 border border-red-200 whitespace-nowrap"><i class="fas fa-trash"></i></button>' +
       '</div>'
     }).join('')
   }
@@ -2395,42 +2397,42 @@ app.get('/ppt-templates', async (c) => {
     mode: {
       title: '슬라이드 생성 방식 (Generation Mode)',
       desc: '데이터를 슬라이드로 변환하는 핵심 알고리즘을 선택합니다. 장표 유형에 따라 적합한 방식이 다릅니다.',
-      example: 'BUILD_TABLE: 인원 배정표, 감리 일정\nBUILD_OBJECTS: 사진·프로필 장표\nCLONE_SLIDE: 반복 구조 장표\nREPLACE: 표지·고정 양식\nHYBRID: 표+사진 복합',
+      example: ['BUILD_TABLE: 인원 배정표, 감리 일정', 'BUILD_OBJECTS: 사진/프로필 장표', 'CLONE_SLIDE: 반복 구조 장표', 'REPLACE: 표지/고정 양식', 'HYBRID: 표+사진 복합'].join(' | '),
     },
     strategy: {
       title: '템플릿 종류 (Template Strategy)',
-      desc: '슬라이드 생성 시 사용하는 템플릿 파일/구조의 종류입니다. PPTX 파일 기반인지 XML 구조인지 선택합니다.',
-      example: 'PPTX_TEMPLATE: .pptx 파일을 직접 사용\nPPTX_XML_TEMPLATE: XML 조각 조합\nFRAME_TEMPLATE: 프레임 레이아웃 기반\nVARIANT_TEMPLATE: 인원 수별 변형 템플릿',
+      desc: '슬라이드 생성 시 사용하는 템플릿 파일/구조의 종류입니다.',
+      example: ['PPTX_TEMPLATE: .pptx 파일을 직접 사용', 'PPTX_XML_TEMPLATE: XML 조각 조합', 'FRAME_TEMPLATE: 프레임 레이아웃 기반', 'VARIANT_TEMPLATE: 인원수별 변형 템플릿'].join(' | '),
     },
     pagination: {
       title: '페이지 분할 방식 (Pagination Mode)',
-      desc: '데이터가 많아 슬라이드를 여러 장으로 나눠야 할 때 분할하는 기준을 지정합니다.',
-      example: 'NONE: 분할 없음 (단일 슬라이드)\nROW_LIMIT: 행 수 기준 분할\n  → rule_config: {"maxRowsPerSlide": 15}\nSECTION: 섹션/그룹 단위 분할\nCUSTOM: 커스텀 분할 함수 사용',
+      desc: '데이터가 많아 슬라이드를 여러 장으로 나눠야 할 때 분할 기준을 지정합니다.',
+      example: 'NONE: 분할없음 | ROW_LIMIT: 행수기준(maxRowsPerSlide) | SECTION: 섹션단위 | CUSTOM: 커스텀함수',
     },
     merge: {
       title: '합본(병합) 방식 (Merge Strategy)',
       desc: '여러 장표를 하나의 PPTX 파일로 합칠 때 사용하는 방식입니다.',
-      example: 'STANDARD: 현재 파일에 슬라이드 추가\nFOREIGN_TEMPLATE: 다른 템플릿 파일에\n  슬라이드를 복사하여 병합',
+      example: 'STANDARD: 현재 파일에 슬라이드 추가 | FOREIGN_TEMPLATE: 외부 템플릿 파일에 슬라이드를 복사하여 병합',
     },
     calc: {
       title: '데이터 계산 함수명 (Calculator Code)',
-      desc: '슬라이드에 들어갈 데이터를 준비·가공하는 JavaScript 함수의 이름입니다. ppt-engine.js 또는 proposal-detail.js에 정의된 함수명을 입력합니다.',
-      example: 'computeAssignRows  → 인원배정 행 계산\ncomputeScheduleRows → 감리일정 행 계산\ncomputeComplianceRows → 적합성 데이터\n(없으면 빈칸)',
+      desc: '슬라이드에 들어갈 데이터를 준비/가공하는 JS 함수명입니다. ppt-engine.js 또는 proposal-detail.js에 정의된 함수명을 입력합니다.',
+      example: 'computeAssignRows | computeScheduleRows | computeComplianceRows (없으면 빈칸)',
     },
     renderer: {
       title: '슬라이드 렌더 함수명 (Renderer Code)',
-      desc: '계산된 데이터를 PPTX 슬라이드 XML로 변환하는 JavaScript 함수명입니다.',
-      example: 'renderAssignTable   → 인원배정표 렌더\nrenderPhotoSlide    → 사진 슬라이드 렌더\nrenderScheduleTable → 일정표 렌더\n(없으면 빈칸)',
+      desc: '계산된 데이터를 PPTX 슬라이드 XML로 변환하는 JS 함수명입니다.',
+      example: 'renderAssignTable | renderPhotoSlide | renderScheduleTable (없으면 빈칸)',
     },
     postprocess: {
       title: '후처리 방식 (Postprocess Mode)',
       desc: '슬라이드 생성 완료 후 추가로 수행하는 처리 단계를 지정합니다.',
-      example: 'NONE: 후처리 없음\nWATERMARK: 워터마크 삽입\nCOMPRESS: 이미지 압축\nSIGN: 전자서명 삽입\nCUSTOM: 커스텀 후처리',
+      example: 'NONE: 없음 | WATERMARK: 워터마크 | COMPRESS: 이미지압축 | SIGN: 전자서명 | CUSTOM: 커스텀',
     },
     config: {
       title: '추가 설정값 (Rule Config)',
-      desc: '위 설정만으로 표현할 수 없는 세부 동작을 JSON 형식으로 지정합니다. 템플릿 capacity 목록, 최대 행 수, 특수 옵션 등을 설정할 수 있습니다.',
-      example: '{"maxRowsPerSlide": 15}\n{"variants": [2, 4, 6, 9]}\n{"photoSize": "large", "nameFontSize": 14}\n{"groupBy": "field", "sortKey": "grade"}',
+      desc: '위 설정으로 표현할 수 없는 세부 동작을 JSON 형식으로 지정합니다.',
+      example: '{"maxRowsPerSlide":15} | {"variants":[2,4,6,9]} | {"photoSize":"large","nameFontSize":14}',
     },
   }
 
