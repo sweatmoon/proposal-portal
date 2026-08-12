@@ -340,9 +340,39 @@ CREATE TABLE IF NOT EXISTS ppt_template_elements (
   created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+-- ── 17. ppt_compositions (최종 PPT 구성 순서 / 포함 조건) ─────────
+CREATE TABLE IF NOT EXISTS ppt_compositions (
+  id             SERIAL PRIMARY KEY,
+  proposal_type  TEXT    NOT NULL DEFAULT 'DEFAULT',   -- 제안서 유형 (추후 확장용)
+  menu_id        INTEGER NOT NULL REFERENCES ppt_menus(id) ON DELETE CASCADE,
+  sort_order     INTEGER NOT NULL DEFAULT 0,
+  is_required    INTEGER NOT NULL DEFAULT 1,            -- 1=필수, 0=선택
+  condition_code TEXT,                                  -- 생성조건 식별자 (예: HAS_AUDIT_PHASE)
+  is_enabled     INTEGER NOT NULL DEFAULT 1,
+  created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (proposal_type, menu_id)
+);
+
+-- ── 18. ppt_template_versions (템플릿 버전 이력) ────────────────
+CREATE TABLE IF NOT EXISTS ppt_template_versions (
+  id            SERIAL PRIMARY KEY,
+  template_id   INTEGER NOT NULL REFERENCES ppt_templates(id) ON DELETE CASCADE,
+  version       INTEGER NOT NULL,
+  file_path     TEXT,
+  pptx_b64_key  TEXT,
+  uploaded_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  uploaded_by   TEXT,
+  change_note   TEXT,
+  UNIQUE (template_id, version)
+);
+
 -- ── PPT 테이블 인덱스 ──────────────────────────────────────────
-CREATE INDEX IF NOT EXISTS idx_ppt_menus_parent      ON ppt_menus(parent_id);
-CREATE INDEX IF NOT EXISTS idx_ppt_menus_sort        ON ppt_menus(sort_order);
-CREATE INDEX IF NOT EXISTS idx_ppt_templates_menu    ON ppt_templates(menu_id);
-CREATE INDEX IF NOT EXISTS idx_ppt_gen_rules_menu    ON ppt_generation_rules(menu_id);
-CREATE INDEX IF NOT EXISTS idx_ppt_elements_template ON ppt_template_elements(template_id);
+CREATE INDEX IF NOT EXISTS idx_ppt_menus_parent        ON ppt_menus(parent_id);
+CREATE INDEX IF NOT EXISTS idx_ppt_menus_sort          ON ppt_menus(sort_order);
+CREATE INDEX IF NOT EXISTS idx_ppt_templates_menu      ON ppt_templates(menu_id);
+CREATE INDEX IF NOT EXISTS idx_ppt_gen_rules_menu      ON ppt_generation_rules(menu_id);
+CREATE INDEX IF NOT EXISTS idx_ppt_elements_template   ON ppt_template_elements(template_id);
+CREATE INDEX IF NOT EXISTS idx_ppt_compositions_menu   ON ppt_compositions(menu_id);
+CREATE INDEX IF NOT EXISTS idx_ppt_compositions_sort   ON ppt_compositions(proposal_type, sort_order);
+CREATE INDEX IF NOT EXISTS idx_ppt_tpl_versions_tpl    ON ppt_template_versions(template_id);

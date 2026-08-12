@@ -31,6 +31,7 @@ app.route('/api/upload/project',   uploadProjectRoute)
 app.route('/api/projects',         projectsApiRoute)
 app.route('/api/personnel',        personnelApiRoute)
 app.route('/api/ppt-menus',        pptMenuApiRoute)
+app.route('/api/ppt-compositions', pptMenuApiRoute)   // compositions 서브라우트 별칭
 
 // ── 페이지 라우트 (홈, /proposals, /personnel, /upload) ───────
 app.route('/', pagesRoute)
