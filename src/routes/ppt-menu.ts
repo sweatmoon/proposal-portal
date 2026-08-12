@@ -821,20 +821,54 @@ app.get('/:id/templates', async (c) => {
   }
 })
 
-/** POST /api/ppt-menus/:id/templates */
+/** POST /api/ppt-menus/:id/templates — multipart/form-data 파일 업로드 */
 app.post('/:id/templates', async (c) => {
   try {
     const menuId = Number(c.req.param('id'))
-    const body = await c.req.json()
-    const { template_name, variant_code, pptx_b64_key, capacity, slide_count, is_default, metadata } = body
+    const contentType = c.req.header('content-type') || ''
+
+    let template_name: string
+    let variant_code: string
+    let capacity: number | null
+    let pptx_b64_key: string | null = null
+    let pptx_file_path: string | null = null
+
+    if (contentType.includes('multipart/form-data')) {
+      // ── 파일 업로드 경로 ──────────────────────────────────────
+      const form = await c.req.formData()
+      template_name = String(form.get('template_name') ?? '')
+      variant_code  = String(form.get('variant_code')  ?? 'DEFAULT') || 'DEFAULT'
+      capacity      = form.get('capacity') ? Number(form.get('capacity')) : null
+      const file = form.get('pptx_file') as File | null
+      if (file && file.size > 0) {
+        // 파일을 ArrayBuffer → Base64로 인코딩하여 pptx_b64_key 컬럼에 저장
+        const buf    = await file.arrayBuffer()
+        const bytes  = new Uint8Array(buf)
+        let binary   = ''
+        for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i])
+        const b64 = btoa(binary)
+        // 저장 키: "FILE:<원본파일명>:<업로드타임스탬프>"
+        pptx_b64_key  = b64
+        pptx_file_path = file.name
+      }
+    } else {
+      // ── JSON 경로 (하위 호환) ─────────────────────────────────
+      const body = await c.req.json()
+      template_name  = body.template_name
+      variant_code   = body.variant_code ?? 'DEFAULT'
+      capacity       = body.capacity ?? null
+      pptx_b64_key   = body.pptx_b64_key ?? null
+      pptx_file_path = body.pptx_file_path ?? null
+    }
+
+    if (!template_name) return c.json({ ok: false, error: '템플릿 이름은 필수입니다' }, 400)
+
     const row = await queryOne<{ id: number }>(`
       INSERT INTO ppt_templates
-        (menu_id, template_name, variant_code, pptx_b64_key, capacity, slide_count, is_default, is_active, metadata)
-      VALUES ($1,$2,$3,$4,$5,$6,$7,1,$8) RETURNING id
-    `, [menuId, template_name, variant_code ?? 'DEFAULT', pptx_b64_key ?? null,
-        capacity ?? null, slide_count ?? null, is_default ?? 1,
-        metadata ? JSON.stringify(metadata) : null])
-    return c.json({ ok: true, id: row?.id })
+        (menu_id, template_name, variant_code, pptx_b64_key, pptx_file_path, capacity, is_default, is_active)
+      VALUES ($1,$2,$3,$4,$5,$6,1,1) RETURNING id
+    `, [menuId, template_name, variant_code, pptx_b64_key, pptx_file_path, capacity ?? null])
+    return c.json({ ok: true, id: row?.id, file_name: pptx_file_path })
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : String(e)
     return c.json({ ok: false, error: msg }, 400)

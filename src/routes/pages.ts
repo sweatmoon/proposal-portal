@@ -1980,12 +1980,18 @@ app.get('/ppt-templates', async (c) => {
     const mergeOpts = Object.entries(MERGE_LABELS).map(([v, lbl]) =>
       \`<option value="\${v}" \${rule.merge_strategy===v?'selected':''}>\${lbl}</option>\`).join('')
 
-    const tplRows = templates.map(t => \`
+    const tplRows = templates.map(t => {
+      const hasFile  = !!t.pptx_b64_key
+      const fileName = t.pptx_file_path || (hasFile ? '업로드됨' : '-')
+      const fileBadge = hasFile
+        ? \`<span class="inline-flex items-center gap-1 text-xs text-emerald-700 bg-emerald-50 border border-emerald-200 rounded px-2 py-0.5"><i class="fas fa-file-powerpoint text-emerald-500"></i>\${fileName}</span>\`
+        : \`<span class="text-xs text-slate-400">파일 없음</span>\`
+      return \`
       <tr class="border-t border-slate-100 hover:bg-slate-50">
         <td class="px-3 py-2 text-xs font-mono text-indigo-600">\${t.variant_code}</td>
         <td class="px-3 py-2 text-xs text-slate-700">\${t.template_name}</td>
         <td class="px-3 py-2 text-xs text-center text-slate-500">\${t.capacity ?? '-'}</td>
-        <td class="px-3 py-2 text-xs text-center text-slate-500">\${t.pptx_b64_key ?? '-'}</td>
+        <td class="px-3 py-2 text-xs">\${fileBadge}</td>
         <td class="px-3 py-2 text-xs text-center">
           <span class="px-1.5 py-0.5 rounded-full text-xs \${t.is_active?'bg-emerald-100 text-emerald-700':'bg-slate-100 text-slate-400'}">\${t.is_active?'활성':'비활성'}</span>
         </td>
@@ -1993,7 +1999,7 @@ app.get('/ppt-templates', async (c) => {
           <button onclick="deleteTpl(\${t.id})" class="text-red-400 hover:text-red-600"><i class="fas fa-trash"></i></button>
         </td>
       </tr>
-    \`).join('')
+    \`}).join('')
 
     document.getElementById('detailPanel').innerHTML = \`
       <div class="p-5 h-full overflow-y-auto">
@@ -2104,7 +2110,7 @@ app.get('/ppt-templates', async (c) => {
                   <th class="px-3 py-2 text-xs text-left text-slate-500 font-semibold">Variant</th>
                   <th class="px-3 py-2 text-xs text-left text-slate-500 font-semibold">이름</th>
                   <th class="px-3 py-2 text-xs text-center text-slate-500 font-semibold">Capacity</th>
-                  <th class="px-3 py-2 text-xs text-center text-slate-500 font-semibold">B64 Key</th>
+                  <th class="px-3 py-2 text-xs text-left text-slate-500 font-semibold">파일</th>
                   <th class="px-3 py-2 text-xs text-center text-slate-500 font-semibold">상태</th>
                   <th class="px-3 py-2 text-xs text-center text-slate-500 font-semibold"></th>
                 </tr>
@@ -2114,15 +2120,25 @@ app.get('/ppt-templates', async (c) => {
           </div>
           <!-- 템플릿 추가 폼 -->
           <div class="mt-3 bg-amber-50 rounded-lg p-3 border border-amber-200">
-            <div class="text-xs font-semibold text-amber-700 mb-2"><i class="fas fa-plus mr-1"></i>템플릿 추가</div>
+            <div class="text-xs font-semibold text-amber-700 mb-2"><i class="fas fa-upload mr-1"></i>템플릿 파일 업로드</div>
             <div class="grid grid-cols-2 gap-2 mb-2">
-              <input id="newTplName" type="text" placeholder="템플릿 이름" class="border border-slate-300 rounded px-2 py-1 text-xs">
+              <input id="newTplName" type="text" placeholder="템플릿 이름 (필수)" class="border border-slate-300 rounded px-2 py-1 text-xs">
               <input id="newTplVariant" type="text" placeholder="Variant (예: PERSON_4)" value="DEFAULT" class="border border-slate-300 rounded px-2 py-1 text-xs">
-              <input id="newTplCapacity" type="number" placeholder="capacity" class="border border-slate-300 rounded px-2 py-1 text-xs">
-              <input id="newTplB64Key" type="text" placeholder="B64 Key (예: PHOTO_TEMPLATE_PPTX_B64)" class="border border-slate-300 rounded px-2 py-1 text-xs">
+              <input id="newTplCapacity" type="number" placeholder="Capacity (행/슬라이드당 인원 수)" class="border border-slate-300 rounded px-2 py-1 text-xs">
+              <div></div>
             </div>
+            <label class="block mb-2">
+              <span class="text-xs text-slate-500 font-medium">PPTX 파일 선택</span>
+              <div id="tplFileDropZone" class="mt-1 flex items-center gap-2 border-2 border-dashed border-amber-300 rounded-lg px-3 py-2 cursor-pointer hover:border-amber-500 hover:bg-amber-100 transition"
+                   onclick="document.getElementById('newTplFile').click()">
+                <i class="fas fa-file-powerpoint text-amber-500 text-lg"></i>
+                <span id="tplFileLabel" class="text-xs text-slate-500 truncate">클릭하거나 파일을 여기에 끌어다 놓으세요 (.pptx)</span>
+              </div>
+              <input id="newTplFile" type="file" accept=".pptx,application/vnd.openxmlformats-officedocument.presentationml.presentation"
+                class="hidden" onchange="onTplFileChange(this)">
+            </label>
             <button onclick="addTemplate(\${menu.id})" class="px-3 py-1 text-xs rounded bg-amber-600 text-white hover:bg-amber-700">
-              <i class="fas fa-plus mr-1"></i>추가
+              <i class="fas fa-upload mr-1"></i>업로드 & 추가
             </button>
           </div>
         </div>
@@ -2149,19 +2165,54 @@ app.get('/ppt-templates', async (c) => {
     if (j.ok) { await loadTree(); selectMenu(menuId) }
   }
 
-  // ── 템플릿 추가 ────────────────────────────────────────────────
-  async function addTemplate(menuId) {
-    const body = {
-      template_name: document.getElementById('newTplName').value,
-      variant_code:  document.getElementById('newTplVariant').value || 'DEFAULT',
-      capacity:      parseInt(document.getElementById('newTplCapacity').value) || null,
-      pptx_b64_key:  document.getElementById('newTplB64Key').value || null,
+  // ── 템플릿 파일 선택 핸들러 ───────────────────────────────────
+  function onTplFileChange(input) {
+    const label = document.getElementById('tplFileLabel')
+    if (input.files && input.files[0]) {
+      label.textContent = input.files[0].name
+      label.classList.add('text-amber-700', 'font-semibold')
+      // 이름 자동 채우기 (비어있을 때)
+      const nameEl = document.getElementById('newTplName')
+      if (nameEl && !nameEl.value) {
+        nameEl.value = input.files[0].name.replace(/\.pptx$/i, '')
+      }
+    } else {
+      label.textContent = '클릭하거나 파일을 여기에 끌어다 놓으세요 (.pptx)'
+      label.classList.remove('text-amber-700', 'font-semibold')
     }
-    if (!body.template_name) { showAlert('템플릿 이름을 입력하세요', false); return }
-    const r = await fetch('/api/ppt-menus/' + menuId + '/templates', { method: 'POST', headers: { 'Content-Type':'application/json' }, body: JSON.stringify(body) })
+  }
+
+  // ── 템플릿 추가 (파일 업로드) ────────────────────────────────
+  async function addTemplate(menuId) {
+    const name     = document.getElementById('newTplName').value.trim()
+    const variant  = document.getElementById('newTplVariant').value.trim() || 'DEFAULT'
+    const capacity = document.getElementById('newTplCapacity').value
+    const fileEl   = document.getElementById('newTplFile')
+    const file     = fileEl && fileEl.files && fileEl.files[0]
+
+    if (!name) { showAlert('템플릿 이름을 입력하세요', false); return }
+
+    const formData = new FormData()
+    formData.append('template_name', name)
+    formData.append('variant_code',  variant)
+    if (capacity) formData.append('capacity', capacity)
+    if (file)     formData.append('pptx_file', file)
+
+    const r = await fetch('/api/ppt-menus/' + menuId + '/templates', { method: 'POST', body: formData })
     const j = await r.json()
-    showAlert(j.ok ? '✅ 템플릿 추가 완료' : '❌ ' + j.error, j.ok)
-    if (j.ok) selectMenu(menuId)
+    if (j.ok) {
+      showAlert('✅ 템플릿 추가 완료' + (j.file_name ? ' — ' + j.file_name : ''), true)
+      // 폼 초기화
+      document.getElementById('newTplName').value = ''
+      document.getElementById('newTplVariant').value = 'DEFAULT'
+      document.getElementById('newTplCapacity').value = ''
+      if (fileEl) fileEl.value = ''
+      const label = document.getElementById('tplFileLabel')
+      if (label) { label.textContent = '클릭하거나 파일을 여기에 끌어다 놓으세요 (.pptx)'; label.classList.remove('text-amber-700','font-semibold') }
+      selectMenu(menuId)
+    } else {
+      showAlert('❌ ' + j.error, false)
+    }
   }
 
   // ── 템플릿 삭제 ────────────────────────────────────────────────
@@ -2422,6 +2473,33 @@ app.get('/ppt-templates', async (c) => {
       tipEl.classList.add('hidden')
       _activeTipKey = null
     }
+  })
+
+  // ── 드래그앤드롭 파일 업로드 ──────────────────────────────────
+  document.addEventListener('dragover', function(e) {
+    const zone = e.target.closest('#tplFileDropZone')
+    if (zone) { e.preventDefault(); zone.classList.add('border-amber-500','bg-amber-100') }
+  })
+  document.addEventListener('dragleave', function(e) {
+    const zone = e.target.closest('#tplFileDropZone')
+    if (zone) { zone.classList.remove('border-amber-500','bg-amber-100') }
+  })
+  document.addEventListener('drop', function(e) {
+    const zone = e.target.closest('#tplFileDropZone')
+    if (!zone) return
+    e.preventDefault()
+    zone.classList.remove('border-amber-500','bg-amber-100')
+    const files = e.dataTransfer && e.dataTransfer.files
+    if (!files || !files.length) return
+    const fileEl = document.getElementById('newTplFile')
+    if (!fileEl) return
+    // DataTransfer로 파일 세팅
+    try {
+      const dt = new DataTransfer()
+      dt.items.add(files[0])
+      fileEl.files = dt.files
+      onTplFileChange(fileEl)
+    } catch (_) {}
   })
 
   // ── 초기 로드 ─────────────────────────────────────────────────
