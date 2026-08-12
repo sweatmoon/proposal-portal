@@ -56,27 +56,28 @@ serve({ fetch: app.fetch, port })
 
 // ── 앱 시작 후 자동 마이그레이션 (ppt_master_templates 테이블 보장) ──
 ;(async () => {
-  try {
-    await query(`
-      CREATE TABLE IF NOT EXISTS ppt_master_templates (
-        id           SERIAL PRIMARY KEY,
-        name         TEXT NOT NULL,
-        description  TEXT,
-        pptx_b64     TEXT NOT NULL,
-        layouts      JSONB NOT NULL DEFAULT '[]',
-        is_active    INTEGER NOT NULL DEFAULT 0,
-        created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-        updated_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
-      )
-    `)
-    await query(`ALTER TABLE ppt_master_templates ADD COLUMN IF NOT EXISTS layouts JSONB NOT NULL DEFAULT '[]'`)
-    await query(`ALTER TABLE ppt_generation_rules ADD COLUMN IF NOT EXISTS target_layout_name TEXT`)
-    await query(`CREATE INDEX IF NOT EXISTS idx_ppt_masters_active ON ppt_master_templates(is_active DESC, created_at DESC)`)
-    console.log('✅ auto-migrate: ppt_master_templates 준비 완료')
-  } catch (e) {
-    // ppt_menus 등 다른 테이블이 없으면 무시 (최초 배포 전)
-    console.warn('⚠️  auto-migrate 스킵 (테이블 미존재):', (e as Error).message?.slice(0, 80))
+  // 각 쿼리를 독립 try-catch — 일부 테이블이 없어도 나머지 계속 진행
+  const safeExec = async (sql: string, label: string) => {
+    try { await query(sql) }
+    catch (e) { console.warn(`⚠️  auto-migrate [${label}] 스킵:`, (e as Error).message?.slice(0, 100)) }
   }
+
+  await safeExec(`
+    CREATE TABLE IF NOT EXISTS ppt_master_templates (
+      id           SERIAL PRIMARY KEY,
+      name         TEXT NOT NULL,
+      description  TEXT,
+      pptx_b64     TEXT NOT NULL,
+      layouts      JSONB NOT NULL DEFAULT '[]',
+      is_active    INTEGER NOT NULL DEFAULT 0,
+      created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `, 'create ppt_master_templates')
+  await safeExec(`ALTER TABLE ppt_master_templates ADD COLUMN IF NOT EXISTS layouts JSONB NOT NULL DEFAULT '[]'`, 'add layouts col')
+  await safeExec(`CREATE INDEX IF NOT EXISTS idx_ppt_masters_active ON ppt_master_templates(is_active DESC, created_at DESC)`, 'idx masters')
+  await safeExec(`ALTER TABLE ppt_generation_rules ADD COLUMN IF NOT EXISTS target_layout_name TEXT`, 'add target_layout_name col')
+  console.log('✅ auto-migrate 완료')
 })()
 
 export default app

@@ -921,18 +921,21 @@ app.put('/:id/rule', async (c) => {
     const {
       generation_mode, template_strategy, calculator_code, renderer_code,
       pagination_mode, postprocess_mode, merge_strategy, rule_config,
+      target_layout_name,
     } = body
     await exec(`
       INSERT INTO ppt_generation_rules
         (menu_id, generation_mode, template_strategy, calculator_code, renderer_code,
-         pagination_mode, postprocess_mode, merge_strategy, rule_config)
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+         pagination_mode, postprocess_mode, merge_strategy, rule_config, target_layout_name)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
       ON CONFLICT (menu_id) DO UPDATE
         SET generation_mode=$2, template_strategy=$3, calculator_code=$4, renderer_code=$5,
-            pagination_mode=$6, postprocess_mode=$7, merge_strategy=$8, rule_config=$9, updated_at=NOW()
+            pagination_mode=$6, postprocess_mode=$7, merge_strategy=$8, rule_config=$9,
+            target_layout_name=$10, updated_at=NOW()
     `, [id, generation_mode, template_strategy, calculator_code, renderer_code,
         pagination_mode, postprocess_mode, merge_strategy,
-        typeof rule_config === 'object' ? JSON.stringify(rule_config) : rule_config])
+        typeof rule_config === 'object' ? JSON.stringify(rule_config) : rule_config,
+        target_layout_name ?? null])
     return c.json({ ok: true })
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : String(e)
