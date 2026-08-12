@@ -416,27 +416,36 @@ async function _mergeForeign({ baseZip, srcZip, srcPresXml, srcPresRels, counter
   // slideLayout → slideMaster → theme 체인 복사
   // ── 공통: .rels XML에서 media 파일 복사 ──────────────────────
   async function copyMediaFromRels(relsXml, basePath) {
-    if (!relsXml) return;
+    if (!relsXml) return relsXml;
+    let updatedRelsXml = relsXml;
     const mediaMatches = [...relsXml.matchAll(/Target="([^"]*media\/[^"]+)"/g)];
     for (const mm of mediaMatches) {
-      let origRelTarget = mm[1];
-      let target = origRelTarget;
-      // 상대경로 → 절대경로 변환
-      if (!target.startsWith('ppt/')) {
+      const origRelTarget = mm[1];
+      let absTarget = origRelTarget;
+      // 상대경로 → 절대경로(ppt/media/xxx) 변환
+      if (!absTarget.startsWith('ppt/')) {
         const baseDir = basePath.replace(/[^/]+$/, '');
-        target = (baseDir + target).replace(/\/[^/]+\/\.\.\//g, '/').replace(/^\//, '');
-        if (!target.startsWith('ppt/')) target = 'ppt/' + target;
+        absTarget = (baseDir + absTarget).replace(/\/[^/]+\/\.\.\//g, '/').replace(/^\//, '');
+        if (!absTarget.startsWith('ppt/')) absTarget = 'ppt/' + absTarget;
       }
-      if (foreignPathMap['media:' + target]) continue;
 
-      const bytes = await getFileBytes(target);
+      if (foreignPathMap[absTarget]) {
+        // 이미 처리된 파일 → rels 내 참조를 실제 저장 경로로 교체
+        const destPath = foreignPathMap[absTarget];
+        if (destPath !== absTarget) {
+          updatedRelsXml = updatedRelsXml.split(origRelTarget).join('../' + destPath.replace(/^ppt\//, ''));
+        }
+        continue;
+      }
+
+      const bytes = await getFileBytes(absTarget);
       if (!bytes) continue;
 
-      const existing = baseZip.file(target);
-      let destPath = target;
+      const existing = baseZip.file(absTarget);
+      let destPath = absTarget;
       if (existing) {
         // 충돌: 새 이름 생성
-        const mediaFile = target.split('/').pop();
+        const mediaFile = absTarget.split('/').pop();
         const dotIdx    = mediaFile.lastIndexOf('.');
         const base      = dotIdx >= 0 ? mediaFile.slice(0, dotIdx) : mediaFile;
         const ext       = dotIdx >= 0 ? mediaFile.slice(dotIdx)    : '';
@@ -445,8 +454,14 @@ async function _mergeForeign({ baseZip, srcZip, srcPresXml, srcPresRels, counter
         destPath = `ppt/media/${base}_f${idx}${ext}`;
       }
       baseZip.file(destPath, bytes);
-      foreignPathMap['media:' + target] = destPath;
+      foreignPathMap[absTarget] = destPath;
+
+      // 충돌로 이름이 바뀐 경우 rels 내 참조 교체
+      if (destPath !== absTarget) {
+        updatedRelsXml = updatedRelsXml.split(origRelTarget).join('../' + destPath.replace(/^ppt\//, ''));
+      }
     }
+    return updatedRelsXml;
   }
 
   async function ensureMaster(origMasterPath) {
@@ -487,8 +502,8 @@ async function _mergeForeign({ baseZip, srcZip, srcPresXml, srcPresRels, counter
       }
     }
 
-    // master .rels에서 미디어 복사 (배경 이미지, 로고 등)
-    await copyMediaFromRels(newMasterRels, origMasterPath);
+    // master .rels에서 미디어 복사 (배경 이미지, 로고 등) — 참조 교체된 rels 사용
+    newMasterRels = await copyMediaFromRels(newMasterRels, origMasterPath);
 
     baseZip.file(newMasterPath, masterXml);
     baseZip.file(newMasterPath.replace(/([^/]+)$/, '_rels/$1.rels').replace('ppt/', 'ppt/'), newMasterRels);
@@ -522,8 +537,8 @@ async function _mergeForeign({ baseZip, srcZip, srcPresXml, srcPresRels, counter
         `Target="../slideMasters/${masterInfo.newMasterName}"`);
     }
 
-    // layout .rels에서 미디어 복사 (배경 이미지 등)
-    if (layoutRelsXml) await copyMediaFromRels(layoutRelsXml, origLayoutPath);
+    // layout .rels에서 미디어 복사 (배경 이미지 등) — 참조 교체된 rels 사용
+    if (layoutRelsXml) layoutRelsXml = await copyMediaFromRels(layoutRelsXml, origLayoutPath);
 
     baseZip.file(newLayoutPath, layoutXml);
     if (layoutRelsXml) baseZip.file(`ppt/slideLayouts/_rels/${newLayoutName}.rels`, layoutRelsXml);
@@ -597,48 +612,10 @@ async function _mergeForeign({ baseZip, srcZip, srcPresXml, srcPresRels, counter
       }
     }
 
-    // 미디어 파일 복사 — 충돌 시 새 이름으로 저장 + rels 내 참조 교체
-    const mediaMatches = [...slideRelsXml.matchAll(/Target="([^"]*media\/[^"]+)"/g)];
-    for (const mm of mediaMatches) {
-      const origRelTarget = mm[1];                          // e.g. "../media/image3.png"
-      const mediaFile     = origRelTarget.split('/').pop(); // e.g. "image3.png"
-      const srcMediaPath  = `ppt/media/${mediaFile}`;
-
-      if (foreignPathMap[srcMediaPath]) {
-        // 이미 처리된 파일 → 저장된 실제 경로로 rels 교체
-        const actualPath   = foreignPathMap[srcMediaPath];  // e.g. "ppt/media/image3.png" or renamed
-        const relTarget    = '../' + actualPath.replace(/^ppt\//, '');
-        if (relTarget !== origRelTarget) {
-          slideRelsXml = slideRelsXml.split(origRelTarget).join(relTarget);
-        }
-        continue;
-      }
-
-      const mediaBytes = await getFileBytes(srcMediaPath);
-      if (!mediaBytes) continue;
-
-      const existing = baseZip.file(srcMediaPath);
-      let destPath = srcMediaPath;
-
-      if (existing) {
-        // 충돌: 새 이름 생성 (e.g. image3.png → image3_f1.png)
-        const dotIdx  = mediaFile.lastIndexOf('.');
-        const base    = dotIdx >= 0 ? mediaFile.slice(0, dotIdx) : mediaFile;
-        const ext     = dotIdx >= 0 ? mediaFile.slice(dotIdx)    : '';
-        let   idx     = 1;
-        while (baseZip.file(`ppt/media/${base}_f${idx}${ext}`)) idx++;
-        destPath = `ppt/media/${base}_f${idx}${ext}`;
-      }
-
-      baseZip.file(destPath, mediaBytes);
-      foreignPathMap[srcMediaPath] = destPath;
-
-      // slideRelsXml 내 참조 교체 (새 이름이면)
-      if (destPath !== srcMediaPath) {
-        const newRelTarget = '../' + destPath.replace(/^ppt\//, '');
-        slideRelsXml = slideRelsXml.split(origRelTarget).join(newRelTarget);
-      }
-    }
+    // 미디어 파일 복사 — copyMediaFromRels로 통합 처리
+    // (마스터/레이아웃에서 이미 처리된 파일도 동일 foreignPathMap 키로 중복 방지)
+    // basePath를 'ppt/slides/_dummy'로 하면 '../media/xxx' → 'ppt/media/xxx' 로 올바르게 변환됨
+    slideRelsXml = await copyMediaFromRels(slideRelsXml, 'ppt/slides/_dummy');
 
     const newName = `slideF${++sc}.xml`;
     baseZip.file(`ppt/slides/${newName}`, slideXml);
