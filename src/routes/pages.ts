@@ -2373,35 +2373,76 @@ app.get('/ppt-templates', async (c) => {
     }
   }
 
-  // ── 전체 목차 스냅샷 적용 ────────────────────────────────────
+  // ── 전체 목차 스냅샷 적용 (완전 덮어쓰기) ───────────────────
   async function applyPreset(idx) {
     const list = loadPresets()
     const preset = list[idx]
     if (!preset) { alert('프리셋을 찾을 수 없습니다'); return }
-    if (!confirm('"' + preset.name + '" 프리셋을 적용하시겠습니까? ' + preset.menuCount + '개 메뉴의 규칙이 일괄 변경됩니다.')) return
+    if (!confirm('"' + preset.name + '" 프리셋을 적용하시겠습니까?\\n\\n· 스냅샷의 ' + preset.menuCount + '개 메뉴로 완전히 덮어씁니다\\n· 이후 추가된 메뉴는 삭제됩니다\\n· 이 작업은 되돌릴 수 없습니다')) return
 
     closePresetModal()
-    showAlert('⏳ 프리셋 적용 중... (' + preset.menuCount + '개 메뉴)', true)
+    showAlert('⏳ 프리셋 복원 중...', true)
 
-    let ok = 0, skip = 0, fail = 0
-    for (const item of preset.snapshot) {
-      try {
-        const r = await fetch('/api/ppt-menus/' + item.menu_id + '/rule', {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(item.rule)
-        })
-        if (r.status === 404) { skip++; continue }   // 삭제된 메뉴 → 조용히 스킵
-        const j = await r.json()
-        if (j.ok) ok++; else fail++
-      } catch(_) { fail++ }
+    try {
+      // 1) 현재 전체 메뉴 id 목록 조회
+      const curR = await fetch('/api/ppt-menus')
+      const curJ = await curR.json()
+      const curIds = new Set()
+      function collectIds(nodes) {
+        nodes.forEach(n => { curIds.add(n.id); if (n.children) collectIds(n.children) })
+      }
+      collectIds(curJ.data || [])
+
+      const snapIds = new Set(preset.snapshot.map(item => item.menu_id))
+
+      // 2) 스냅샷에 없는 메뉴 삭제 (이후 추가된 것)
+      const toDelete = [...curIds].filter(id => !snapIds.has(id))
+      for (const id of toDelete) {
+        await fetch('/api/ppt-menus/' + id, { method: 'DELETE' })
+      }
+
+      // 3) 스냅샷 메뉴 전체 upsert (부모→자식 순서 보장: parent_id=null 먼저)
+      const sorted = [...preset.snapshot].sort((a, b) => {
+        if (!a.parent_id && b.parent_id) return -1
+        if (a.parent_id && !b.parent_id) return 1
+        return 0
+      })
+      let ok = 0, fail = 0
+      for (const item of sorted) {
+        try {
+          const r = await fetch('/api/ppt-menus/restore', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              id:          item.menu_id,
+              parent_id:   item.parent_id ?? null,
+              menu_code:   item.menu_code,
+              menu_name:   item.menu_name,
+              menu_number: item.menu_number ?? null,
+              sort_order:  item.sort_order ?? 0,
+              is_enabled:  item.is_enabled ?? 1,
+              rule:        item.rule ?? null,
+            })
+          })
+          const j = await r.json()
+          if (j.ok) ok++; else fail++
+        } catch(_) { fail++ }
+      }
+
+      await loadTree()
+      if (_selectedMenuId && snapIds.has(_selectedMenuId)) {
+        selectMenu(_selectedMenuId)
+      } else {
+        _selectedMenuId = null
+      }
+
+      const deleted = toDelete.length
+      const delNote = deleted ? ', 불필요 메뉴 ' + deleted + '개 삭제' : ''
+      const failNote = fail ? ' (실패 ' + fail + '개)' : ''
+      showAlert('✅ 프리셋 "' + preset.name + '" 복원 완료 — ' + ok + '개 복원' + delNote + failNote, fail === 0)
+    } catch(e) {
+      showAlert('❌ 복원 중 오류: ' + e.message, false)
     }
-
-    await loadTree()
-    if (_selectedMenuId) selectMenu(_selectedMenuId)
-    const skipNote = skip ? ' (삭제된 메뉴 ' + skip + '개 건너뜀)' : ''
-    const failNote = fail ? ', ' + fail + '개 실패' : ''
-    showAlert('✅ 프리셋 "' + preset.name + '" 적용 완료 — ' + ok + '개 성공' + failNote + skipNote, ok > 0)
   }
 
   function deletePreset(idx) {
