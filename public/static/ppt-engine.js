@@ -150,10 +150,33 @@ async function mergePresentationZips(parts) {
   let newRels = '', newIds = '', newCt = '';
   let sc = 0;
 
-  for (let i = 1; i < usable.length; i++) {
+  // MASTER_ONLY 전략: parts[0]이 마스터 전용 PPTX일 때
+  // → 슬라이드는 복사하지 않고, 나머지 parts[1..]를 FOREIGN_TEMPLATE으로 병합
+  // → 모든 콘텐츠 슬라이드가 baseZip(마스터 PPTX)의 slideMaster를 참조하게 됨
+  const isMasterOnly = usable[0].mergeStrategy === 'MASTER_ONLY';
+  const startIdx = 1; // 항상 1부터 시작 (baseZip은 마스터 소스 역할)
+
+  // MASTER_ONLY: baseZip(마스터 PPTX)에서 기존 슬라이드 참조를 제거
+  // (마스터/테마/레이아웃만 남기고 빈 슬라이드 덱으로 시작)
+  if (isMasterOnly) {
+    // presentation.xml에서 sldIdLst 비우기
+    presXml = presXml.replace(/<p:sldIdLst>[\s\S]*?<\/p:sldIdLst>/, '<p:sldIdLst></p:sldIdLst>');
+    // presentation.xml.rels에서 슬라이드 rel 제거 (slideMaster는 유지)
+    presRelsXml = presRelsXml.replace(/<Relationship\b[^>]*Type="[^"]*\/slide"[^>]*\/>/g, '');
+    // 슬라이드 파일은 baseZip에 남아있어도 참조 없으면 무시됨
+    maxSldId = 255;
+    maxRid = 0; presRelsXml.replace(/Id="rId(\d+)"/g, (_, n) => { maxRid = Math.max(maxRid, +n); return _; });
+    // masterIdx: baseZip의 마스터를 재활용하므로 높은 번호에서 시작
+    masterIdx = 0; themeIdx = 0; layoutIdx = 0;
+    console.log('[PptEngine] MASTER_ONLY 모드 — 마스터 PPTX를 baseZip으로 사용');
+  }
+
+  for (let i = startIdx; i < usable.length; i++) {
     const part      = usable[i];
     const srcZip    = part.zip;
-    const isForeign = (part.mergeStrategy === 'FOREIGN_TEMPLATE');
+    // 마스터 PPTX가 있으면 모든 파트를 FOREIGN_TEMPLATE으로 처리하여
+    // baseZip의 slideMaster를 재사용하게 함
+    const isForeign = isMasterOnly || (part.mergeStrategy === 'FOREIGN_TEMPLATE');
 
     const srcPresRels = await srcZip.file('ppt/_rels/presentation.xml.rels').async('string');
 
@@ -561,6 +584,9 @@ async function generateMenuPpt(menu, vm) {
  * 활성화된 메뉴를 sort_order 순으로 순회하며 각 PPT를 생성하고
  * mergePresentationZips()로 하나의 최종 PPTX를 합본한다.
  *
+ * 마스터 템플릿이 활성화되어 있으면 해당 PPTX를 parts[0]에 삽입하여
+ * 모든 슬라이드가 동일한 slideMaster/Theme/Layout을 참조하게 한다.
+ *
  * @param {object} vm - ProjectViewModel
  * @returns {Promise<JSZip>} 최종 합본 JSZip 객체
  */
@@ -573,7 +599,25 @@ async function generateProposalPpt(vm) {
 
   if (!enabledMenus.length) throw new Error('활성화된 메뉴가 없습니다.');
 
-  // 2. 각 메뉴 PPT 생성
+  // 2. 마스터 템플릿 로드 (활성화된 것이 있으면)
+  let masterPart = null;
+  try {
+    const mr = await fetch('/api/ppt-menus/master-templates/active');
+    const mj = await mr.json();
+    if (mj.ok && mj.data?.pptx_b64) {
+      const b64  = mj.data.pptx_b64;
+      const bin  = atob(b64);
+      const bytes = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+      const zip = await JSZip.loadAsync(bytes);
+      masterPart = { zip, mergeStrategy: 'MASTER_ONLY', name: mj.data.name };
+      console.log('[PptEngine] 마스터 템플릿 로드:', mj.data.name);
+    }
+  } catch (e) {
+    console.warn('[PptEngine] 마스터 템플릿 로드 실패 (무시):', e.message);
+  }
+
+  // 3. 각 메뉴 PPT 생성
   showAutoAlert('⏳ PPT 생성 중... 완료될 때까지 잠시 기다려주세요.', false);
 
   const parts = [];
@@ -594,7 +638,12 @@ async function generateProposalPpt(vm) {
 
   if (!parts.length) throw new Error('생성할 슬라이드가 없습니다.');
 
-  // 3. 합본
+  // 4. 합본
+  // 마스터 템플릿이 있으면 맨 앞에 삽입 → baseZip으로 사용
+  // MASTER_ONLY 전략: 슬라이드는 0장이지만 master/theme/layout 체인을 제공
+  if (masterPart) {
+    parts.unshift(masterPart);
+  }
   return mergePresentationZips(parts);
 }
 

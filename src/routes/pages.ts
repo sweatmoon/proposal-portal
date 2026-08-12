@@ -1700,6 +1700,9 @@ app.get('/ppt-templates', async (c) => {
         <button onclick="openAddMenu()" class="px-3 py-1.5 text-xs rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white transition">
           <i class="fas fa-plus mr-1"></i>메뉴 추가
         </button>
+        <button onclick="openMasterModal()" class="px-3 py-1.5 text-xs rounded-lg bg-violet-600 hover:bg-violet-700 text-white transition">
+          <i class="fas fa-layer-group mr-1"></i>마스터 템플릿
+        </button>
         <button onclick="openPresetModal()" class="px-3 py-1.5 text-xs rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white transition">
           <i class="fas fa-bookmark mr-1"></i>프리셋
         </button>
@@ -1734,6 +1737,56 @@ app.get('/ppt-templates', async (c) => {
         </div>
       </div>
 
+    </div>
+
+    <!-- 마스터 템플릿 모달 -->
+    <div id="masterModal" class="hidden fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
+      <div class="bg-white rounded-2xl shadow-xl w-full max-w-lg">
+        <div class="px-6 py-4 border-b border-slate-200 flex items-center justify-between">
+          <h3 class="font-bold text-slate-800"><i class="fas fa-layer-group mr-2 text-violet-500"></i>마스터 템플릿 관리</h3>
+          <button onclick="closeMasterModal()" class="text-slate-400 hover:text-slate-700"><i class="fas fa-times"></i></button>
+        </div>
+        <div class="px-6 py-4 space-y-4">
+          <!-- 설명 -->
+          <p class="text-xs text-slate-500 leading-relaxed bg-violet-50 border border-violet-200 rounded-lg p-3">
+            <i class="fas fa-info-circle mr-1 text-violet-400"></i>
+            마스터 템플릿을 업로드하면 자동화 PPT 생성 시 해당 마스터의 <strong>슬라이드 마스터 / 테마 / 레이아웃</strong>이 모든 슬라이드에 적용됩니다.
+          </p>
+          <!-- 업로드 폼 -->
+          <div class="border border-slate-200 rounded-xl p-4 space-y-3">
+            <div class="text-xs font-semibold text-slate-700 mb-1"><i class="fas fa-upload mr-1 text-violet-400"></i>새 마스터 업로드</div>
+            <div>
+              <label class="text-xs text-slate-500 mb-1 block">이름 <span class="text-red-500">*</span></label>
+              <input id="masterNameInput" type="text" placeholder="예: 2024 표준 마스터" class="w-full border border-slate-300 rounded-lg px-3 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-violet-300">
+            </div>
+            <div>
+              <label class="text-xs text-slate-500 mb-1 block">설명 (선택)</label>
+              <input id="masterDescInput" type="text" placeholder="예: 파란색 헤더 + 회사 로고" class="w-full border border-slate-300 rounded-lg px-3 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-violet-300">
+            </div>
+            <div>
+              <label class="text-xs text-slate-500 mb-1 block">PPTX 파일 <span class="text-red-500">*</span></label>
+              <input id="masterFileInput" type="file" accept=".pptx" class="w-full text-xs text-slate-500 file:mr-2 file:py-1 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-medium file:bg-violet-50 file:text-violet-700 hover:file:bg-violet-100">
+            </div>
+            <div class="flex items-center gap-2">
+              <input id="masterSetActive" type="checkbox" checked class="w-4 h-4 accent-violet-600">
+              <label class="text-xs text-slate-600">업로드 후 바로 활성화</label>
+            </div>
+            <button onclick="uploadMasterTemplate()" class="w-full py-1.5 text-xs rounded-lg bg-violet-600 text-white hover:bg-violet-700 font-medium">
+              <i class="fas fa-cloud-upload-alt mr-1"></i>업로드
+            </button>
+          </div>
+          <!-- 저장된 마스터 목록 -->
+          <div>
+            <div class="text-xs font-semibold text-slate-700 mb-2"><i class="fas fa-list mr-1"></i>저장된 마스터 템플릿</div>
+            <div id="masterList" class="space-y-1 max-h-48 overflow-y-auto">
+              <div class="text-center text-slate-400 text-xs py-3">로딩 중...</div>
+            </div>
+          </div>
+        </div>
+        <div class="px-6 py-3 border-t border-slate-100 text-right">
+          <button onclick="closeMasterModal()" class="px-4 py-1.5 text-xs rounded-lg border border-slate-300 text-slate-600 hover:bg-slate-50">닫기</button>
+        </div>
+      </div>
     </div>
 
     <!-- 프리셋 저장/불러오기 모달 -->
@@ -2284,6 +2337,90 @@ app.get('/ppt-templates', async (c) => {
         '<div class="flex items-center justify-center h-full text-slate-400"><div class="text-center"><i class="fas fa-mouse-pointer text-4xl mb-3 opacity-30"></i><p class="text-sm">왼쪽 트리에서 메뉴를 선택하세요</p></div></div>'
       loadTree()
     }
+  }
+
+  // ── 마스터 템플릿 관리 ───────────────────────────────────────
+  async function openMasterModal() {
+    document.getElementById('masterModal').classList.remove('hidden')
+    await loadMasterList()
+  }
+  function closeMasterModal() {
+    document.getElementById('masterModal').classList.add('hidden')
+  }
+
+  async function loadMasterList() {
+    const el = document.getElementById('masterList')
+    el.innerHTML = '<div class="text-center text-slate-400 text-xs py-3"><i class="fas fa-spinner fa-spin mr-1"></i>로딩 중...</div>'
+    try {
+      const r = await fetch('/api/ppt-menus/master-templates')
+      const j = await r.json()
+      if (!j.ok) throw new Error(j.error)
+      if (!j.data.length) {
+        el.innerHTML = '<div class="text-center text-slate-400 text-xs py-3">저장된 마스터 템플릿이 없습니다</div>'
+        return
+      }
+      el.innerHTML = j.data.map(m => \`
+        <div data-master-id="\${m.id}" class="flex items-center gap-2 px-3 py-2 rounded-lg border \${m.is_active ? 'border-violet-400 bg-violet-50' : 'border-slate-200 bg-white'} text-xs">
+          <span class="flex-1 font-medium text-slate-700 truncate" title="\${m.name}">\${m.name}\${m.description ? ' <span class=\\"text-slate-400\\">' + m.description + '</span>' : ''}</span>
+          \${m.is_active
+            ? '<span class="px-2 py-0.5 rounded-full bg-violet-600 text-white text-xs font-bold">활성</span>'
+            : '<button onclick="activateMaster(' + m.id + ')" class="px-2 py-0.5 rounded-full border border-violet-400 text-violet-600 hover:bg-violet-50 text-xs">활성화</button>'
+          }
+          <button onclick="deleteMaster(\${m.id})" class="text-red-400 hover:text-red-600 ml-1"><i class="fas fa-trash-alt"></i></button>
+        </div>
+      \`).join('')
+    } catch (e) {
+      el.innerHTML = '<div class="text-red-400 text-xs text-center py-2">로드 실패: ' + e.message + '</div>'
+    }
+  }
+
+  async function uploadMasterTemplate() {
+    const name = document.getElementById('masterNameInput').value.trim()
+    const desc = document.getElementById('masterDescInput').value.trim()
+    const fileInput = document.getElementById('masterFileInput')
+    const setActive = document.getElementById('masterSetActive').checked
+    if (!name) { alert('이름을 입력하세요'); return }
+    if (!fileInput.files?.length) { alert('PPTX 파일을 선택하세요'); return }
+
+    const fd = new FormData()
+    fd.append('file', fileInput.files[0])
+    fd.append('name', name)
+    fd.append('description', desc)
+    fd.append('set_active', setActive ? '1' : '0')
+
+    const btn = event.target
+    btn.disabled = true; btn.textContent = '업로드 중...'
+    try {
+      const r = await fetch('/api/ppt-menus/master-templates', { method: 'POST', body: fd })
+      const j = await r.json()
+      if (!j.ok) throw new Error(j.error)
+      showAlert('✅ 마스터 템플릿 "' + name + '" 업로드 완료', true)
+      document.getElementById('masterNameInput').value = ''
+      document.getElementById('masterDescInput').value = ''
+      fileInput.value = ''
+      await loadMasterList()
+    } catch (e) {
+      showAlert('❌ 업로드 실패: ' + e.message, false)
+    } finally {
+      btn.disabled = false; btn.innerHTML = '<i class="fas fa-cloud-upload-alt mr-1"></i>업로드'
+    }
+  }
+
+  async function activateMaster(id) {
+    const r = await fetch('/api/ppt-menus/master-templates/' + id + '/activate', { method: 'PUT' })
+    const j = await r.json()
+    if (j.ok) { showAlert('✅ 마스터 템플릿이 활성화되었습니다', true); await loadMasterList() }
+    else showAlert('❌ 활성화 실패: ' + j.error, false)
+  }
+
+  async function deleteMaster(id) {
+    const row = document.querySelector('[data-master-id="' + id + '"]')
+    const name = row?.querySelector('.font-medium')?.textContent?.trim() || '이 마스터'
+    if (!confirm('"' + name + '"을 삭제하시겠습니까?')) return
+    const r = await fetch('/api/ppt-menus/master-templates/' + id, { method: 'DELETE' })
+    const j = await r.json()
+    if (j.ok) { showAlert('✅ 삭제 완료', true); await loadMasterList() }
+    else showAlert('❌ 삭제 실패: ' + j.error, false)
   }
 
   // ── 프리셋 저장/불러오기 (DB 기반) ──────────────────────────

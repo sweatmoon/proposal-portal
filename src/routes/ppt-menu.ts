@@ -170,7 +170,21 @@ app.post('/migrate', async (c) => {
     `)
     await exec(`CREATE INDEX IF NOT EXISTS idx_ppt_presets_created ON ppt_presets(created_at DESC)`)
 
-    return c.json({ ok: true, message: 'PPT 테이블 마이그레이션 완료 (7개 테이블)' })
+    // 8. ppt_master_templates (전체 PPT에 적용할 마스터 디자인 템플릿)
+    await exec(`
+      CREATE TABLE IF NOT EXISTS ppt_master_templates (
+        id           SERIAL PRIMARY KEY,
+        name         TEXT NOT NULL,
+        description  TEXT,
+        pptx_b64     TEXT NOT NULL,
+        is_active    INTEGER NOT NULL DEFAULT 0,
+        created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `)
+    await exec(`CREATE INDEX IF NOT EXISTS idx_ppt_masters_active ON ppt_master_templates(is_active DESC, created_at DESC)`)
+
+    return c.json({ ok: true, message: 'PPT 테이블 마이그레이션 완료 (8개 테이블)' })
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : String(e)
     return c.json({ ok: false, error: msg }, 500)
@@ -1114,6 +1128,104 @@ app.delete('/presets/:id', async (c) => {
   try {
     const id = Number(c.req.param('id'))
     await exec(`DELETE FROM ppt_presets WHERE id=$1`, [id])
+    return c.json({ ok: true })
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : String(e)
+    return c.json({ ok: false, error: msg }, 500)
+  }
+})
+
+// ═══════════════════════════════════════════════════════════════════
+// [9] 마스터 템플릿 CRUD
+//     GET    /api/ppt-menus/master-templates         — 목록 (pptx_b64 제외)
+//     GET    /api/ppt-menus/master-templates/active  — 활성 마스터 단건 (pptx_b64 포함)
+//     POST   /api/ppt-menus/master-templates         — 업로드 (multipart/form-data)
+//     PUT    /api/ppt-menus/master-templates/:id/activate — 활성 마스터 변경
+//     DELETE /api/ppt-menus/master-templates/:id     — 삭제
+// ═══════════════════════════════════════════════════════════════════
+
+/** GET /api/ppt-menus/master-templates — 목록 (pptx_b64 제외, 용량 절약) */
+app.get('/master-templates', async (c) => {
+  try {
+    const rows = await query(`
+      SELECT id, name, description, is_active, created_at
+      FROM ppt_master_templates
+      ORDER BY is_active DESC, created_at DESC
+    `)
+    return c.json({ ok: true, data: rows })
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : String(e)
+    return c.json({ ok: false, error: msg }, 500)
+  }
+})
+
+/** GET /api/ppt-menus/master-templates/active — 현재 활성 마스터 (pptx_b64 포함) */
+app.get('/master-templates/active', async (c) => {
+  try {
+    const row = await queryOne(`
+      SELECT id, name, description, pptx_b64, is_active, created_at
+      FROM ppt_master_templates
+      WHERE is_active = 1
+      ORDER BY created_at DESC LIMIT 1
+    `)
+    return c.json({ ok: true, data: row ?? null })
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : String(e)
+    return c.json({ ok: false, error: msg }, 500)
+  }
+})
+
+/** POST /api/ppt-menus/master-templates — 업로드 */
+app.post('/master-templates', async (c) => {
+  try {
+    const formData = await c.req.formData()
+    const file = formData.get('file') as File | null
+    const name = (formData.get('name') as string | null)?.trim() || ''
+    const description = (formData.get('description') as string | null)?.trim() || ''
+    const setActive = formData.get('set_active') === '1' || formData.get('set_active') === 'true'
+
+    if (!file || !name) return c.json({ ok: false, error: 'file, name 필수' }, 400)
+
+    // 파일 → base64
+    const buf = await file.arrayBuffer()
+    const b64 = Buffer.from(buf).toString('base64')
+
+    // 활성으로 설정 시 기존 활성 해제
+    if (setActive) {
+      await exec(`UPDATE ppt_master_templates SET is_active = 0, updated_at = NOW()`)
+    }
+
+    const row = await queryOne<{ id: number }>(`
+      INSERT INTO ppt_master_templates (name, description, pptx_b64, is_active)
+      VALUES ($1, $2, $3, $4) RETURNING id
+    `, [name, description, b64, setActive ? 1 : 0])
+
+    return c.json({ ok: true, id: row?.id })
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : String(e)
+    return c.json({ ok: false, error: msg }, 400)
+  }
+})
+
+/** PUT /api/ppt-menus/master-templates/:id/activate — 활성 마스터 변경 */
+app.put('/master-templates/:id/activate', async (c) => {
+  try {
+    const id = Number(c.req.param('id'))
+    // 전체 비활성화 후 선택된 것만 활성화
+    await exec(`UPDATE ppt_master_templates SET is_active = 0, updated_at = NOW()`)
+    await exec(`UPDATE ppt_master_templates SET is_active = 1, updated_at = NOW() WHERE id = $1`, [id])
+    return c.json({ ok: true })
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : String(e)
+    return c.json({ ok: false, error: msg }, 500)
+  }
+})
+
+/** DELETE /api/ppt-menus/master-templates/:id — 삭제 */
+app.delete('/master-templates/:id', async (c) => {
+  try {
+    const id = Number(c.req.param('id'))
+    await exec(`DELETE FROM ppt_master_templates WHERE id = $1`, [id])
     return c.json({ ok: true })
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : String(e)
