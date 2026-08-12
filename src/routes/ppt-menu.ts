@@ -26,6 +26,7 @@
 
 import { Hono } from 'hono'
 import { query, queryOne } from '../db/client.js'
+import { inflateRawSync } from 'zlib'
 
 const app = new Hono()
 
@@ -34,6 +35,63 @@ const app = new Hono()
 // ─────────────────────────────────────────────────
 async function exec(sql: string, params: unknown[] = []) {
   return query(sql, params)
+}
+
+/**
+ * PPTX(ZIP) 버퍼에서 slideLayout XML을 파싱하여 레이아웃 이름 배열 반환
+ * 추가 npm 패키지 없이 Node.js 내장 zlib만 사용
+ */
+function extractLayoutNamesFromPptx(buf: Buffer): string[] {
+  const names: string[] = []
+  try {
+    // ZIP 파일 끝에서 End-of-Central-Directory 레코드 탐색
+    let eocdOffset = -1
+    for (let i = buf.length - 22; i >= 0; i--) {
+      if (buf.readUInt32LE(i) === 0x06054b50) { eocdOffset = i; break }
+    }
+    if (eocdOffset < 0) return names
+
+    const cdOffset = buf.readUInt32LE(eocdOffset + 16)
+    const cdSize   = buf.readUInt32LE(eocdOffset + 12)
+    let pos = cdOffset
+
+    while (pos < cdOffset + cdSize) {
+      if (buf.readUInt32LE(pos) !== 0x02014b50) break
+      const compression  = buf.readUInt16LE(pos + 10)
+      const compSize     = buf.readUInt32LE(pos + 20)
+      const uncompSize   = buf.readUInt32LE(pos + 24)
+      const fileNameLen  = buf.readUInt16LE(pos + 28)
+      const extraLen     = buf.readUInt16LE(pos + 30)
+      const commentLen   = buf.readUInt16LE(pos + 32)
+      const localOffset  = buf.readUInt32LE(pos + 42)
+      const fileName     = buf.slice(pos + 46, pos + 46 + fileNameLen).toString('utf8')
+      pos += 46 + fileNameLen + extraLen + commentLen
+
+      // slideLayout XML만 처리
+      if (!fileName.match(/^ppt\/slideLayouts\/slideLayout\d+\.xml$/)) continue
+
+      // Local File Header → 실제 데이터 위치 계산
+      const lhFnLen  = buf.readUInt16LE(localOffset + 26)
+      const lhExLen  = buf.readUInt16LE(localOffset + 28)
+      const dataStart = localOffset + 30 + lhFnLen + lhExLen
+
+      let xmlBuf: Buffer
+      if (compression === 0) {
+        xmlBuf = buf.slice(dataStart, dataStart + uncompSize)
+      } else {
+        xmlBuf = inflateRawSync(buf.slice(dataStart, dataStart + compSize))
+      }
+      const xml = xmlBuf.toString('utf8')
+
+      // <p:cSld name="레이아웃이름"> 추출
+      const m = xml.match(/<p:cSld[^>]*\bname="([^"]+)"/)
+      const layoutName = m ? m[1] : fileName.replace(/^.*\//, '').replace('.xml', '')
+      if (layoutName && !names.includes(layoutName)) names.push(layoutName)
+    }
+  } catch (e) {
+    console.warn('[extractLayouts] 파싱 실패:', (e as Error).message)
+  }
+  return names
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -177,14 +235,20 @@ app.post('/migrate', async (c) => {
         name         TEXT NOT NULL,
         description  TEXT,
         pptx_b64     TEXT NOT NULL,
+        layouts      JSONB NOT NULL DEFAULT '[]',
         is_active    INTEGER NOT NULL DEFAULT 0,
         created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
         updated_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
       )
     `)
     await exec(`CREATE INDEX IF NOT EXISTS idx_ppt_masters_active ON ppt_master_templates(is_active DESC, created_at DESC)`)
+    // layouts 컬럼 없는 구버전 자동 업그레이드 (멱등)
+    await exec(`ALTER TABLE ppt_master_templates ADD COLUMN IF NOT EXISTS layouts JSONB NOT NULL DEFAULT '[]'`)
 
-    return c.json({ ok: true, message: 'PPT 테이블 마이그레이션 완료 (8개 테이블)' })
+    // 9. ppt_generation_rules 에 target_layout_name 컬럼 추가 (구버전 호환)
+    await exec(`ALTER TABLE ppt_generation_rules ADD COLUMN IF NOT EXISTS target_layout_name TEXT`)
+
+    return c.json({ ok: true, message: 'PPT 테이블 마이그레이션 완료 (8개 테이블 + 컬럼 업그레이드)' })
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : String(e)
     return c.json({ ok: false, error: msg }, 500)
@@ -1148,7 +1212,7 @@ app.delete('/presets/:id', async (c) => {
 app.get('/master-templates', async (c) => {
   try {
     const rows = await query(`
-      SELECT id, name, description, is_active, created_at
+      SELECT id, name, description, layouts, is_active, created_at
       FROM ppt_master_templates
       ORDER BY is_active DESC, created_at DESC
     `)
@@ -1163,7 +1227,7 @@ app.get('/master-templates', async (c) => {
 app.get('/master-templates/active', async (c) => {
   try {
     const row = await queryOne(`
-      SELECT id, name, description, pptx_b64, is_active, created_at
+      SELECT id, name, description, pptx_b64, layouts, is_active, created_at
       FROM ppt_master_templates
       WHERE is_active = 1
       ORDER BY created_at DESC LIMIT 1
@@ -1187,8 +1251,11 @@ app.post('/master-templates', async (c) => {
     if (!file || !name) return c.json({ ok: false, error: 'file, name 필수' }, 400)
 
     // 파일 → base64
-    const buf = await file.arrayBuffer()
-    const b64 = Buffer.from(buf).toString('base64')
+    const buf = Buffer.from(await file.arrayBuffer())
+    const b64 = buf.toString('base64')
+
+    // PPTX(ZIP)에서 레이아웃 이름 추출
+    const layouts = extractLayoutNamesFromPptx(buf)
 
     // 활성으로 설정 시 기존 활성 해제
     if (setActive) {
@@ -1196,11 +1263,11 @@ app.post('/master-templates', async (c) => {
     }
 
     const row = await queryOne<{ id: number }>(`
-      INSERT INTO ppt_master_templates (name, description, pptx_b64, is_active)
-      VALUES ($1, $2, $3, $4) RETURNING id
-    `, [name, description, b64, setActive ? 1 : 0])
+      INSERT INTO ppt_master_templates (name, description, pptx_b64, layouts, is_active)
+      VALUES ($1, $2, $3, $4, $5) RETURNING id
+    `, [name, description, b64, JSON.stringify(layouts), setActive ? 1 : 0])
 
-    return c.json({ ok: true, id: row?.id })
+    return c.json({ ok: true, id: row?.id, layouts })
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : String(e)
     return c.json({ ok: false, error: msg }, 400)

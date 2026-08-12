@@ -6,6 +6,7 @@ import { serveStatic } from '@hono/node-server/serve-static'
 import { Hono } from 'hono'
 import { logger } from 'hono/logger'
 import { cors } from 'hono/cors'
+import { query } from './db/client.js'
 import uploadPersonnelRoute from './routes/upload-personnel.js'
 import uploadProjectRoute from './routes/upload-project.js'
 import pagesRoute from './routes/pages.js'
@@ -52,5 +53,30 @@ const port = parseInt(process.env.PORT ?? '3000', 10)
 console.log(`🚀 서버 시작: http://localhost:${port}`)
 
 serve({ fetch: app.fetch, port })
+
+// ── 앱 시작 후 자동 마이그레이션 (ppt_master_templates 테이블 보장) ──
+;(async () => {
+  try {
+    await query(`
+      CREATE TABLE IF NOT EXISTS ppt_master_templates (
+        id           SERIAL PRIMARY KEY,
+        name         TEXT NOT NULL,
+        description  TEXT,
+        pptx_b64     TEXT NOT NULL,
+        layouts      JSONB NOT NULL DEFAULT '[]',
+        is_active    INTEGER NOT NULL DEFAULT 0,
+        created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `)
+    await query(`ALTER TABLE ppt_master_templates ADD COLUMN IF NOT EXISTS layouts JSONB NOT NULL DEFAULT '[]'`)
+    await query(`ALTER TABLE ppt_generation_rules ADD COLUMN IF NOT EXISTS target_layout_name TEXT`)
+    await query(`CREATE INDEX IF NOT EXISTS idx_ppt_masters_active ON ppt_master_templates(is_active DESC, created_at DESC)`)
+    console.log('✅ auto-migrate: ppt_master_templates 준비 완료')
+  } catch (e) {
+    // ppt_menus 등 다른 테이블이 없으면 무시 (최초 배포 전)
+    console.warn('⚠️  auto-migrate 스킵 (테이블 미존재):', (e as Error).message?.slice(0, 80))
+  }
+})()
 
 export default app
