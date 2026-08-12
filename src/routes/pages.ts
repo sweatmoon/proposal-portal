@@ -1903,16 +1903,42 @@ app.get('/ppt-templates', async (c) => {
   function renderDetail(menu, templates) {
     const rule = menu.rule || {}
     const cfg = (() => { try { return JSON.parse(rule.rule_config || '{}') } catch (_) { return {} } })()
-    const modeOpts = ['BUILD_TABLE','BUILD_OBJECTS','CLONE_SLIDE','REPLACE','HYBRID'].map(v =>
-      \`<option value="\${v}" \${rule.generation_mode===v?'selected':''}>\${v}</option>\`).join('')
-    const stratOpts = ['PPTX_TEMPLATE','PPTX_XML_TEMPLATE','FRAME_TEMPLATE','VARIANT_TEMPLATE'].map(v =>
-      \`<option value="\${v}" \${rule.template_strategy===v?'selected':''}>\${v}</option>\`).join('')
-    const paginOpts = ['SINGLE','MAX_ROWS','VARIANT_OVERFLOW'].map(v =>
-      \`<option value="\${v}" \${rule.pagination_mode===v?'selected':''}>\${v}</option>\`).join('')
-    const postOpts  = ['NONE','OOXML_PATCH'].map(v =>
-      \`<option value="\${v}" \${rule.postprocess_mode===v?'selected':''}>\${v}</option>\`).join('')
-    const mergeOpts = ['STANDARD','FOREIGN_TEMPLATE'].map(v =>
-      \`<option value="\${v}" \${rule.merge_strategy===v?'selected':''}>\${v}</option>\`).join('')
+    const MODE_LABELS: Record<string,string> = {
+      'BUILD_TABLE':   '표 직접 생성 (PptxGenJS로 표 그리기)',
+      'BUILD_OBJECTS': '도형 직접 생성 (PptxGenJS로 개별 객체)',
+      'CLONE_SLIDE':   '슬라이드 복제 (템플릿 슬라이드를 복사·치환)',
+      'REPLACE':       '변수 치환 (템플릿 placeholder 값만 교체)',
+      'HYBRID':        '혼합 (치환 + 표/도형 추가)',
+    }
+    const STRAT_LABELS: Record<string,string> = {
+      'PPTX_TEMPLATE':     'PPTX 파일 템플릿 (업로드된 .pptx 파일 기반)',
+      'PPTX_XML_TEMPLATE': 'XML 직접 편집 (슬라이드 XML을 코드로 수정)',
+      'FRAME_TEMPLATE':    '프레임 생성 (PptxGenJS로 빈 슬라이드에 직접 그리기)',
+      'VARIANT_TEMPLATE':  'Variant 선택 (인원 수·조건에 따라 템플릿 자동 선택)',
+    }
+    const PAGIN_LABELS: Record<string,string> = {
+      'SINGLE':           '단일 슬라이드 (무조건 1장)',
+      'MAX_ROWS':         '행 수 초과 시 분할 (maxRowsPerSlide 기준)',
+      'VARIANT_OVERFLOW': 'Variant 슬롯 초과 시 새 슬라이드 추가',
+    }
+    const POST_LABELS: Record<string,string> = {
+      'NONE':        '없음',
+      'OOXML_PATCH': 'OOXML 직접 패치 (XML 후처리)',
+    }
+    const MERGE_LABELS: Record<string,string> = {
+      'STANDARD':        '기본 합본 (슬라이드만 복사, 폰트·테마 공유)',
+      'FOREIGN_TEMPLATE':'외부 템플릿 합본 (마스터/테마/레이아웃까지 복사)',
+    }
+    const modeOpts = Object.entries(MODE_LABELS).map(([v, lbl]) =>
+      \`<option value="\${v}" \${rule.generation_mode===v?'selected':''}>\${lbl}</option>\`).join('')
+    const stratOpts = Object.entries(STRAT_LABELS).map(([v, lbl]) =>
+      \`<option value="\${v}" \${rule.template_strategy===v?'selected':''}>\${lbl}</option>\`).join('')
+    const paginOpts = Object.entries(PAGIN_LABELS).map(([v, lbl]) =>
+      \`<option value="\${v}" \${rule.pagination_mode===v?'selected':''}>\${lbl}</option>\`).join('')
+    const postOpts  = Object.entries(POST_LABELS).map(([v, lbl]) =>
+      \`<option value="\${v}" \${rule.postprocess_mode===v?'selected':''}>\${lbl}</option>\`).join('')
+    const mergeOpts = Object.entries(MERGE_LABELS).map(([v, lbl]) =>
+      \`<option value="\${v}" \${rule.merge_strategy===v?'selected':''}>\${lbl}</option>\`).join('')
 
     const tplRows = templates.map(t => \`
       <tr class="border-t border-slate-100 hover:bg-slate-50">
@@ -1960,39 +1986,63 @@ app.get('/ppt-templates', async (c) => {
             <i class="fas fa-cogs text-indigo-400"></i>생성 규칙 설정
           </div>
           <div class="grid grid-cols-2 gap-3 mb-3">
-            <div>
-              <label class="text-xs text-slate-500 font-medium mb-1 block">Generation Mode</label>
+            <div class="col-span-2">
+              <label class="text-xs text-slate-500 font-medium mb-1 flex items-center gap-1 block">
+                슬라이드 생성 방식
+                <span class="text-slate-300 cursor-help" title="PPT 슬라이드를 어떤 방법으로 만드는지 결정합니다"><i class="fas fa-question-circle"></i></span>
+              </label>
               <select id="ruleMode" class="w-full border border-slate-300 rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-indigo-300">\${modeOpts}</select>
             </div>
-            <div>
-              <label class="text-xs text-slate-500 font-medium mb-1 block">Template Strategy</label>
+            <div class="col-span-2">
+              <label class="text-xs text-slate-500 font-medium mb-1 flex items-center gap-1 block">
+                템플릿 종류
+                <span class="text-slate-300 cursor-help" title="슬라이드 디자인을 어디서 가져오는지 결정합니다"><i class="fas fa-question-circle"></i></span>
+              </label>
               <select id="ruleStrategy" class="w-full border border-slate-300 rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-indigo-300">\${stratOpts}</select>
             </div>
             <div>
-              <label class="text-xs text-slate-500 font-medium mb-1 block">Pagination Mode</label>
+              <label class="text-xs text-slate-500 font-medium mb-1 flex items-center gap-1 block">
+                페이지 분할 방식
+                <span class="text-slate-300 cursor-help" title="데이터가 많을 때 슬라이드를 어떻게 나눌지 결정합니다"><i class="fas fa-question-circle"></i></span>
+              </label>
               <select id="rulePagination" class="w-full border border-slate-300 rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-indigo-300">\${paginOpts}</select>
             </div>
             <div>
-              <label class="text-xs text-slate-500 font-medium mb-1 block">Merge Strategy</label>
+              <label class="text-xs text-slate-500 font-medium mb-1 flex items-center gap-1 block">
+                합본(병합) 방식
+                <span class="text-slate-300 cursor-help" title="전체 PPT 합본 시 이 장표를 어떻게 붙이는지 결정합니다"><i class="fas fa-question-circle"></i></span>
+              </label>
               <select id="ruleMerge" class="w-full border border-slate-300 rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-indigo-300">\${mergeOpts}</select>
             </div>
             <div>
-              <label class="text-xs text-slate-500 font-medium mb-1 block">Calculator Code</label>
+              <label class="text-xs text-slate-500 font-medium mb-1 flex items-center gap-1 block">
+                데이터 계산 함수명
+                <span class="text-slate-300 cursor-help" title="이 장표의 데이터를 준비하는 JS 함수 이름 (proposal-detail.js 내 함수)"><i class="fas fa-question-circle"></i></span>
+              </label>
               <input id="ruleCalc" type="text" value="\${rule.calculator_code||''}" placeholder="예: computeAssignRows"
                 class="w-full border border-slate-300 rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-indigo-300">
             </div>
             <div>
-              <label class="text-xs text-slate-500 font-medium mb-1 block">Renderer Code</label>
+              <label class="text-xs text-slate-500 font-medium mb-1 flex items-center gap-1 block">
+                슬라이드 렌더 함수명
+                <span class="text-slate-300 cursor-help" title="실제 슬라이드를 그리는 JS 함수 이름 (proposal-detail.js 내 함수)"><i class="fas fa-question-circle"></i></span>
+              </label>
               <input id="ruleRenderer" type="text" value="\${rule.renderer_code||''}" placeholder="예: renderAssignTable"
                 class="w-full border border-slate-300 rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-indigo-300">
             </div>
           </div>
           <div class="mb-3">
-            <label class="text-xs text-slate-500 font-medium mb-1 block">Postprocess Mode</label>
-            <select id="rulePostprocess" class="w-40 border border-slate-300 rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-indigo-300">\${postOpts}</select>
+            <label class="text-xs text-slate-500 font-medium mb-1 flex items-center gap-1 block">
+              후처리 방식
+              <span class="text-slate-300 cursor-help" title="생성 후 XML을 직접 수정해야 하는 경우에만 OOXML 패치를 선택하세요"><i class="fas fa-question-circle"></i></span>
+            </label>
+            <select id="rulePostprocess" class="w-full border border-slate-300 rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-indigo-300">\${postOpts}</select>
           </div>
           <div class="mb-3">
-            <label class="text-xs text-slate-500 font-medium mb-1 block">Rule Config (JSON)</label>
+            <label class="text-xs text-slate-500 font-medium mb-1 flex items-center gap-1 block">
+              추가 설정값 (JSON)
+              <span class="text-slate-300 cursor-help" title='규칙 동작에 필요한 세부 값. 예: {&quot;maxRowsPerSlide&quot;:15} 또는 {&quot;variants&quot;:[2,4,6,9]}'><i class="fas fa-question-circle"></i></span>
+            </label>
             <textarea id="ruleConfig" rows="3" placeholder='예: {"maxRowsPerSlide":15,"variants":[2,4,6,9]}'
               class="w-full border border-slate-300 rounded-lg px-2 py-1.5 text-xs font-mono focus:outline-none focus:ring-2 focus:ring-indigo-300">\${rule.rule_config||''}</textarea>
           </div>
