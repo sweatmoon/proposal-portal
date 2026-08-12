@@ -262,3 +262,87 @@ CREATE INDEX IF NOT EXISTS idx_proposal_files_project     ON proposal_files(proj
 CREATE INDEX IF NOT EXISTS idx_keywords_project           ON keywords(project_id);
 CREATE INDEX IF NOT EXISTS idx_kwmap_project              ON keyword_mappings(project_id);
 CREATE INDEX IF NOT EXISTS idx_kwmap_keyword              ON keyword_mappings(keyword_id);
+
+-- ──────────────────────────────────────────
+-- 13. ppt_menus (PPT 목차/메뉴 관리)
+-- ──────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS ppt_menus (
+  id          SERIAL PRIMARY KEY,
+  parent_id   INTEGER REFERENCES ppt_menus(id) ON DELETE SET NULL,
+  menu_code   TEXT    NOT NULL UNIQUE,
+  menu_name   TEXT    NOT NULL,
+  menu_number TEXT,                         -- "다-1", "라-3" 등 목차 번호
+  sort_order  INTEGER NOT NULL DEFAULT 0,
+  is_enabled  INTEGER NOT NULL DEFAULT 1,   -- 1=사용, 0=미사용
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- ──────────────────────────────────────────
+-- 14. ppt_templates (메뉴별 PPTX 템플릿)
+-- ──────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS ppt_templates (
+  id              SERIAL PRIMARY KEY,
+  menu_id         INTEGER NOT NULL REFERENCES ppt_menus(id) ON DELETE CASCADE,
+  template_name   TEXT    NOT NULL,
+  variant_code    TEXT    NOT NULL DEFAULT 'DEFAULT',  -- DEFAULT, PERSON_2, PERSON_4 ...
+  pptx_file_path  TEXT,                                -- 파일 저장 경로 (null = 코드 생성)
+  pptx_b64_key    TEXT,                                -- js 전역변수명 (b64 템플릿용)
+  capacity        INTEGER,                             -- variant별 슬롯 수
+  slide_count     INTEGER,                             -- 템플릿 슬라이드 수
+  version         INTEGER NOT NULL DEFAULT 1,
+  is_default      INTEGER NOT NULL DEFAULT 1,
+  is_active       INTEGER NOT NULL DEFAULT 1,
+  metadata        TEXT,                                -- JSON: placeholder/anchor/component 목록
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (menu_id, variant_code, version)
+);
+
+-- ──────────────────────────────────────────
+-- 15. ppt_generation_rules (메뉴별 생성 규칙)
+-- ──────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS ppt_generation_rules (
+  id               SERIAL PRIMARY KEY,
+  menu_id          INTEGER NOT NULL UNIQUE REFERENCES ppt_menus(id) ON DELETE CASCADE,
+  generation_mode  TEXT    NOT NULL DEFAULT 'BUILD_TABLE',
+                   -- REPLACE | CLONE_SLIDE | BUILD_TABLE | BUILD_OBJECTS | HYBRID
+  template_strategy TEXT   NOT NULL DEFAULT 'PPTX_TEMPLATE',
+                   -- PPTX_TEMPLATE | PPTX_XML_TEMPLATE | FRAME_TEMPLATE | VARIANT_TEMPLATE
+  calculator_code  TEXT,   -- 계산 함수명 (예: computeDetailSchedule1Rows)
+  renderer_code    TEXT,   -- 렌더 함수명 (예: renderDetailScheduleTable)
+  pagination_mode  TEXT    NOT NULL DEFAULT 'SINGLE',
+                   -- SINGLE | MAX_ROWS | VARIANT_OVERFLOW
+  postprocess_mode TEXT    NOT NULL DEFAULT 'NONE',
+                   -- NONE | OOXML_PATCH
+  merge_strategy   TEXT    NOT NULL DEFAULT 'STANDARD',
+                   -- STANDARD | FOREIGN_TEMPLATE
+  rule_config      TEXT,   -- JSON 설정 (variants, maxRowsPerSlide, fillOrder 등)
+  created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- ──────────────────────────────────────────
+-- 16. ppt_template_elements (템플릿 요소 정보)
+-- ──────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS ppt_template_elements (
+  id            SERIAL PRIMARY KEY,
+  template_id   INTEGER NOT NULL REFERENCES ppt_templates(id) ON DELETE CASCADE,
+  element_code  TEXT    NOT NULL,  -- [PROJECT.NAME], [TABLE_AREA], [PERSON_CARD] 등
+  element_type  TEXT    NOT NULL,  -- VARIABLE | ANCHOR | COMPONENT
+  data_key      TEXT,              -- 매핑될 ProjectViewModel 필드 경로
+  slide_index   INTEGER,           -- 슬라이드 인덱스 (0-based)
+  x             REAL,              -- EMU 단위
+  y             REAL,
+  width         REAL,
+  height        REAL,
+  config        TEXT,              -- JSON 추가 설정
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- ── PPT 테이블 인덱스 ──────────────────────────────────────────
+CREATE INDEX IF NOT EXISTS idx_ppt_menus_parent      ON ppt_menus(parent_id);
+CREATE INDEX IF NOT EXISTS idx_ppt_menus_sort        ON ppt_menus(sort_order);
+CREATE INDEX IF NOT EXISTS idx_ppt_templates_menu    ON ppt_templates(menu_id);
+CREATE INDEX IF NOT EXISTS idx_ppt_gen_rules_menu    ON ppt_generation_rules(menu_id);
+CREATE INDEX IF NOT EXISTS idx_ppt_elements_template ON ppt_template_elements(template_id);

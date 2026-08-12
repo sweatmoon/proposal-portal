@@ -1004,6 +1004,7 @@ app.get('/proposals/:id', async (c) => {
   <script src="https://cdn.jsdelivr.net/npm/pptxgenjs@4.0.1/dist/pptxgen.bundle.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
   <script src="/static/photo-template.b64.js"></script>
+  <script src="/static/ppt-engine.js"></script>
 
   <script>
   // ══════════════════════════════════════════════════════════
@@ -1675,6 +1676,480 @@ app.get('/upload', (c) => {
   </script>`
 
   return c.html(layout('HTML 업로드', body, 'upload'))
+})
+
+// ── PPT 템플릿 관리 페이지 ─────────────────────────────────────
+app.get('/ppt-templates', async (c) => {
+  const body = `
+  <div class="p-6 md:p-8" id="pptMgrRoot">
+
+    <div class="mb-6 flex items-center justify-between gap-4 flex-wrap">
+      <div>
+        <h1 class="text-2xl font-bold text-slate-800 flex items-center gap-2">
+          <i class="fas fa-layer-group text-indigo-500"></i> PPT 목차/메뉴 관리
+        </h1>
+        <p class="text-slate-500 text-sm mt-1">각 목차 메뉴별 생성 규칙·템플릿을 설정합니다.</p>
+      </div>
+      <div class="flex gap-2">
+        <button onclick="runMigrate()" class="px-3 py-1.5 text-xs rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-300 transition">
+          <i class="fas fa-database mr-1"></i>테이블 생성
+        </button>
+        <button onclick="runSeed()" class="px-3 py-1.5 text-xs rounded-lg bg-amber-50 hover:bg-amber-100 text-amber-700 border border-amber-300 transition">
+          <i class="fas fa-seedling mr-1"></i>기본 메뉴 시드
+        </button>
+        <button onclick="openAddMenu()" class="px-3 py-1.5 text-xs rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white transition">
+          <i class="fas fa-plus mr-1"></i>메뉴 추가
+        </button>
+      </div>
+    </div>
+
+    <div id="pptAlert" class="hidden mb-4 p-3 rounded-lg text-sm font-medium"></div>
+
+    <!-- 2-panel layout -->
+    <div class="flex gap-5" style="min-height:600px">
+
+      <!-- LEFT: 메뉴 트리 -->
+      <div class="w-72 flex-shrink-0">
+        <div class="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+          <div class="px-4 py-3 bg-slate-50 border-b border-slate-200 flex items-center justify-between">
+            <span class="text-sm font-semibold text-slate-700"><i class="fas fa-sitemap mr-2 text-indigo-400"></i>목차 메뉴</span>
+            <button onclick="loadTree()" class="text-xs text-slate-400 hover:text-indigo-500"><i class="fas fa-sync-alt"></i></button>
+          </div>
+          <div id="menuTree" class="p-2 overflow-y-auto" style="max-height:560px">
+            <div class="text-center text-slate-400 text-sm py-6"><i class="fas fa-spinner fa-spin mr-1"></i>로딩 중...</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- RIGHT: 상세 설정 패널 -->
+      <div class="flex-1 min-w-0">
+        <div id="detailPanel" class="bg-white rounded-xl shadow-sm border border-slate-200 h-full flex items-center justify-center text-slate-400">
+          <div class="text-center">
+            <i class="fas fa-mouse-pointer text-4xl mb-3 opacity-30"></i>
+            <p class="text-sm">왼쪽 트리에서 메뉴를 선택하세요</p>
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- 메뉴 추가/수정 모달 -->
+    <div id="menuModal" class="hidden fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
+      <div class="bg-white rounded-2xl shadow-xl w-full max-w-md">
+        <div class="px-6 py-4 border-b border-slate-200 flex items-center justify-between">
+          <h3 class="font-bold text-slate-800" id="menuModalTitle">메뉴 추가</h3>
+          <button onclick="closeMenuModal()" class="text-slate-400 hover:text-slate-700"><i class="fas fa-times"></i></button>
+        </div>
+        <div class="px-6 py-4 space-y-3">
+          <input type="hidden" id="modalMenuId">
+          <div>
+            <label class="text-xs text-slate-500 font-medium mb-1 block">상위 메뉴 ID (선택)</label>
+            <input id="modalParentId" type="number" placeholder="없으면 비워두기" class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300">
+          </div>
+          <div>
+            <label class="text-xs text-slate-500 font-medium mb-1 block">메뉴 코드 <span class="text-red-500">*</span></label>
+            <input id="modalMenuCode" type="text" placeholder="예: DETAIL_SCHEDULE" class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300">
+          </div>
+          <div>
+            <label class="text-xs text-slate-500 font-medium mb-1 block">메뉴명 <span class="text-red-500">*</span></label>
+            <input id="modalMenuName" type="text" placeholder="예: 세부 감리 일정" class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300">
+          </div>
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label class="text-xs text-slate-500 font-medium mb-1 block">목차 번호</label>
+              <input id="modalMenuNumber" type="text" placeholder="예: 다-2" class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300">
+            </div>
+            <div>
+              <label class="text-xs text-slate-500 font-medium mb-1 block">정렬 순서</label>
+              <input id="modalSortOrder" type="number" value="100" class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300">
+            </div>
+          </div>
+          <div class="flex items-center gap-2">
+            <input id="modalIsEnabled" type="checkbox" checked class="w-4 h-4 accent-indigo-600">
+            <label class="text-sm text-slate-600">사용 여부</label>
+          </div>
+        </div>
+        <div class="px-6 py-4 border-t border-slate-100 flex justify-end gap-2">
+          <button onclick="closeMenuModal()" class="px-4 py-2 text-sm rounded-lg border border-slate-300 text-slate-600 hover:bg-slate-50">취소</button>
+          <button onclick="saveMenu()" class="px-4 py-2 text-sm rounded-lg bg-indigo-600 text-white hover:bg-indigo-700">저장</button>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <script>
+  // ── 상태 ──────────────────────────────────────────────────────
+  let _selectedMenuId = null
+  let _treeData = []
+
+  // ── 알림 ──────────────────────────────────────────────────────
+  function showAlert(msg, ok) {
+    const el = document.getElementById('pptAlert')
+    el.className = 'mb-4 p-3 rounded-lg text-sm font-medium ' + (ok ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-red-50 text-red-700 border border-red-200')
+    el.textContent = msg
+    el.classList.remove('hidden')
+    setTimeout(() => el.classList.add('hidden'), 4000)
+  }
+
+  // ── 마이그레이션 / 시드 ────────────────────────────────────────
+  async function runMigrate() {
+    const r = await fetch('/api/ppt-menus/migrate', { method: 'POST' })
+    const j = await r.json()
+    showAlert(j.ok ? '✅ ' + j.message : '❌ ' + j.error, j.ok)
+  }
+
+  async function runSeed() {
+    const r = await fetch('/api/ppt-menus/seed', { method: 'POST' })
+    const j = await r.json()
+    showAlert(j.ok ? '✅ ' + j.message : '❌ ' + j.error, j.ok)
+    if (j.ok) loadTree()
+  }
+
+  // ── 트리 로드 ─────────────────────────────────────────────────
+  async function loadTree() {
+    document.getElementById('menuTree').innerHTML =
+      '<div class="text-center text-slate-400 text-sm py-6"><i class="fas fa-spinner fa-spin mr-1"></i>로딩 중...</div>'
+    try {
+      const r = await fetch('/api/ppt-menus')
+      const j = await r.json()
+      if (!j.ok) throw new Error(j.error)
+      _treeData = j.data
+      renderTree(j.data)
+    } catch (e) {
+      document.getElementById('menuTree').innerHTML =
+        '<div class="text-center text-red-400 text-xs py-6">' + e.message + '</div>'
+    }
+  }
+
+  function renderTree(nodes, depth = 0) {
+    if (depth === 0) document.getElementById('menuTree').innerHTML = ''
+    const container = depth === 0 ? document.getElementById('menuTree') : null
+    let html = ''
+    nodes.forEach(n => {
+      const isSection = !n.parent_id
+      const hasRule = !!n.rule
+      const badgeColor = n.is_enabled ? (hasRule ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-600') : 'bg-slate-100 text-slate-400'
+      const badge = hasRule ? '규칙' : (isSection ? '섹션' : '미설정')
+      html += \`
+        <div class="menu-item rounded-lg mb-0.5 \${_selectedMenuId === n.id ? 'bg-indigo-50 border border-indigo-200' : 'hover:bg-slate-50 border border-transparent'} cursor-pointer transition-all"
+             style="padding-left:\${depth * 14 + 8}px"
+             onclick="selectMenu(\${n.id})">
+          <div class="flex items-center gap-1.5 py-1.5 pr-2">
+            <i class="fas \${isSection ? 'fa-folder text-amber-400' : (hasRule ? 'fa-file-powerpoint text-indigo-400' : 'fa-file text-slate-300')} text-xs flex-shrink-0"></i>
+            <span class="text-xs \${n.is_enabled ? 'text-slate-700' : 'text-slate-400 line-through'} flex-1 min-w-0 truncate" title="\${n.menu_name}">
+              \${n.menu_number ? '<span class=\\"text-slate-400\\">' + n.menu_number + '</span> ' : ''}\${n.menu_name}
+            </span>
+            <span class="text-xs px-1.5 py-0.5 rounded-full font-medium \${badgeColor} flex-shrink-0">\${badge}</span>
+          </div>
+        </div>
+        \${n.children && n.children.length ? renderTreeChildren(n.children, depth + 1) : ''}
+      \`
+    })
+    if (container) container.innerHTML = html
+    return html
+  }
+
+  function renderTreeChildren(nodes, depth) {
+    let html = ''
+    nodes.forEach(n => {
+      const hasRule = !!n.rule
+      const badgeColor = n.is_enabled ? (hasRule ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-600') : 'bg-slate-100 text-slate-400'
+      const badge = hasRule ? '규칙' : '미설정'
+      html += \`
+        <div class="menu-item rounded-lg mb-0.5 \${_selectedMenuId === n.id ? 'bg-indigo-50 border border-indigo-200' : 'hover:bg-slate-50 border border-transparent'} cursor-pointer transition-all"
+             style="padding-left:\${depth * 14 + 8}px"
+             onclick="selectMenu(\${n.id})">
+          <div class="flex items-center gap-1.5 py-1.5 pr-2">
+            <i class="fas \${hasRule ? 'fa-file-powerpoint text-indigo-400' : 'fa-file text-slate-300'} text-xs flex-shrink-0"></i>
+            <span class="text-xs \${n.is_enabled ? 'text-slate-700' : 'text-slate-400 line-through'} flex-1 min-w-0 truncate" title="\${n.menu_name}">
+              \${n.menu_number ? '<span class=\\"text-slate-400\\">' + n.menu_number + '</span> ' : ''}\${n.menu_name}
+            </span>
+            <span class="text-xs px-1.5 py-0.5 rounded-full font-medium \${badgeColor} flex-shrink-0">\${badge}</span>
+          </div>
+        </div>
+        \${n.children && n.children.length ? renderTreeChildren(n.children, depth + 1) : ''}
+      \`
+    })
+    return html
+  }
+
+  // ── 메뉴 선택 → 상세 패널 ─────────────────────────────────────
+  function findMenuById(nodes, id) {
+    for (const n of nodes) {
+      if (n.id === id) return n
+      if (n.children) { const f = findMenuById(n.children, id); if (f) return f }
+    }
+    return null
+  }
+
+  async function selectMenu(id) {
+    _selectedMenuId = id
+    renderTree(_treeData)  // 선택 상태 갱신
+    const menu = findMenuById(_treeData, id)
+    if (!menu) return
+
+    // 템플릿 목록 로드
+    let templates = []
+    try {
+      const r = await fetch('/api/ppt-menus/' + id + '/templates')
+      const j = await r.json()
+      if (j.ok) templates = j.data
+    } catch (_) {}
+
+    renderDetail(menu, templates)
+  }
+
+  function renderDetail(menu, templates) {
+    const rule = menu.rule || {}
+    const cfg = (() => { try { return JSON.parse(rule.rule_config || '{}') } catch (_) { return {} } })()
+    const modeOpts = ['BUILD_TABLE','BUILD_OBJECTS','CLONE_SLIDE','REPLACE','HYBRID'].map(v =>
+      \`<option value="\${v}" \${rule.generation_mode===v?'selected':''}>\${v}</option>\`).join('')
+    const stratOpts = ['PPTX_TEMPLATE','PPTX_XML_TEMPLATE','FRAME_TEMPLATE','VARIANT_TEMPLATE'].map(v =>
+      \`<option value="\${v}" \${rule.template_strategy===v?'selected':''}>\${v}</option>\`).join('')
+    const paginOpts = ['SINGLE','MAX_ROWS','VARIANT_OVERFLOW'].map(v =>
+      \`<option value="\${v}" \${rule.pagination_mode===v?'selected':''}>\${v}</option>\`).join('')
+    const postOpts  = ['NONE','OOXML_PATCH'].map(v =>
+      \`<option value="\${v}" \${rule.postprocess_mode===v?'selected':''}>\${v}</option>\`).join('')
+    const mergeOpts = ['STANDARD','FOREIGN_TEMPLATE'].map(v =>
+      \`<option value="\${v}" \${rule.merge_strategy===v?'selected':''}>\${v}</option>\`).join('')
+
+    const tplRows = templates.map(t => \`
+      <tr class="border-t border-slate-100 hover:bg-slate-50">
+        <td class="px-3 py-2 text-xs font-mono text-indigo-600">\${t.variant_code}</td>
+        <td class="px-3 py-2 text-xs text-slate-700">\${t.template_name}</td>
+        <td class="px-3 py-2 text-xs text-center text-slate-500">\${t.capacity ?? '-'}</td>
+        <td class="px-3 py-2 text-xs text-center text-slate-500">\${t.pptx_b64_key ?? '-'}</td>
+        <td class="px-3 py-2 text-xs text-center">
+          <span class="px-1.5 py-0.5 rounded-full text-xs \${t.is_active?'bg-emerald-100 text-emerald-700':'bg-slate-100 text-slate-400'}">\${t.is_active?'활성':'비활성'}</span>
+        </td>
+        <td class="px-3 py-2 text-xs text-center">
+          <button onclick="deleteTpl(\${t.id})" class="text-red-400 hover:text-red-600"><i class="fas fa-trash"></i></button>
+        </td>
+      </tr>
+    \`).join('')
+
+    document.getElementById('detailPanel').innerHTML = \`
+      <div class="p-5 h-full overflow-y-auto">
+
+        <!-- 헤더 -->
+        <div class="flex items-start justify-between mb-5">
+          <div>
+            <div class="flex items-center gap-2 mb-1">
+              \${menu.menu_number ? '<span class="text-xs bg-slate-100 text-slate-500 px-2 py-0.5 rounded font-mono">' + menu.menu_number + '</span>' : ''}
+              <h2 class="text-lg font-bold text-slate-800">\${menu.menu_name}</h2>
+            </div>
+            <div class="flex items-center gap-2">
+              <code class="text-xs bg-indigo-50 text-indigo-600 px-2 py-0.5 rounded">\${menu.menu_code}</code>
+              <span class="text-xs px-2 py-0.5 rounded-full \${menu.is_enabled?'bg-emerald-100 text-emerald-700':'bg-slate-100 text-slate-400'}">\${menu.is_enabled?'사용중':'미사용'}</span>
+            </div>
+          </div>
+          <div class="flex gap-2">
+            <button onclick="openEditMenu(\${menu.id})" class="px-2 py-1 text-xs rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-600 border border-slate-200">
+              <i class="fas fa-edit mr-1"></i>편집
+            </button>
+            <button onclick="deleteMenu(\${menu.id})" class="px-2 py-1 text-xs rounded-lg bg-red-50 hover:bg-red-100 text-red-500 border border-red-200">
+              <i class="fas fa-trash mr-1"></i>삭제
+            </button>
+          </div>
+        </div>
+
+        <!-- 생성 규칙 -->
+        <div class="mb-5 bg-slate-50 rounded-xl p-4 border border-slate-200">
+          <div class="text-sm font-bold text-slate-700 mb-3 flex items-center gap-2">
+            <i class="fas fa-cogs text-indigo-400"></i>생성 규칙 설정
+          </div>
+          <div class="grid grid-cols-2 gap-3 mb-3">
+            <div>
+              <label class="text-xs text-slate-500 font-medium mb-1 block">Generation Mode</label>
+              <select id="ruleMode" class="w-full border border-slate-300 rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-indigo-300">\${modeOpts}</select>
+            </div>
+            <div>
+              <label class="text-xs text-slate-500 font-medium mb-1 block">Template Strategy</label>
+              <select id="ruleStrategy" class="w-full border border-slate-300 rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-indigo-300">\${stratOpts}</select>
+            </div>
+            <div>
+              <label class="text-xs text-slate-500 font-medium mb-1 block">Pagination Mode</label>
+              <select id="rulePagination" class="w-full border border-slate-300 rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-indigo-300">\${paginOpts}</select>
+            </div>
+            <div>
+              <label class="text-xs text-slate-500 font-medium mb-1 block">Merge Strategy</label>
+              <select id="ruleMerge" class="w-full border border-slate-300 rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-indigo-300">\${mergeOpts}</select>
+            </div>
+            <div>
+              <label class="text-xs text-slate-500 font-medium mb-1 block">Calculator Code</label>
+              <input id="ruleCalc" type="text" value="\${rule.calculator_code||''}" placeholder="예: computeAssignRows"
+                class="w-full border border-slate-300 rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-indigo-300">
+            </div>
+            <div>
+              <label class="text-xs text-slate-500 font-medium mb-1 block">Renderer Code</label>
+              <input id="ruleRenderer" type="text" value="\${rule.renderer_code||''}" placeholder="예: renderAssignTable"
+                class="w-full border border-slate-300 rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-indigo-300">
+            </div>
+          </div>
+          <div class="mb-3">
+            <label class="text-xs text-slate-500 font-medium mb-1 block">Postprocess Mode</label>
+            <select id="rulePostprocess" class="w-40 border border-slate-300 rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-indigo-300">\${postOpts}</select>
+          </div>
+          <div class="mb-3">
+            <label class="text-xs text-slate-500 font-medium mb-1 block">Rule Config (JSON)</label>
+            <textarea id="ruleConfig" rows="3" placeholder='예: {"maxRowsPerSlide":15,"variants":[2,4,6,9]}'
+              class="w-full border border-slate-300 rounded-lg px-2 py-1.5 text-xs font-mono focus:outline-none focus:ring-2 focus:ring-indigo-300">\${rule.rule_config||''}</textarea>
+          </div>
+          <button onclick="saveRule(\${menu.id})" class="px-3 py-1.5 text-xs rounded-lg bg-indigo-600 text-white hover:bg-indigo-700">
+            <i class="fas fa-save mr-1"></i>규칙 저장
+          </button>
+        </div>
+
+        <!-- 템플릿 목록 -->
+        <div class="mb-4">
+          <div class="text-sm font-bold text-slate-700 mb-2 flex items-center gap-2">
+            <i class="fas fa-copy text-amber-400"></i>템플릿 목록
+            <span class="text-xs font-normal text-slate-400">(총 \${templates.length}개)</span>
+          </div>
+          <div class="overflow-x-auto rounded-xl border border-slate-200">
+            <table class="w-full text-sm">
+              <thead>
+                <tr class="bg-slate-50 border-b border-slate-200">
+                  <th class="px-3 py-2 text-xs text-left text-slate-500 font-semibold">Variant</th>
+                  <th class="px-3 py-2 text-xs text-left text-slate-500 font-semibold">이름</th>
+                  <th class="px-3 py-2 text-xs text-center text-slate-500 font-semibold">Capacity</th>
+                  <th class="px-3 py-2 text-xs text-center text-slate-500 font-semibold">B64 Key</th>
+                  <th class="px-3 py-2 text-xs text-center text-slate-500 font-semibold">상태</th>
+                  <th class="px-3 py-2 text-xs text-center text-slate-500 font-semibold"></th>
+                </tr>
+              </thead>
+              <tbody>\${tplRows || '<tr><td colspan="6" class="text-center py-4 text-slate-400 text-xs">템플릿 없음</td></tr>'}</tbody>
+            </table>
+          </div>
+          <!-- 템플릿 추가 폼 -->
+          <div class="mt-3 bg-amber-50 rounded-lg p-3 border border-amber-200">
+            <div class="text-xs font-semibold text-amber-700 mb-2"><i class="fas fa-plus mr-1"></i>템플릿 추가</div>
+            <div class="grid grid-cols-2 gap-2 mb-2">
+              <input id="newTplName" type="text" placeholder="템플릿 이름" class="border border-slate-300 rounded px-2 py-1 text-xs">
+              <input id="newTplVariant" type="text" placeholder="Variant (예: PERSON_4)" value="DEFAULT" class="border border-slate-300 rounded px-2 py-1 text-xs">
+              <input id="newTplCapacity" type="number" placeholder="capacity" class="border border-slate-300 rounded px-2 py-1 text-xs">
+              <input id="newTplB64Key" type="text" placeholder="B64 Key (예: PHOTO_TEMPLATE_PPTX_B64)" class="border border-slate-300 rounded px-2 py-1 text-xs">
+            </div>
+            <button onclick="addTemplate(\${menu.id})" class="px-3 py-1 text-xs rounded bg-amber-600 text-white hover:bg-amber-700">
+              <i class="fas fa-plus mr-1"></i>추가
+            </button>
+          </div>
+        </div>
+
+      </div>
+    \`
+  }
+
+  // ── 규칙 저장 ──────────────────────────────────────────────────
+  async function saveRule(menuId) {
+    const body = {
+      generation_mode:   document.getElementById('ruleMode').value,
+      template_strategy: document.getElementById('ruleStrategy').value,
+      calculator_code:   document.getElementById('ruleCalc').value,
+      renderer_code:     document.getElementById('ruleRenderer').value,
+      pagination_mode:   document.getElementById('rulePagination').value,
+      postprocess_mode:  document.getElementById('rulePostprocess').value,
+      merge_strategy:    document.getElementById('ruleMerge').value,
+      rule_config:       document.getElementById('ruleConfig').value,
+    }
+    const r = await fetch('/api/ppt-menus/' + menuId + '/rule', { method: 'PUT', headers: { 'Content-Type':'application/json' }, body: JSON.stringify(body) })
+    const j = await r.json()
+    showAlert(j.ok ? '✅ 규칙 저장 완료' : '❌ ' + j.error, j.ok)
+    if (j.ok) { await loadTree(); selectMenu(menuId) }
+  }
+
+  // ── 템플릿 추가 ────────────────────────────────────────────────
+  async function addTemplate(menuId) {
+    const body = {
+      template_name: document.getElementById('newTplName').value,
+      variant_code:  document.getElementById('newTplVariant').value || 'DEFAULT',
+      capacity:      parseInt(document.getElementById('newTplCapacity').value) || null,
+      pptx_b64_key:  document.getElementById('newTplB64Key').value || null,
+    }
+    if (!body.template_name) { showAlert('템플릿 이름을 입력하세요', false); return }
+    const r = await fetch('/api/ppt-menus/' + menuId + '/templates', { method: 'POST', headers: { 'Content-Type':'application/json' }, body: JSON.stringify(body) })
+    const j = await r.json()
+    showAlert(j.ok ? '✅ 템플릿 추가 완료' : '❌ ' + j.error, j.ok)
+    if (j.ok) selectMenu(menuId)
+  }
+
+  // ── 템플릿 삭제 ────────────────────────────────────────────────
+  async function deleteTpl(tid) {
+    if (!confirm('템플릿을 삭제하시겠습니까?')) return
+    const r = await fetch('/api/ppt-templates/' + tid, { method: 'DELETE' })
+    const j = await r.json()
+    showAlert(j.ok ? '✅ 삭제 완료' : '❌ ' + j.error, j.ok)
+    if (j.ok && _selectedMenuId) selectMenu(_selectedMenuId)
+  }
+
+  // ── 메뉴 추가/편집 모달 ────────────────────────────────────────
+  function openAddMenu() {
+    document.getElementById('menuModalTitle').textContent = '메뉴 추가'
+    document.getElementById('modalMenuId').value = ''
+    document.getElementById('modalParentId').value = ''
+    document.getElementById('modalMenuCode').value = ''
+    document.getElementById('modalMenuName').value = ''
+    document.getElementById('modalMenuNumber').value = ''
+    document.getElementById('modalSortOrder').value = '100'
+    document.getElementById('modalIsEnabled').checked = true
+    document.getElementById('menuModal').classList.remove('hidden')
+  }
+
+  function openEditMenu(id) {
+    const menu = findMenuById(_treeData, id)
+    if (!menu) return
+    document.getElementById('menuModalTitle').textContent = '메뉴 편집'
+    document.getElementById('modalMenuId').value = id
+    document.getElementById('modalParentId').value = menu.parent_id || ''
+    document.getElementById('modalMenuCode').value = menu.menu_code
+    document.getElementById('modalMenuName').value = menu.menu_name
+    document.getElementById('modalMenuNumber').value = menu.menu_number || ''
+    document.getElementById('modalSortOrder').value = menu.sort_order
+    document.getElementById('modalIsEnabled').checked = !!menu.is_enabled
+    document.getElementById('menuModal').classList.remove('hidden')
+  }
+
+  function closeMenuModal() { document.getElementById('menuModal').classList.add('hidden') }
+
+  async function saveMenu() {
+    const id   = document.getElementById('modalMenuId').value
+    const body = {
+      parent_id:   parseInt(document.getElementById('modalParentId').value) || null,
+      menu_code:   document.getElementById('modalMenuCode').value,
+      menu_name:   document.getElementById('modalMenuName').value,
+      menu_number: document.getElementById('modalMenuNumber').value || null,
+      sort_order:  parseInt(document.getElementById('modalSortOrder').value) || 0,
+      is_enabled:  document.getElementById('modalIsEnabled').checked ? 1 : 0,
+    }
+    if (!body.menu_code || !body.menu_name) { showAlert('메뉴 코드와 이름은 필수입니다', false); return }
+    const url    = id ? '/api/ppt-menus/' + id : '/api/ppt-menus'
+    const method = id ? 'PUT' : 'POST'
+    const r = await fetch(url, { method, headers: { 'Content-Type':'application/json' }, body: JSON.stringify(body) })
+    const j = await r.json()
+    showAlert(j.ok ? '✅ 저장 완료' : '❌ ' + j.error, j.ok)
+    if (j.ok) { closeMenuModal(); loadTree() }
+  }
+
+  // ── 메뉴 삭제 ─────────────────────────────────────────────────
+  async function deleteMenu(id) {
+    if (!confirm('메뉴를 삭제하면 하위 템플릿/규칙도 모두 삭제됩니다. 계속하시겠습니까?')) return
+    const r = await fetch('/api/ppt-menus/' + id, { method: 'DELETE' })
+    const j = await r.json()
+    showAlert(j.ok ? '✅ 삭제 완료' : '❌ ' + j.error, j.ok)
+    if (j.ok) {
+      _selectedMenuId = null
+      document.getElementById('detailPanel').innerHTML =
+        '<div class="flex items-center justify-center h-full text-slate-400"><div class="text-center"><i class="fas fa-mouse-pointer text-4xl mb-3 opacity-30"></i><p class="text-sm">왼쪽 트리에서 메뉴를 선택하세요</p></div></div>'
+      loadTree()
+    }
+  }
+
+  // ── 초기 로드 ─────────────────────────────────────────────────
+  loadTree()
+  </script>`
+
+  return c.html(layout('PPT 템플릿 관리', body, 'ppt-templates'))
 })
 
 export default app

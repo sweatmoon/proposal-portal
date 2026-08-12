@@ -855,11 +855,34 @@ async function downloadSummaryTablePptx(btn, opts) {
 }
 
 // ── 전체 합본 PPT ───────────────────────────────────────────
+// ppt-engine.js의 generateProposalPpt()를 우선 사용하고,
+// 메뉴 DB가 없거나 실패 시 레거시 고정 순서 방식으로 fallback
 async function downloadAllPptx(btn) {
   if (typeof PptxGenJS === 'undefined' || typeof JSZip === 'undefined') { alert('PPT 라이브러리 로딩 중입니다. 잠시 후 다시 시도해주세요.'); return }
   setBtnState(btn, true)
   showAutoAlert('⏳ 생성 중... 완료될 때까지 잠시 기다려주세요.', false)
   try {
+    // ── 메뉴 기반 Composer 시도 ─────────────────────────────────
+    let usedMenuComposer = false
+    if (typeof generateProposalPpt === 'function') {
+      try {
+        const vm = typeof buildProjectViewModel === 'function' ? buildProjectViewModel(parsedData) : null
+        const finalZip = await generateProposalPpt(vm)
+        const blob = await finalZip.generateAsync({ type: 'blob', mimeType: 'application/vnd.openxmlformats-officedocument.presentationml.presentation', compression: 'DEFLATE', compressionOptions: { level: 6 } })
+        const d = new Date()
+        const dateStr = d.getFullYear() + String(d.getMonth() + 1).padStart(2, '0') + String(d.getDate()).padStart(2, '0')
+        const url = URL.createObjectURL(blob)
+        const a = document.createElement('a'); a.href = url; a.download = '자동화PPT_' + (parsedData.projectTitle || '').slice(0, 10) + '_' + dateStr + '.pptx'; a.click()
+        setTimeout(() => URL.revokeObjectURL(url), 2000)
+        showAutoAlert('✅ 자동화 PPT 생성 완료!', true)
+        usedMenuComposer = true
+      } catch (menuErr) {
+        console.warn('[downloadAllPptx] 메뉴 Composer 실패 → 레거시 방식으로 fallback:', menuErr.message)
+      }
+    }
+    if (usedMenuComposer) return
+
+    // ── 레거시 고정 순서 방식 (fallback) ────────────────────────
     const parts = await Promise.all([
       downloadDetailSchedule1Pptx(null, { returnZip: true }),
       downloadAssignPptx(null, { returnZip: true }),
@@ -877,7 +900,6 @@ async function downloadAllPptx(btn) {
     let newRels = '', newIds = '', newCt = '', sc = 0
     for (let i = 1; i < usable.length; i++) {
       const srcZip = usable[i].zip
-      const srcPresXml = await srcZip.file('ppt/presentation.xml').async('string')
       const srcRelsXml = await srcZip.file('ppt/_rels/presentation.xml.rels').async('string')
       const relMap = {}
       srcRelsXml.replace(/<Relationship\b[^>]*\/>/g, tag => {
@@ -887,7 +909,7 @@ async function downloadAllPptx(btn) {
         if (id && tgt && type.includes('slide') && !type.includes('slideLayout') && !type.includes('slideMaster')) relMap[id] = tgt
         return tag
       })
-      for (const [origId, tgt] of Object.entries(relMap)) {
+      for (const [, tgt] of Object.entries(relMap)) {
         const xml = await srcZip.file('ppt/' + tgt).async('string').catch(() => null)
         if (!xml) continue
         const relsPath = 'ppt/' + tgt.replace(/([^/]+)$/, '_rels/$1.rels')

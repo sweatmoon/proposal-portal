@@ -11,6 +11,7 @@ import uploadProjectRoute from './routes/upload-project.js'
 import pagesRoute from './routes/pages.js'
 import projectsApiRoute from './routes/projects.js'
 import personnelApiRoute from './routes/personnel-list.js'
+import pptMenuApiRoute from './routes/ppt-menu.js'
 
 const app = new Hono()
 
@@ -29,6 +30,7 @@ app.route('/api/upload/personnel', uploadPersonnelRoute)
 app.route('/api/upload/project',   uploadProjectRoute)
 app.route('/api/projects',         projectsApiRoute)
 app.route('/api/personnel',        personnelApiRoute)
+app.route('/api/ppt-menus',        pptMenuApiRoute)
 
 // ── 페이지 라우트 (홈, /proposals, /personnel, /upload) ───────
 app.route('/', pagesRoute)
