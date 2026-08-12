@@ -247,6 +247,39 @@ async function _mergeForeign({ baseZip, srcZip, srcPresRels, counters,
   }
 
   // slideLayout → slideMaster → theme 체인 복사
+  // ── 공통: .rels XML에서 media 파일 복사 ──────────────────────
+  async function copyMediaFromRels(relsXml, basePath) {
+    if (!relsXml) return;
+    const mediaMatches = [...relsXml.matchAll(/Target="([^"]*media\/[^"]+)"/g)];
+    for (const mm of mediaMatches) {
+      let target = mm[1];
+      // 상대경로 → 절대경로 변환
+      if (!target.startsWith('ppt/')) {
+        // basePath 기준 상대경로 해석
+        const baseDir = basePath.replace(/[^/]+$/, '');
+        target = (baseDir + target).replace(/\/[^/]+\/\.\.\//g, '/').replace(/^\//, '');
+        // ppt/ 로 시작하도록 보정
+        if (!target.startsWith('ppt/')) target = 'ppt/' + target;
+      }
+      // 파일명 충돌 방지: baseZip에 없을 때만 복사
+      if (!foreignPathMap['media:' + target]) {
+        const bytes = await getFileBytes(target);
+        if (bytes) {
+          // 이미 baseZip에 같은 경로로 파일이 있으면 다른 이름으로
+          const fileName = target.split('/').pop();
+          const ext      = fileName.includes('.') ? '.' + fileName.split('.').pop() : '';
+          const existing = baseZip.file(target);
+          if (existing) {
+            // 이미 있으면 그대로 (baseZip의 파일이 우선)
+          } else {
+            baseZip.file(target, bytes);
+          }
+          foreignPathMap['media:' + target] = true;
+        }
+      }
+    }
+  }
+
   async function ensureMaster(origMasterPath) {
     if (foreignPathMap[origMasterPath]) return foreignPathMap[origMasterPath];
 
@@ -285,6 +318,9 @@ async function _mergeForeign({ baseZip, srcZip, srcPresRels, counters,
       }
     }
 
+    // master .rels에서 미디어 복사 (배경 이미지, 로고 등)
+    await copyMediaFromRels(newMasterRels, origMasterPath);
+
     baseZip.file(newMasterPath, masterXml);
     baseZip.file(newMasterPath.replace(/([^/]+)$/, '_rels/$1.rels').replace('ppt/', 'ppt/'), newMasterRels);
     newCt += `<Override PartName="/${newMasterPath}" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slideMaster+xml"/>`;
@@ -316,6 +352,9 @@ async function _mergeForeign({ baseZip, srcZip, srcPresRels, counters,
       layoutRelsXml = layoutRelsXml.replace(/Target="[^"]*slideMasters\/[^"]+"/g,
         `Target="../slideMasters/${masterInfo.newMasterName}"`);
     }
+
+    // layout .rels에서 미디어 복사 (배경 이미지 등)
+    if (layoutRelsXml) await copyMediaFromRels(layoutRelsXml, origLayoutPath);
 
     baseZip.file(newLayoutPath, layoutXml);
     if (layoutRelsXml) baseZip.file(`ppt/slideLayouts/_rels/${newLayoutName}.rels`, layoutRelsXml);
