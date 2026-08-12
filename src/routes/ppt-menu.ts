@@ -709,6 +709,46 @@ app.get('/', async (c) => {
   }
 })
 
+/** POST /api/ppt-menus/restore — 프리셋 복원용: 원본 id로 메뉴 + rule 한번에 upsert */
+app.post('/restore', async (c) => {
+  try {
+    const body = await c.req.json()
+    const { id, parent_id, menu_code, menu_name, menu_number, sort_order, is_enabled, rule } = body
+    if (!id || !menu_code || !menu_name) return c.json({ ok: false, error: 'id, menu_code, menu_name 필수' }, 400)
+
+    // 메뉴 upsert (원본 id 보존)
+    await exec(`
+      INSERT INTO ppt_menus (id, parent_id, menu_code, menu_name, menu_number, sort_order, is_enabled)
+      VALUES ($1,$2,$3,$4,$5,$6,$7)
+      ON CONFLICT (id) DO UPDATE
+        SET parent_id=$2, menu_code=$3, menu_name=$4, menu_number=$5,
+            sort_order=$6, is_enabled=$7, updated_at=NOW()
+    `, [id, parent_id ?? null, menu_code, menu_name, menu_number ?? null, sort_order ?? 0, is_enabled ?? 1])
+
+    // rule upsert (있을 때만)
+    if (rule) {
+      const { generation_mode, template_strategy, calculator_code, renderer_code,
+              pagination_mode, postprocess_mode, merge_strategy, rule_config } = rule
+      await exec(`
+        INSERT INTO ppt_generation_rules
+          (menu_id, generation_mode, template_strategy, calculator_code, renderer_code,
+           pagination_mode, postprocess_mode, merge_strategy, rule_config)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+        ON CONFLICT (menu_id) DO UPDATE
+          SET generation_mode=$2, template_strategy=$3, calculator_code=$4, renderer_code=$5,
+              pagination_mode=$6, postprocess_mode=$7, merge_strategy=$8, rule_config=$9, updated_at=NOW()
+      `, [id, generation_mode, template_strategy, calculator_code, renderer_code,
+          pagination_mode, postprocess_mode, merge_strategy,
+          typeof rule_config === 'object' ? JSON.stringify(rule_config) : rule_config])
+    }
+
+    return c.json({ ok: true, restored: true })
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : String(e)
+    return c.json({ ok: false, error: msg }, 400)
+  }
+})
+
 /** POST /api/ppt-menus */
 app.post('/', async (c) => {
   try {

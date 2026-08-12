@@ -2322,27 +2322,29 @@ app.get('/ppt-templates', async (c) => {
       const j = await r.json()
       if (!j.ok) throw new Error(j.error)
 
-      // 트리를 평탄화하여 menu_id → rule 맵 생성
+      // 트리를 평탄화하여 메뉴 전체 스냅샷 생성
       const snapshot = []
       function flattenTree(nodes) {
         nodes.forEach(n => {
-          if (n.rule) {
-            snapshot.push({
-              menu_id:   n.id,
-              menu_code: n.menu_code,
-              menu_name: n.menu_name,
-              rule: {
-                generation_mode:   n.rule.generation_mode,
-                template_strategy: n.rule.template_strategy,
-                pagination_mode:   n.rule.pagination_mode,
-                merge_strategy:    n.rule.merge_strategy,
-                calculator_code:   n.rule.calculator_code,
-                renderer_code:     n.rule.renderer_code,
-                postprocess_mode:  n.rule.postprocess_mode,
-                rule_config:       n.rule.rule_config,
-              }
-            })
-          }
+          snapshot.push({
+            menu_id:     n.id,
+            parent_id:   n.parent_id ?? null,
+            menu_code:   n.menu_code,
+            menu_name:   n.menu_name,
+            menu_number: n.menu_number ?? null,
+            sort_order:  n.sort_order ?? 0,
+            is_enabled:  n.is_enabled ?? 1,
+            rule: n.rule ? {
+              generation_mode:   n.rule.generation_mode,
+              template_strategy: n.rule.template_strategy,
+              pagination_mode:   n.rule.pagination_mode,
+              merge_strategy:    n.rule.merge_strategy,
+              calculator_code:   n.rule.calculator_code,
+              renderer_code:     n.rule.renderer_code,
+              postprocess_mode:  n.rule.postprocess_mode,
+              rule_config:       n.rule.rule_config,
+            } : null
+          })
           if (n.children && n.children.length) flattenTree(n.children)
         })
       }
