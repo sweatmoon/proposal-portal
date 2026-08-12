@@ -2103,7 +2103,8 @@ app.get('/ppt-templates', async (c) => {
                 슬라이드 생성 방식
                 <span class="tip-icon" data-tip="mode"><i class="fas fa-question-circle text-slate-300 cursor-help"></i></span>
               </label>
-              <select id="ruleMode" class="w-full border border-slate-300 rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-indigo-300">\${modeOpts}</select>
+              <select id="ruleMode" onchange="onRuleModeChange(this.value)"
+                class="w-full border border-slate-300 rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-indigo-300">\${modeOpts}</select>
             </div>
             <div class="col-span-2">
               <label class="text-xs text-slate-500 font-medium mb-1 flex items-center gap-1 block">
@@ -2112,7 +2113,7 @@ app.get('/ppt-templates', async (c) => {
               </label>
               <select id="ruleStrategy" class="w-full border border-slate-300 rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-indigo-300">\${stratOpts}</select>
             </div>
-            <div>
+            <div id="wrap-rulePagination">
               <label class="text-xs text-slate-500 font-medium mb-1 flex items-center gap-1 block">
                 페이지 분할 방식
                 <span class="tip-icon" data-tip="pagination"><i class="fas fa-question-circle text-slate-300 cursor-help"></i></span>
@@ -2126,7 +2127,7 @@ app.get('/ppt-templates', async (c) => {
               </label>
               <select id="ruleMerge" class="w-full border border-slate-300 rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-indigo-300">\${mergeOpts}</select>
             </div>
-            <div>
+            <div id="wrap-ruleCalc">
               <label class="text-xs text-slate-500 font-medium mb-1 flex items-center gap-1 block">
                 데이터 계산 함수명
                 <span class="tip-icon" data-tip="calc"><i class="fas fa-question-circle text-slate-300 cursor-help"></i></span>
@@ -2134,7 +2135,7 @@ app.get('/ppt-templates', async (c) => {
               <input id="ruleCalc" type="text" value="\${rule.calculator_code||''}" placeholder="예: computeAssignRows"
                 class="w-full border border-slate-300 rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-indigo-300">
             </div>
-            <div>
+            <div id="wrap-ruleRenderer">
               <label class="text-xs text-slate-500 font-medium mb-1 flex items-center gap-1 block">
                 슬라이드 렌더 함수명
                 <span class="tip-icon" data-tip="renderer"><i class="fas fa-question-circle text-slate-300 cursor-help"></i></span>
@@ -2143,7 +2144,7 @@ app.get('/ppt-templates', async (c) => {
                 class="w-full border border-slate-300 rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-indigo-300">
             </div>
           </div>
-          <div class="mb-3">
+          <div id="wrap-rulePostprocess" class="mb-3">
             <label class="text-xs text-slate-500 font-medium mb-1 flex items-center gap-1 block">
               후처리 방식
               <span class="tip-icon" data-tip="postprocess"><i class="fas fa-question-circle text-slate-300 cursor-help"></i></span>
@@ -2211,6 +2212,31 @@ app.get('/ppt-templates', async (c) => {
 
       </div>
     \`
+    // 현재 mode에 맞게 필드 비활성화 초기 적용
+    onRuleModeChange(rule.generation_mode || 'BUILD_TABLE')
+  }
+
+  // ── mode 변경 시 관련 필드 활성/비활성 처리 ───────────────────
+  function onRuleModeChange(mode) {
+    // CLONE_SLIDE: 템플릿만 그대로 사용 → 계산/렌더/분할/후처리 불필요
+    // REPLACE: 변수치환만 → 렌더 함수 불필요
+    // BUILD_TABLE / BUILD_OBJECTS / HYBRID: 모두 활성
+    const isTemplateOnly = (mode === 'CLONE_SLIDE')
+    const isReplace      = (mode === 'REPLACE')
+
+    function setWrap(id, disabled) {
+      const el = document.getElementById(id)
+      if (!el) return
+      el.style.opacity   = disabled ? '0.38' : '1'
+      el.style.pointerEvents = disabled ? 'none' : ''
+      const inp = el.querySelector('input,select,textarea')
+      if (inp) inp.disabled = disabled
+    }
+
+    setWrap('wrap-ruleCalc',       isTemplateOnly)
+    setWrap('wrap-ruleRenderer',   isTemplateOnly || isReplace)
+    setWrap('wrap-rulePagination', isTemplateOnly)
+    setWrap('wrap-rulePostprocess',isTemplateOnly)
   }
 
   // ── 규칙 저장 ──────────────────────────────────────────────────
