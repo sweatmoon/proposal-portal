@@ -693,17 +693,28 @@ app.get('/', async (c) => {
       postprocess_mode: string; merge_strategy: string; rule_config: string
     }>(`SELECT * FROM ppt_generation_rules`)
 
-    const tplCounts = await query<{ menu_id: number; cnt: string }>(
-      `SELECT menu_id, COUNT(*) AS cnt FROM ppt_templates WHERE is_active=1 GROUP BY menu_id`
-    )
+    // pptx_b64_key 포함 — ppt-engine.js 템플릿 fallback용
+    const templates = await query<{
+      id: number; menu_id: number; template_name: string; variant_code: string
+      capacity: number | null; is_default: number; is_active: number
+      pptx_b64_key: string | null; pptx_file_path: string | null
+    }>(`SELECT id, menu_id, template_name, variant_code, capacity, is_default, is_active,
+              pptx_b64_key, pptx_file_path
+       FROM ppt_templates WHERE is_active=1 ORDER BY is_default DESC, id ASC`)
 
-    const ruleMap  = Object.fromEntries(rules.map(r => [r.menu_id, r]))
-    const tplMap   = Object.fromEntries(tplCounts.map(r => [r.menu_id, Number(r.cnt)]))
+    const ruleMap = Object.fromEntries(rules.map(r => [r.menu_id, r]))
+    // 메뉴별 템플릿 배열 맵
+    const tplMap: Record<number, typeof templates> = {}
+    for (const t of templates) {
+      if (!tplMap[t.menu_id]) tplMap[t.menu_id] = []
+      tplMap[t.menu_id].push(t)
+    }
 
     const enriched = menus.map(m => ({
       ...m,
       rule: ruleMap[m.id] ?? null,
-      template_count: tplMap[m.id] ?? 0,
+      templates: tplMap[m.id] ?? [],
+      template_count: (tplMap[m.id] ?? []).length,
     }))
 
     // 트리 변환

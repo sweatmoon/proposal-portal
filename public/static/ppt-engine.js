@@ -475,10 +475,32 @@ async function generateMenuPpt(menu, vm) {
       result = await downloadSummaryTablePptx(null, { returnZip: true });
       break;
 
-    default:
-      console.warn('[PptEngine] 알 수 없는 menu_code:', menu.menu_code);
-      return null;
-  }
+    default: {
+      // ── 템플릿 파일 직접 합본 (데이터 연동 미구현 메뉴) ──────────
+      // menu.templates 배열에서 pptx_b64_key가 있는 첫 번째 템플릿을 사용
+      const tpls = Array.isArray(menu.templates) ? menu.templates : [];
+      const tpl  = tpls.find(t => t.pptx_b64_key) || null;
+      if (!tpl) {
+        console.warn('[PptEngine] 템플릿 없음 (건너뜀):', menu.menu_code, menu.menu_name);
+        return null;
+      }
+      try {
+        // base64 → Uint8Array → JSZip
+        const b64   = tpl.pptx_b64_key;
+        const bin   = atob(b64);
+        const bytes = new Uint8Array(bin.length);
+        for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+        const zip = await JSZip.loadAsync(bytes);
+        console.log('[PptEngine] 템플릿 삽입:', menu.menu_code, '-', tpl.pptx_file_path || tpl.template_name);
+        result = { zip, mergeStrategy: 'FOREIGN_TEMPLATE' };
+      } catch (e) {
+        console.error('[PptEngine] 템플릿 로드 실패:', menu.menu_code, e.message);
+        return null;
+      }
+      break;
+    }
+
+  }  // end switch
 
   if (!result || !result.zip) return null;
 
