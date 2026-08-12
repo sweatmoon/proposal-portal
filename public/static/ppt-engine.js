@@ -441,7 +441,8 @@ async function generateMenuPpt(menu, vm) {
       result = await downloadPhotoAssignPptx(null, { returnZip: true });
       break;
 
-    case 'SUMMARY_TABLE':
+    case 'SUMMARY_TABLE':   // 구버전 호환 alias
+    case 'COMPLIANCE':      // 명세 기준 정식 코드 — 주관기관 요청사항 준수 여부
       result = await downloadSummaryTablePptx(null, { returnZip: true });
       break;
 

@@ -169,6 +169,23 @@ app.post('/migrate', async (c) => {
 // ═══════════════════════════════════════════════════════════════════
 app.post('/seed', async (c) => {
   try {
+    // ── 구버전 menu_code 호환 rename (멱등) ────────────────────────
+    // SUMMARY_TABLE → COMPLIANCE, ASSIGN_TABLE → MANPOWER_MD, PHOTO_ASSIGN → AUDITOR_PROFILE
+    const renames: Array<[string, string]> = [
+      ['SUMMARY_TABLE', 'COMPLIANCE'],
+      ['ASSIGN_TABLE',  'MANPOWER_MD'],
+      ['PHOTO_ASSIGN',  'AUDITOR_PROFILE'],
+    ]
+    for (const [oldCode, newCode] of renames) {
+      // 새 코드가 아직 없을 때만 rename (이미 둘 다 존재하면 건드리지 않음)
+      await exec(`
+        UPDATE ppt_menus
+        SET menu_code = $2, updated_at = NOW()
+        WHERE menu_code = $1
+          AND NOT EXISTS (SELECT 1 FROM ppt_menus WHERE menu_code = $2)
+      `, [oldCode, newCode])
+    }
+
     // ── 섹션 (parent) 정의 ─────────────────────────────────────────
     type SectionDef = { code: string; name: string; number: string; sort: number }
     const SECTIONS: SectionDef[] = [
