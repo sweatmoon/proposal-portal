@@ -378,3 +378,14 @@ CREATE INDEX IF NOT EXISTS idx_ppt_elements_template   ON ppt_template_elements(
 CREATE INDEX IF NOT EXISTS idx_ppt_compositions_menu   ON ppt_compositions(menu_id);
 CREATE INDEX IF NOT EXISTS idx_ppt_compositions_sort   ON ppt_compositions(proposal_type, sort_order);
 CREATE INDEX IF NOT EXISTS idx_ppt_tpl_versions_tpl    ON ppt_template_versions(template_id);
+
+-- ── 19. ppt_presets (전체 목차 스냅샷 프리셋) ──────────────────
+CREATE TABLE IF NOT EXISTS ppt_presets (
+  id          SERIAL PRIMARY KEY,
+  name        TEXT NOT NULL,
+  menu_count  INTEGER NOT NULL DEFAULT 0,
+  snapshot    JSONB NOT NULL DEFAULT '[]',   -- 메뉴+규칙+템플릿 전체 스냅샷
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_ppt_presets_created ON ppt_presets(created_at DESC);

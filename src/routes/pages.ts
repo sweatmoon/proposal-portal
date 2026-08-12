@@ -2286,43 +2286,35 @@ app.get('/ppt-templates', async (c) => {
     }
   }
 
-  // ── 프리셋 저장/불러오기 ─────────────────────────────────────
-  const PRESET_KEY = 'ppt_rule_presets'
+  // ── 프리셋 저장/불러오기 (DB 기반) ──────────────────────────
 
-  function loadPresets() {
-    try { return JSON.parse(localStorage.getItem(PRESET_KEY) || '[]') }
-    catch (e) { return [] }
-  }
+  function savePresets(_list) {}  // 하위호환 stub (사용 안 함)
 
-  function savePresets(list) {
-    localStorage.setItem(PRESET_KEY, JSON.stringify(list))
-  }
-
-  function openPresetModal() {
-    renderPresetList()
+  async function openPresetModal() {
     document.getElementById('presetNameInput').value = ''
     document.getElementById('presetModal').classList.remove('hidden')
+    await renderPresetList()
   }
 
   function closePresetModal() {
     document.getElementById('presetModal').classList.add('hidden')
   }
 
-  // ── 전체 목차 스냅샷 저장 ────────────────────────────────────
+  // ── 전체 목차 스냅샷 저장 (DB) ──────────────────────────────
   async function savePreset() {
     const name = document.getElementById('presetNameInput').value.trim()
     if (!name) { alert('프리셋 이름을 입력하세요'); return }
 
-    // API에서 전체 메뉴 트리(rules 포함) 조회
     const btn = document.getElementById('presetSaveBtn')
     btn.disabled = true
     btn.textContent = '저장 중...'
     try {
+      // 1) 전체 메뉴 트리 (rules 포함) 조회
       const r = await fetch('/api/ppt-menus')
       const j = await r.json()
       if (!j.ok) throw new Error(j.error)
 
-      // 트리를 평탄화하여 메뉴 전체 스냅샷 생성
+      // 2) 트리 평탄화
       const snapshot = []
       function flattenTree(nodes) {
         nodes.forEach(n => {
@@ -2343,28 +2335,46 @@ app.get('/ppt-templates', async (c) => {
               renderer_code:     n.rule.renderer_code,
               postprocess_mode:  n.rule.postprocess_mode,
               rule_config:       n.rule.rule_config,
-            } : null
+            } : null,
+            templates: []
           })
           if (n.children && n.children.length) flattenTree(n.children)
         })
       }
       flattenTree(j.data)
 
-      if (!snapshot.length) { alert('저장할 규칙이 있는 메뉴가 없습니다. 먼저 각 메뉴의 규칙을 설정하세요.'); return }
+      // 3) 각 메뉴의 템플릿 목록 병렬 조회 (pptx_b64_key 포함)
+      await Promise.all(snapshot.map(async (item) => {
+        try {
+          const tr = await fetch('/api/ppt-menus/' + item.menu_id + '/templates')
+          const tj = await tr.json()
+          if (tj.ok && Array.isArray(tj.data)) {
+            item.templates = tj.data.map(t => ({
+              template_name: t.template_name,
+              variant_code:  t.variant_code,
+              capacity:      t.capacity ?? null,
+              is_default:    t.is_default ?? 0,
+              is_active:     t.is_active ?? 1,
+              pptx_b64_key:  t.pptx_b64_key ?? null,
+              pptx_file_path: t.pptx_file_path ?? null,
+            }))
+          }
+        } catch(_) {}
+      }))
 
-      const list = loadPresets()
-      const existing = list.findIndex(p => p.name === name)
-      const entry = { name, snapshot, menuCount: snapshot.length, savedAt: new Date().toISOString() }
-      if (existing >= 0) {
-        if (!confirm('"' + name + '" 프리셋이 이미 있습니다. 덮어쓰시겠습니까?')) return
-        list[existing] = entry
-      } else {
-        list.unshift(entry)
-      }
-      savePresets(list)
-      renderPresetList()
+      // 4) DB에 저장
+      const sr = await fetch('/api/ppt-menus/presets', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, snapshot })
+      })
+      const sj = await sr.json()
+      if (!sj.ok) throw new Error(sj.error)
+
       document.getElementById('presetNameInput').value = ''
-      showAlert('✅ 프리셋 "' + name + '" 저장 완료 (' + snapshot.length + '개 메뉴 규칙)', true)
+      await renderPresetList()
+      const tplCount = snapshot.reduce((s, m) => s + (m.templates ? m.templates.length : 0), 0)
+      showAlert('✅ 프리셋 "' + name + '" 저장 완료 (메뉴 ' + snapshot.length + '개, 템플릿 ' + tplCount + '개)', true)
     } catch(e) {
       alert('저장 실패: ' + e.message)
     } finally {
@@ -2373,17 +2383,22 @@ app.get('/ppt-templates', async (c) => {
     }
   }
 
-  // ── 전체 목차 스냅샷 적용 (완전 덮어쓰기) ───────────────────
-  async function applyPreset(idx) {
-    const list = loadPresets()
-    const preset = list[idx]
-    if (!preset) { alert('프리셋을 찾을 수 없습니다'); return }
-    if (!confirm('"' + preset.name + '" 프리셋을 적용하시겠습니까?\\n\\n· 스냅샷의 ' + preset.menuCount + '개 메뉴로 완전히 덮어씁니다\\n· 이후 추가된 메뉴는 삭제됩니다\\n· 이 작업은 되돌릴 수 없습니다')) return
+  // ── 전체 목차 스냅샷 적용 (완전 덮어쓰기, DB) ───────────────
+  async function applyPreset(presetId) {
+    // 프리셋 snapshot 전체 조회
+    const pr = await fetch('/api/ppt-menus/presets/' + presetId)
+    const pj = await pr.json()
+    if (!pj.ok) { alert('프리셋을 찾을 수 없습니다'); return }
+    const preset = pj.data
+
+    if (!confirm('"' + preset.name + '" 프리셋을 적용하시겠습니까?\\n\\n· 스냅샷의 ' + preset.menu_count + '개 메뉴로 완전히 덮어씁니다\\n· 이후 추가된 메뉴는 삭제됩니다\\n· 이 작업은 되돌릴 수 없습니다')) return
 
     closePresetModal()
     showAlert('⏳ 프리셋 복원 중...', true)
 
     try {
+      const snapshot = Array.isArray(preset.snapshot) ? preset.snapshot : JSON.parse(preset.snapshot)
+
       // 1) 현재 전체 메뉴 id 목록 조회
       const curR = await fetch('/api/ppt-menus')
       const curJ = await curR.json()
@@ -2393,16 +2408,16 @@ app.get('/ppt-templates', async (c) => {
       }
       collectIds(curJ.data || [])
 
-      const snapIds = new Set(preset.snapshot.map(item => item.menu_id))
+      const snapIds = new Set(snapshot.map(item => item.menu_id))
 
-      // 2) 스냅샷에 없는 메뉴 삭제 (이후 추가된 것)
+      // 2) 스냅샷에 없는 메뉴 삭제
       const toDelete = [...curIds].filter(id => !snapIds.has(id))
       for (const id of toDelete) {
         await fetch('/api/ppt-menus/' + id, { method: 'DELETE' })
       }
 
-      // 3) 스냅샷 메뉴 전체 upsert (부모→자식 순서 보장: parent_id=null 먼저)
-      const sorted = [...preset.snapshot].sort((a, b) => {
+      // 3) 스냅샷 메뉴+룰 upsert (부모 먼저)
+      const sorted = [...snapshot].sort((a, b) => {
         if (!a.parent_id && b.parent_id) return -1
         if (a.parent_id && !b.parent_id) return 1
         return 0
@@ -2424,9 +2439,35 @@ app.get('/ppt-templates', async (c) => {
               rule:        item.rule ?? null,
             })
           })
-          const j = await r.json()
-          if (j.ok) ok++; else fail++
+          const rj = await r.json()
+          if (rj.ok) ok++; else fail++
         } catch(_) { fail++ }
+      }
+
+      // 4) 템플릿 복원 — 메뉴별 기존 템플릿 전부 삭제 후 재삽입
+      let tplOk = 0, tplFail = 0
+      for (const item of snapshot) {
+        if (!item.templates || !item.templates.length) continue
+        try {
+          // 기존 템플릿 삭제 (메뉴 단위)
+          const existing = await fetch('/api/ppt-menus/' + item.menu_id + '/templates')
+          const ej = await existing.json()
+          if (ej.ok && Array.isArray(ej.data)) {
+            for (const t of ej.data) {
+              await fetch('/api/ppt-menus/templates/' + t.id, { method: 'DELETE' })
+            }
+          }
+          // 스냅샷 템플릿 재삽입
+          for (const t of item.templates) {
+            const tr = await fetch('/api/ppt-menus/' + item.menu_id + '/templates', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(t)
+            })
+            const tj = await tr.json()
+            if (tj.ok) tplOk++; else tplFail++
+          }
+        } catch(_) { tplFail++ }
       }
 
       await loadTree()
@@ -2436,45 +2477,50 @@ app.get('/ppt-templates', async (c) => {
         _selectedMenuId = null
       }
 
-      const deleted = toDelete.length
-      const delNote = deleted ? ', 불필요 메뉴 ' + deleted + '개 삭제' : ''
-      const failNote = fail ? ' (실패 ' + fail + '개)' : ''
-      showAlert('✅ 프리셋 "' + preset.name + '" 복원 완료 — ' + ok + '개 복원' + delNote + failNote, fail === 0)
+      const delNote = toDelete.length ? ', 불필요 메뉴 ' + toDelete.length + '개 삭제' : ''
+      const tplNote = (tplOk + tplFail) > 0 ? ', 템플릿 ' + tplOk + '개 복원' : ''
+      const failNote = (fail + tplFail) ? ' (실패 ' + (fail + tplFail) + '개)' : ''
+      showAlert('✅ 프리셋 "' + preset.name + '" 복원 완료 — 메뉴 ' + ok + '개' + tplNote + delNote + failNote, (fail + tplFail) === 0)
     } catch(e) {
       showAlert('❌ 복원 중 오류: ' + e.message, false)
     }
   }
 
-  function deletePreset(idx) {
-    const list = loadPresets()
-    const preset = list[idx]
-    if (!preset) return
-    if (!confirm('"' + preset.name + '" 프리셋을 삭제하시겠습니까?')) return
-    list.splice(idx, 1)
-    savePresets(list)
-    renderPresetList()
+  async function deletePreset(presetId) {
+    const name = document.querySelector('[data-preset-id="' + presetId + '"] .preset-name')?.textContent || '이 프리셋'
+    if (!confirm('"' + name + '" 프리셋을 삭제하시겠습니까?')) return
+    const r = await fetch('/api/ppt-menus/presets/' + presetId, { method: 'DELETE' })
+    const j = await r.json()
+    if (j.ok) await renderPresetList()
+    else alert('삭제 실패: ' + j.error)
   }
 
-  function renderPresetList() {
-    const list = loadPresets()
+  async function renderPresetList() {
     const container = document.getElementById('presetList')
-    if (!list.length) {
-      container.innerHTML = '<div class="text-center text-slate-400 text-xs py-4">저장된 프리셋이 없습니다</div>'
-      return
+    container.innerHTML = '<div class="text-center text-slate-400 text-xs py-4"><i class="fas fa-spinner fa-spin mr-1"></i>불러오는 중...</div>'
+    try {
+      const r = await fetch('/api/ppt-menus/presets')
+      const j = await r.json()
+      const list = j.data || []
+      if (!list.length) {
+        container.innerHTML = '<div class="text-center text-slate-400 text-xs py-4">저장된 프리셋이 없습니다</div>'
+        return
+      }
+      container.innerHTML = list.map(p => {
+        const dt = new Date(p.created_at)
+        const dtStr = dt.getFullYear() + '.' + String(dt.getMonth()+1).padStart(2,'0') + '.' + String(dt.getDate()).padStart(2,'0') + ' ' + String(dt.getHours()).padStart(2,'0') + ':' + String(dt.getMinutes()).padStart(2,'0')
+        return '<div class="flex items-center gap-2 bg-slate-50 rounded-lg px-3 py-2 border border-slate-200" data-preset-id="' + p.id + '">' +
+          '<div class="flex-1 min-w-0">' +
+            '<div class="text-xs font-semibold text-slate-800 truncate preset-name">' + p.name + '</div>' +
+            '<div class="text-xs text-slate-400 mt-0.5">메뉴 ' + p.menu_count + '개 · ' + dtStr + '</div>' +
+          '</div>' +
+          '<button onclick="applyPreset(' + p.id + ')" class="px-2 py-1 text-xs rounded bg-indigo-600 text-white hover:bg-indigo-700 whitespace-nowrap"><i class="fas fa-check mr-1"></i>적용</button>' +
+          '<button onclick="deletePreset(' + p.id + ')" class="px-2 py-1 text-xs rounded bg-red-50 text-red-500 hover:bg-red-100 border border-red-200 whitespace-nowrap"><i class="fas fa-trash"></i></button>' +
+        '</div>'
+      }).join('')
+    } catch(e) {
+      container.innerHTML = '<div class="text-center text-red-400 text-xs py-4">불러오기 실패: ' + e.message + '</div>'
     }
-    container.innerHTML = list.map((p, idx) => {
-      const dt = new Date(p.savedAt)
-      const dtStr = dt.getFullYear() + '.' + String(dt.getMonth()+1).padStart(2,'0') + '.' + String(dt.getDate()).padStart(2,'0') + ' ' + String(dt.getHours()).padStart(2,'0') + ':' + String(dt.getMinutes()).padStart(2,'0')
-      const menuCount = p.menuCount || (p.snapshot ? p.snapshot.length : 0)
-      return '<div class="flex items-center gap-2 bg-slate-50 rounded-lg px-3 py-2 border border-slate-200">' +
-        '<div class="flex-1 min-w-0">' +
-          '<div class="text-xs font-semibold text-slate-800 truncate">' + p.name + '</div>' +
-          '<div class="text-xs text-slate-400 mt-0.5">메뉴 ' + menuCount + '개 · ' + dtStr + '</div>' +
-        '</div>' +
-        '<button onclick="applyPreset(' + idx + ')" class="px-2 py-1 text-xs rounded bg-indigo-600 text-white hover:bg-indigo-700 whitespace-nowrap"><i class="fas fa-check mr-1"></i>적용</button>' +
-        '<button onclick="deletePreset(' + idx + ')" class="px-2 py-1 text-xs rounded bg-red-50 text-red-500 hover:bg-red-100 border border-red-200 whitespace-nowrap"><i class="fas fa-trash"></i></button>' +
-      '</div>'
-    }).join('')
   }
 
   // ── 툴팁 팝오버 ──────────────────────────────────────────────────

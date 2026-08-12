@@ -157,7 +157,20 @@ app.post('/migrate', async (c) => {
     ]
     for (const sql of indexes) await exec(sql)
 
-    return c.json({ ok: true, message: 'PPT 테이블 마이그레이션 완료 (6개 테이블)' })
+    // 7. ppt_presets (전체 목차 스냅샷 프리셋)
+    await exec(`
+      CREATE TABLE IF NOT EXISTS ppt_presets (
+        id          SERIAL PRIMARY KEY,
+        name        TEXT NOT NULL,
+        menu_count  INTEGER NOT NULL DEFAULT 0,
+        snapshot    JSONB NOT NULL DEFAULT '[]',
+        created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `)
+    await exec(`CREATE INDEX IF NOT EXISTS idx_ppt_presets_created ON ppt_presets(created_at DESC)`)
+
+    return c.json({ ok: true, message: 'PPT 테이블 마이그레이션 완료 (7개 테이블)' })
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : String(e)
     return c.json({ ok: false, error: msg }, 500)
@@ -1035,6 +1048,65 @@ app.post('/compositions/reorder', async (c) => {
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : String(e)
     return c.json({ ok: false, error: msg }, 400)
+  }
+})
+
+// ═══════════════════════════════════════════════════════════════════
+// [8] 프리셋 CRUD  /api/ppt-menus/presets
+// ═══════════════════════════════════════════════════════════════════
+
+/** GET /api/ppt-menus/presets — 전체 목록 (snapshot 제외, 목록용) */
+app.get('/presets', async (c) => {
+  try {
+    const rows = await query(`
+      SELECT id, name, menu_count, created_at, updated_at
+      FROM ppt_presets ORDER BY created_at DESC
+    `)
+    return c.json({ ok: true, data: rows })
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : String(e)
+    return c.json({ ok: false, error: msg }, 500)
+  }
+})
+
+/** GET /api/ppt-menus/presets/:id — snapshot 포함 단건 조회 */
+app.get('/presets/:id', async (c) => {
+  try {
+    const id = Number(c.req.param('id'))
+    const row = await queryOne(`SELECT * FROM ppt_presets WHERE id=$1`, [id])
+    if (!row) return c.json({ ok: false, error: 'not found' }, 404)
+    return c.json({ ok: true, data: row })
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : String(e)
+    return c.json({ ok: false, error: msg }, 500)
+  }
+})
+
+/** POST /api/ppt-menus/presets — 새 프리셋 저장 */
+app.post('/presets', async (c) => {
+  try {
+    const { name, snapshot } = await c.req.json()
+    if (!name || !Array.isArray(snapshot)) return c.json({ ok: false, error: 'name, snapshot 필수' }, 400)
+    const row = await queryOne<{ id: number }>(`
+      INSERT INTO ppt_presets (name, menu_count, snapshot)
+      VALUES ($1, $2, $3) RETURNING id
+    `, [name, snapshot.length, JSON.stringify(snapshot)])
+    return c.json({ ok: true, id: row?.id })
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : String(e)
+    return c.json({ ok: false, error: msg }, 400)
+  }
+})
+
+/** DELETE /api/ppt-menus/presets/:id — 프리셋 삭제 */
+app.delete('/presets/:id', async (c) => {
+  try {
+    const id = Number(c.req.param('id'))
+    await exec(`DELETE FROM ppt_presets WHERE id=$1`, [id])
+    return c.json({ ok: true })
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : String(e)
+    return c.json({ ok: false, error: msg }, 500)
   }
 })
 
