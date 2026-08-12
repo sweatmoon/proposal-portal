@@ -2218,7 +2218,7 @@ app.get('/ppt-templates', async (c) => {
   // ── 템플릿 삭제 ────────────────────────────────────────────────
   async function deleteTpl(tid) {
     if (!confirm('템플릿을 삭제하시겠습니까?')) return
-    const r = await fetch('/api/ppt-templates/' + tid, { method: 'DELETE' })
+    const r = await fetch('/api/ppt-menus/templates/' + tid, { method: 'DELETE' })
     const j = await r.json()
     showAlert(j.ok ? '✅ 삭제 완료' : '❌ ' + j.error, j.ok)
     if (j.ok && _selectedMenuId) selectMenu(_selectedMenuId)
