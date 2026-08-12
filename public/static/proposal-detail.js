@@ -452,7 +452,7 @@ function computeAssignRows() {
     const certNo = (info.certNo || '').trim()
     const certDisplay = (!certNo || certNo === '-') ? '전문가' : fmtCertNo(certNo)
     const grade = getEffectiveGrade(name)
-    return { name, field, stageLabel, affil, certDisplay, grade, heritageLines: isAudit ? 10 : 3 }
+    return { name, field, stageLabel, affil, certDisplay, grade, isAudit, heritageLines: isAudit ? 10 : 3 }
   })
 }
 
@@ -461,8 +461,15 @@ async function downloadAssignPptx(btn, opts) {
   if (typeof PptxGenJS === 'undefined') { alert('PPT 라이브러리 로딩 중입니다.'); return null }
   setBtnState(btn, true)
   try {
-    const rows = computeAssignRows()
+    let rows = computeAssignRows()
     if (!rows.length) { alert('인력 데이터가 없습니다.'); return null }
+
+    // groupFilter: 'AUDITOR' → 감리원만, 'EXPERT' → 전문가(핵심+필수+보안+테스터)만
+    if (opts.groupFilter === 'AUDITOR') {
+      rows = rows.filter(r => r.isAudit)
+    } else if (opts.groupFilter === 'EXPERT') {
+      rows = rows.filter(r => !r.isAudit)
+    }
     const pres = new PptxGenJS(); pres.layout = 'LAYOUT_WIDE'
     const FONT_BOLD = 'KoPub돋움체 Bold', FONT_MEDIUM = 'KoPub돋움체 Medium'
     const bd = { pt: 0.5, color: '969696' }, bd0 = { type: 'none' }
@@ -707,6 +714,11 @@ async function buildPhotoPptxFromTemplate(pages) {
 
 // ── downloadPhotoAssignPptx ─────────────────────────────────────
 // 체크리스트 설정을 읽어 pages 배열을 구성한 뒤 buildPhotoPptxFromTemplate 호출
+// opts.groupFilter:
+//   'AUDITOR'      → 감리원(audit)만                     (AUDITOR_PROFILE, 3.1)
+//   'CORE_EXPERT'  → 핵심기술(core)만                    (CORE_EXPERT_PROFILE, 3.2)
+//   'EXPERT'       → 필수기술·보안·테스터(required+security+tester)만  (EXPERT_PROFILE, 3.3)
+//   undefined      → 전체 (기존 동작 그대로)
 async function downloadPhotoAssignPptx(btn, opts) {
   opts = opts || {}
   if (typeof JSZip === 'undefined') { alert('JSZip 라이브러리 로딩 중입니다. 잠시 후 다시 시도해주세요.'); return null }
@@ -714,6 +726,29 @@ async function downloadPhotoAssignPptx(btn, opts) {
   try {
     const cache = buildPhotoAssignCache()
     if (!cache) { showAutoAlert('❌ 인력 데이터가 없습니다.', false); return null }
+
+    // ── groupFilter에 따라 처리할 카테고리 키 결정 ──
+    const gf = opts.groupFilter
+    let targetAuditPeople = []
+    let targetCatKeys     = []   // 전문가 계열 처리 대상 key 목록
+
+    if (!gf || gf === 'ALL') {
+      // 기존 동작: 감리원 + 전문가 전체
+      targetAuditPeople = cache.audit || []
+      targetCatKeys = ['core', 'required', 'security', 'tester']
+    } else if (gf === 'AUDITOR') {
+      // 3.1 단계 감리원의 전문 역량
+      targetAuditPeople = cache.audit || []
+      targetCatKeys = []
+    } else if (gf === 'CORE_EXPERT') {
+      // 3.2 핵심기술 점검팀의 전문 역량
+      targetAuditPeople = []
+      targetCatKeys = ['core']
+    } else if (gf === 'EXPERT') {
+      // 3.3 필수기술·보안·테스트팀 전문 역량
+      targetAuditPeople = []
+      targetCatKeys = ['required', 'security', 'tester']
+    }
 
     // 체크리스트 설정 읽기 (모달 미열림 시 기본값 fallback)
     let cfg = {}
@@ -730,7 +765,7 @@ async function downloadPhotoAssignPptx(btn, opts) {
     const pages = []
 
     // 감리원: 2인 장표 고정
-    const auditPeople = (cache.audit || []).map(p => ({
+    const auditPeople = targetAuditPeople.map(p => ({
       name: p.name,
       field: (parsedData.personFieldMap || {})[p.name] || '감리원',
       grade: getEffectiveGrade(p.name),
@@ -747,8 +782,11 @@ async function downloadPhotoAssignPptx(btn, opts) {
       }
     }
 
-    // 전문가/테스터: union-find 그룹화
-    const catGroups = groupPhotoCategories(cfg)
+    // 전문가/테스터: union-find 그룹화 (targetCatKeys에 있는 것만)
+    const filteredCfg = {}
+    targetCatKeys.forEach(k => { if (cfg[k]) filteredCfg[k] = cfg[k] })
+
+    const catGroups = groupPhotoCategories(filteredCfg)
     for (const catKeys of catGroups) {
       const firstCat = PHOTO_CATS.find(c => catKeys.includes(c.key))
       const sheetSize = (cfg[firstCat.key] || {}).sheet || suggestSheetSize(1)

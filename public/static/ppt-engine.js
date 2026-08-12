@@ -429,26 +429,53 @@ async function generateMenuPpt(menu, vm) {
 
   // ── 메뉴 코드별 디스패처 ──
   switch (menu.menu_code) {
+
+    // ── 세부 감리 일정 ─────────────────────────────────────────────
     case 'DETAIL_SCHEDULE':
       result = await downloadDetailSchedule1Pptx(null, { returnZip: true });
       break;
 
-    case 'ASSIGN_TABLE':
+    // ── 사진장표 3종 ───────────────────────────────────────────────
+    // 3.1 단계 감리원의 전문 역량
+    case 'AUDITOR_PROFILE':
+    case 'PHOTO_ASSIGN':          // 구버전 alias
+      result = await downloadPhotoAssignPptx(null, { returnZip: true, groupFilter: 'AUDITOR' });
+      break;
+
+    // 3.2 핵심기술 점검팀의 전문 역량
+    case 'CORE_EXPERT_PROFILE':
+      result = await downloadPhotoAssignPptx(null, { returnZip: true, groupFilter: 'CORE_EXPERT' });
+      break;
+
+    // 3.3 필수기술·보안·테스트팀 전문 역량
+    case 'EXPERT_PROFILE':
+      result = await downloadPhotoAssignPptx(null, { returnZip: true, groupFilter: 'EXPERT' });
+      break;
+
+    // ── 표장표 2종 ─────────────────────────────────────────────────
+    // 3.4 감리원별 유사 감리 실적 및 경력·자격
+    case 'AUDITOR_HISTORY':
+      result = await downloadAssignPptx(null, { returnZip: true, groupFilter: 'AUDITOR' });
+      break;
+
+    // 3.5 전문가별 유사 감리 실적 및 경력·자격
+    case 'EXPERT_HISTORY':
+      result = await downloadAssignPptx(null, { returnZip: true, groupFilter: 'EXPERT' });
+      break;
+
+    // ── 기존 표장표 (감리원/전문가 통합 표) ───────────────────────
+    case 'ASSIGN_TABLE':          // 구버전 alias
+    case 'MANPOWER_MD':
       result = await downloadAssignPptx(null, { returnZip: true });
       break;
 
-    case 'PHOTO_ASSIGN':
-      result = await downloadPhotoAssignPptx(null, { returnZip: true });
-      break;
-
-    case 'SUMMARY_TABLE':   // 구버전 호환 alias
-    case 'COMPLIANCE':      // 명세 기준 정식 코드 — 주관기관 요청사항 준수 여부
+    // ── 주관기관 요청사항 준수 여부 (요약표) ──────────────────────
+    case 'SUMMARY_TABLE':         // 구버전 alias
+    case 'COMPLIANCE':
       result = await downloadSummaryTablePptx(null, { returnZip: true });
       break;
 
     default:
-      // 향후 신규 메뉴는 여기에 추가하거나
-      // rule.renderer_code를 동적으로 실행하는 방식으로 확장
       console.warn('[PptEngine] 알 수 없는 menu_code:', menu.menu_code);
       return null;
   }
