@@ -240,8 +240,17 @@ async function mergePresentationZips(parts) {
     }
   }
 
-  // 마스터 없는 경우: baseZip(usable[0])의 기존 슬라이드는 presXml/presRelsXml에 이미 포함돼 있으므로
-  // newRels/newIds/newCt 만 append하면 된다
+  // sldIdLst 태그가 없으면 삽입 (마스터 전용 PPTX는 sldIdLst 자체가 없을 수 있음)
+  if (!presXml.includes('</p:sldIdLst>')) {
+    // sldMasterIdLst 뒤에 삽입
+    if (presXml.includes('</p:sldMasterIdLst>')) {
+      presXml = presXml.replace('</p:sldMasterIdLst>', '</p:sldMasterIdLst><p:sldIdLst></p:sldIdLst>');
+    } else {
+      // fallback: </p:presentation> 바로 앞에 삽입
+      presXml = presXml.replace('</p:presentation>', '<p:sldIdLst></p:sldIdLst></p:presentation>');
+    }
+  }
+
   presRelsXml = presRelsXml.replace('</Relationships>', newRels + '</Relationships>');
   presXml     = presXml.replace('</p:sldIdLst>', newIds + '</p:sldIdLst>');
   ctXml       = ctXml.replace('</Types>', newCt + '</Types>');
