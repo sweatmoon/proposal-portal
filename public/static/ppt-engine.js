@@ -419,31 +419,33 @@ async function _mergeForeign({ baseZip, srcZip, srcPresXml, srcPresRels, counter
     if (!relsXml) return;
     const mediaMatches = [...relsXml.matchAll(/Target="([^"]*media\/[^"]+)"/g)];
     for (const mm of mediaMatches) {
-      let target = mm[1];
+      let origRelTarget = mm[1];
+      let target = origRelTarget;
       // 상대경로 → 절대경로 변환
       if (!target.startsWith('ppt/')) {
-        // basePath 기준 상대경로 해석
         const baseDir = basePath.replace(/[^/]+$/, '');
         target = (baseDir + target).replace(/\/[^/]+\/\.\.\//g, '/').replace(/^\//, '');
-        // ppt/ 로 시작하도록 보정
         if (!target.startsWith('ppt/')) target = 'ppt/' + target;
       }
-      // 파일명 충돌 방지: baseZip에 없을 때만 복사
-      if (!foreignPathMap['media:' + target]) {
-        const bytes = await getFileBytes(target);
-        if (bytes) {
-          // 이미 baseZip에 같은 경로로 파일이 있으면 다른 이름으로
-          const fileName = target.split('/').pop();
-          const ext      = fileName.includes('.') ? '.' + fileName.split('.').pop() : '';
-          const existing = baseZip.file(target);
-          if (existing) {
-            // 이미 있으면 그대로 (baseZip의 파일이 우선)
-          } else {
-            baseZip.file(target, bytes);
-          }
-          foreignPathMap['media:' + target] = true;
-        }
+      if (foreignPathMap['media:' + target]) continue;
+
+      const bytes = await getFileBytes(target);
+      if (!bytes) continue;
+
+      const existing = baseZip.file(target);
+      let destPath = target;
+      if (existing) {
+        // 충돌: 새 이름 생성
+        const mediaFile = target.split('/').pop();
+        const dotIdx    = mediaFile.lastIndexOf('.');
+        const base      = dotIdx >= 0 ? mediaFile.slice(0, dotIdx) : mediaFile;
+        const ext       = dotIdx >= 0 ? mediaFile.slice(dotIdx)    : '';
+        let   idx       = 1;
+        while (baseZip.file(`ppt/media/${base}_f${idx}${ext}`)) idx++;
+        destPath = `ppt/media/${base}_f${idx}${ext}`;
       }
+      baseZip.file(destPath, bytes);
+      foreignPathMap['media:' + target] = destPath;
     }
   }
 
@@ -595,17 +597,46 @@ async function _mergeForeign({ baseZip, srcZip, srcPresXml, srcPresRels, counter
       }
     }
 
-    // 미디어 파일 복사
-    const mediaMatches = [...slideRelsXml.matchAll(/Target="[^"]*media\/([^"]+)"/g)];
+    // 미디어 파일 복사 — 충돌 시 새 이름으로 저장 + rels 내 참조 교체
+    const mediaMatches = [...slideRelsXml.matchAll(/Target="([^"]*media\/[^"]+)"/g)];
     for (const mm of mediaMatches) {
-      const mediaFile = mm[1];
-      const srcMediaPath = `ppt/media/${mediaFile}`;
-      if (!foreignPathMap[srcMediaPath]) {
-        const mediaBytes = await getFileBytes(srcMediaPath);
-        if (mediaBytes) {
-          baseZip.file(srcMediaPath, mediaBytes);
-          foreignPathMap[srcMediaPath] = true;
+      const origRelTarget = mm[1];                          // e.g. "../media/image3.png"
+      const mediaFile     = origRelTarget.split('/').pop(); // e.g. "image3.png"
+      const srcMediaPath  = `ppt/media/${mediaFile}`;
+
+      if (foreignPathMap[srcMediaPath]) {
+        // 이미 처리된 파일 → 저장된 실제 경로로 rels 교체
+        const actualPath   = foreignPathMap[srcMediaPath];  // e.g. "ppt/media/image3.png" or renamed
+        const relTarget    = '../' + actualPath.replace(/^ppt\//, '');
+        if (relTarget !== origRelTarget) {
+          slideRelsXml = slideRelsXml.split(origRelTarget).join(relTarget);
         }
+        continue;
+      }
+
+      const mediaBytes = await getFileBytes(srcMediaPath);
+      if (!mediaBytes) continue;
+
+      const existing = baseZip.file(srcMediaPath);
+      let destPath = srcMediaPath;
+
+      if (existing) {
+        // 충돌: 새 이름 생성 (e.g. image3.png → image3_f1.png)
+        const dotIdx  = mediaFile.lastIndexOf('.');
+        const base    = dotIdx >= 0 ? mediaFile.slice(0, dotIdx) : mediaFile;
+        const ext     = dotIdx >= 0 ? mediaFile.slice(dotIdx)    : '';
+        let   idx     = 1;
+        while (baseZip.file(`ppt/media/${base}_f${idx}${ext}`)) idx++;
+        destPath = `ppt/media/${base}_f${idx}${ext}`;
+      }
+
+      baseZip.file(destPath, mediaBytes);
+      foreignPathMap[srcMediaPath] = destPath;
+
+      // slideRelsXml 내 참조 교체 (새 이름이면)
+      if (destPath !== srcMediaPath) {
+        const newRelTarget = '../' + destPath.replace(/^ppt\//, '');
+        slideRelsXml = slideRelsXml.split(origRelTarget).join(newRelTarget);
       }
     }
 
