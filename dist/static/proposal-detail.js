@@ -219,19 +219,43 @@ function renderPhotoAssignRows() {
     </div>`
   }).join('')
   wrap.innerHTML = rows
+  // 렌더링 후 단독 체크 상태 반영 → 비활성화 동기화
+  syncAllSoloIncludeDisabled()
 }
 
-// "단독" 체크 시 같은 행의 포함 체크박스 모두 해제
+// 단독 체크된 카테고리를 include 대상으로 가진 체크박스를 비활성화/활성화
+// soloCat이 단독 체크 ON → 다른 행에서 soloCat을 include 체크박스를 disabled
+// soloCat이 단독 체크 OFF → 다른 행에서 soloCat을 include 체크박스를 enabled
+function syncSoloIncludeDisabled(soloCat, isSolo) {
+  document.querySelectorAll(`.paw-include[data-target="${soloCat}"]`).forEach(cb => {
+    cb.disabled = isSolo
+    if (isSolo) cb.checked = false
+    const label = cb.closest('label')
+    if (label) label.style.opacity = isSolo ? '0.35' : ''
+  })
+}
+
+// "단독" 체크 시 같은 행의 포함 체크박스 모두 해제 + 다른 행의 이 cat include 비활성화
 function onPawSoloChange(cat) {
   const row = document.querySelector(`.photo-assign-row[data-cat="${cat}"]`)
   const solo = row.querySelector('.paw-solo')
   if (solo.checked) row.querySelectorAll('.paw-include').forEach(cb => { cb.checked = false })
+  syncSoloIncludeDisabled(cat, solo.checked)
 }
 // 다른 분류 포함 체크 시 "단독" 자동 해제
 function onPawIncludeChange(cat) {
   const row = document.querySelector(`.photo-assign-row[data-cat="${cat}"]`)
   const anyChecked = Array.from(row.querySelectorAll('.paw-include')).some(cb => cb.checked)
   if (anyChecked) row.querySelector('.paw-solo').checked = false
+}
+
+// 초기 렌더링 후 단독 체크 상태에 따라 include 체크박스 비활성화 동기화
+function syncAllSoloIncludeDisabled() {
+  document.querySelectorAll('.photo-assign-row').forEach(row => {
+    const cat = row.dataset.cat
+    const soloEl = row.querySelector('.paw-solo')
+    if (soloEl && soloEl.checked) syncSoloIncludeDisabled(cat, true)
+  })
 }
 
 // 각 분류 행의 설정(장표 크기, 포함 대상) 읽기
