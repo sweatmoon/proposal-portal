@@ -193,6 +193,11 @@ const PAW_MENU_DEFAULT_CATS = {
   EXPERT_PROFILE:       ['required', 'security', 'tester'],
 }
 
+// 메뉴 코드 → 고정 템플릿 크기 (지정 시 인원 수 추천 무시)
+const PAW_MENU_FIXED_SHEET = {
+  AUDITOR_PROFILE: 2,
+}
+
 // 내부 목차 데이터 저장소
 // [{ id, menuCode, title, sheetSize, cats: ['audit', ...] }, ...]
 let _pawTocList = []
@@ -261,11 +266,12 @@ function renderPhotoAssignRows() {
         .filter(k => activeCats.some(c => c.key === k))   // 실제 인원 있는 팀만
       const totalCount = defaultCats.reduce((s, k) => s + (cache[k] || []).length, 0)
       const title = [m.menu_number, m.menu_name].filter(Boolean).join(' ')
+      const fixedSheet = PAW_MENU_FIXED_SHEET[m.menu_code]
       return {
         id: i + 1,
         menuCode: m.menu_code,
         title,
-        sheetSize: suggestSheetSize(Math.max(totalCount, 1)),
+        sheetSize: fixedSheet !== undefined ? fixedSheet : suggestSheetSize(Math.max(totalCount, 1)),
         cats: defaultCats,
       }
     })
