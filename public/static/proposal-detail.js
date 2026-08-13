@@ -528,10 +528,11 @@ const PHOTO_LAYOUT_META = {
   9: { file: 'ppt/slides/slide4.xml', rows: 3, cols: 3, orderIndexToSlot: [1, 2, 3, 6, 9, 4, 5, 7, 8] },
 }
 
-// 열 우선 슬롯 채움 순서 (왼쪽 열부터 위→아래로 채운 뒤 다음 열)
+// 행 우선 슬롯 채움 순서 (위쪽 행부터 왼→오른쪽으로 채운 뒤 다음 행)
+// 예) 3×3: [1,2,3, 4,5,6, 7,8,9] → 빈 슬롯이 항상 마지막 행 오른쪽에 위치
 function computeFillOrder(rows, cols) {
   const order = []
-  for (let c = 0; c < cols; c++) for (let r = 0; r < rows; r++) order.push(r * cols + c + 1)
+  for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) order.push(r * cols + c + 1)
   return order
 }
 
