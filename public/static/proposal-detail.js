@@ -1175,42 +1175,29 @@ async function downloadPhotoAssignPptx(btn, opts) {
 
     const catGroups = groupPhotoCategories(filteredCfg)
 
-    // solo=true 카테고리가 다른 그룹의 include 대상인 경우를 미리 파악
-    // → 해당 solo 카테고리는 독립 그룹 슬라이드를 만들되, include한 그룹 슬라이드에도 중복 포함
-    // → include한 그룹 처리 시 solo 카테고리 people을 앞에 삽입 (순서: solo포함대상 → 나머지)
-    const soloIncludedBy = {}  // soloKey → 자신을 include한 catKey Set
-    targetCatKeys.forEach(k => {
-      if (cfg[k]) cfg[k].include.forEach(t => {
-        if (cfg[t] && cfg[t].solo) {
-          soloIncludedBy[t] = soloIncludedBy[t] || new Set()
-          soloIncludedBy[t].add(k)
-        }
-      })
-    })
+    // targetCatKeys 밖에 있는 카테고리(solo=true로 include된 외부 카테고리)는
+    // 독립 슬라이드를 만들지 않고, include한 그룹의 people에만 합산
+    const externalSoloKeys = new Set(
+      Object.keys(filteredCfg).filter(k => !targetCatKeys.includes(k))
+    )
 
     for (const catKeys of catGroups) {
+      // 이 그룹이 외부 solo 카테고리만으로 구성된 독립 그룹이면 슬라이드 생성 skip
+      // (해당 인원은 include한 그룹에서 people 합산으로 처리)
+      if (catKeys.every(k => externalSoloKeys.has(k))) continue
+
       const firstCat = PHOTO_CATS.find(c => catKeys.includes(c.key))
-      // solo=true 카테고리가 include 대상으로 포함된 경우 → 해당 카테고리 자체 sheet 무시,
-      // 그룹을 구성한 원본 카테고리(solo=false인 첫 번째)의 sheet 사용
+      // 그룹 내 solo=false(원본 카테고리)의 sheet 사용
       const ownerCat = catKeys.find(k => filteredCfg[k] && !filteredCfg[k].solo) || firstCat.key
       const sheetSize = (cfg[ownerCat] || cfg[firstCat.key] || {}).sheet || suggestSheetSize(1)
       const meta = PHOTO_LAYOUT_META[sheetSize]
       const fillOrder = computeFillOrder(meta.rows, meta.cols)
 
       const people = []
-      // 이 그룹의 include 대상 중 solo=true인 카테고리를 먼저 앞에 배치
-      // (단독 슬라이드 + 이 그룹에 중복 포함 의도 → 순서: solo포함대상 → catKeys 나머지)
-      const soloIncludeKeys = new Set()
-      catKeys.forEach(k => {
-        if (cfg[k]) cfg[k].include.forEach(t => { if (cfg[t] && cfg[t].solo) soloIncludeKeys.add(t) })
-      })
-      // solo 카테고리가 이 그룹의 catKeys에 있으면 독립 그룹이므로 중복 삽입 제외
-      // (catKeys에 solo=true인 것만 있는 그룹 = 독립 그룹 → soloIncludeKeys 없음)
-      const isIndependentSoloGroup = catKeys.every(k => filteredCfg[k] && filteredCfg[k].solo)
-      const insertSoloFirst = !isIndependentSoloGroup
-      const allPeopleKeys = insertSoloFirst
-        ? [...soloIncludeKeys, ...catKeys.filter(k => !soloIncludeKeys.has(k))]
-        : [...catKeys]
+      // include된 외부 solo 카테고리(targetCatKeys 밖)를 앞에 배치, 나머지 순서대로
+      const externalSoloInGroup = catKeys.filter(k => externalSoloKeys.has(k))
+      const internalCatKeys = catKeys.filter(k => !externalSoloKeys.has(k))
+      const allPeopleKeys = [...externalSoloInGroup, ...internalCatKeys]
       allPeopleKeys.forEach(catKey => {
         const catLabel = PHOTO_CATS.find(c => c.key === catKey).label.replace(/^\S+\s/, '')
         ;(cache[catKey] || []).forEach(p => {
