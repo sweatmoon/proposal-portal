@@ -128,7 +128,7 @@ export function parsePersonnelHtml(html: string): ParsedPersonnel {
   const basicTable =
     tables[3] ??
     findTableByHeaders(tables, ['성명']) ??
-    tables.find(t => t.rows.some(r => r[0]?.includes('감리원증'))) ??
+    tables.find(t => t.rows.some(r => r.join(' ').includes('감리원증'))) ??
     null
   const t4 = basicTable?.rows ?? []
 
@@ -141,55 +141,65 @@ export function parsePersonnelHtml(html: string): ParsedPersonnel {
     education_name: '', education_hours: 0, education_org: '',
   }
 
+  // ── rowspan 오프셋 감지 헬퍼 ─────────────────────────────────
+  // HTML에서 첫 번째 열이 rowspan으로 인력 이름이 반복 삽입되는 경우,
+  // cells[0]이 항상 이름이 되어 실제 라벨이 cells[1]부터 시작함
+  // → 행 전체에서 라벨 키워드를 찾아 실제 시작 오프셋을 반환
+  function findOffset(cells: string[], ...keywords: string[]): number {
+    for (let ci = 0; ci < cells.length; ci++) {
+      if (keywords.some(kw => cells[ci].includes(kw))) return ci
+    }
+    return 0
+  }
+
   // 실제 HTML 구조: 라벨 행 다음에 값 행이 오는 패턴
-  // row N   = 라벨들: [감리원증] [감리원 등급] [기술 등급] [감리 경력] [감리 시작일]
-  // row N+1 = 값들:  [서울 제134호] [수석감리원] [기술사] [-] [0]
-  //
-  // 따라서 "라벨 행"을 먼저 감지하고, 다음 행에서 인덱스 대응 값을 읽는다
+  // rowspan 있는 경우: row N = [이름(rowspan), 감리원증, 감리원 등급, ...]
+  //                   row N+1 = [이름(rowspan), 정감협 제4755호, 감리원, ...]
+  // rowspan 없는 경우: row N = [감리원증, 감리원 등급, ...]
+  //                   row N+1 = [정감협 제4755호, 감리원, ...]
 
   for (let i = 0; i < t4.length; i++) {
     const cells = (t4[i] ?? []).map(c => (c ?? '').trim())
+    const rowText = cells.join(' ')
 
     // ── 성명/직위/회사 ─────────────────────────────────────
-    if (cells[0].includes('성명')) {
+    if (rowText.includes('성명') && rowText.includes('직위')) {
       // 다음 행이 값 행
       const vRow = (t4[i + 1] ?? []).map(c => (c ?? '').trim())
-      const raw = vRow[0] ?? ''   // "강신배 (수석, 상근)"
+      // 성명 헤더 오프셋 찾기
+      const off = findOffset(cells, '성명')
+      const raw = vRow[off] ?? ''   // "강신배 (수석, 상근)" 또는 "김현호 (과장, 상근)"
       const mName = raw.match(/^([^\(（\s]+)/)
       if (mName) personnel.name = mName[1]
       const mPos  = raw.match(/[（(]([^,）)]+)/)
       if (mPos) personnel.position = mPos[1].trim()
       personnel.is_fulltime = raw.includes('상근') ? 1 : 0
-      // 회사: 마지막 셀 (index 5 기준, 없으면 마지막 비어있지 않은 셀)
-      personnel.company = vRow[5] ?? vRow[vRow.length - 1] ?? ''
+      // 회사: 마지막 셀 (index off+5 기준)
+      personnel.company = vRow[off + 5] ?? vRow[vRow.length - 1] ?? ''
     }
 
     // ── 감리원증 / 감리원 등급 / 기술 등급 라벨 행 감지 ───
-    // 패턴: cells = [감리원증, 감리원 등급, 기술 등급, 감리 경력, 감리 시작일]
-    if (cells[0].includes('감리원증') || cells[0].includes('감리원 번호')) {
-      // 다음 행이 값 행
+    if (rowText.includes('감리원증') || rowText.includes('감리원 번호')) {
+      const off = findOffset(cells, '감리원증', '감리원 번호')
       const vRow = (t4[i + 1] ?? []).map(c => (c ?? '').trim())
-      // cells[0]=감리원증  → vRow[0]=자격번호
-      // cells[1]=감리원 등급 → vRow[1]=등급값
-      // cells[2]=기술 등급  → vRow[2]=기술등급값
-      // cells[3]=감리 경력  → vRow[3]=경력값 (무시 - 동적 계산)
-      // cells[4]=감리 시작일 → vRow[4]=시작일 (무시 - 동적 계산)
-      for (let ci = 0; ci < cells.length; ci++) {
+      // off부터 라벨-값 대응
+      for (let ci = off; ci < cells.length; ci++) {
         const lbl = cells[ci]
         const val = (vRow[ci] ?? '').trim()
         if (!val || val === '-') continue
         if (lbl.includes('감리원증') || lbl.includes('감리원 번호')) personnel.auditor_cert_no = val
         if (lbl.includes('감리원 등급') || lbl === '감리등급')         personnel.auditor_grade   = val
         if (lbl.includes('기술 등급')   || lbl === '기술등급')          personnel.tech_grade      = val
+        // 감리 경력/시작일: HTML 값을 직접 저장 (audit_history 없을 때 fallback용)
+        // upload-personnel.ts의 동적 계산이 우선이므로 여기서는 보조 저장하지 않음
       }
     }
 
     // ── 이메일 / 연락처 / 생년월일 라벨 행 감지 ──────────
-    // 패턴: cells = [이메일, 연락처, 생년월일, ...]
-    if (cells[0] === '이메일' || cells[0].includes('이메일')) {
-      // 다음 행이 값 행
+    if (rowText.includes('이메일')) {
+      const off = findOffset(cells, '이메일')
       const vRow = (t4[i + 1] ?? []).map(c => (c ?? '').trim())
-      for (let ci = 0; ci < cells.length; ci++) {
+      for (let ci = off; ci < cells.length; ci++) {
         const lbl = cells[ci]
         const val = vRow[ci] ?? ''
         if (!val || val === '-') continue
@@ -204,39 +214,46 @@ export function parsePersonnelHtml(html: string): ParsedPersonnel {
     }
 
     // ── 최종학교 라벨 행 감지 ────────────────────────────
-    if (cells[0].includes('최종학교')) {
+    if (rowText.includes('최종학교')) {
+      const off = findOffset(cells, '최종학교')
       const vRow = (t4[i + 1] ?? []).map(c => (c ?? '').trim())
-      personnel.school = vRow[0] ?? ''
-      // 전공/학위는 라벨 행에서 인덱스 파악 후 값 행에서 읽기
-      for (let ci = 1; ci < cells.length; ci++) {
+      personnel.school = vRow[off] ?? ''
+      for (let ci = off + 1; ci < cells.length; ci++) {
         const lbl = cells[ci]
         const val = vRow[ci] ?? ''
         if (lbl.includes('전공')) personnel.major  = val
         if (lbl.includes('학위') || lbl.includes('졸업')) personnel.degree = val
       }
-      // 라벨 없이 순서만 있는 경우
-      if (!personnel.major  && vRow[1]) personnel.major  = vRow[1]
-      if (!personnel.degree && vRow[2]) personnel.degree = vRow[2]
+      if (!personnel.major  && vRow[off + 1]) personnel.major  = vRow[off + 1]
+      if (!personnel.degree && vRow[off + 2]) personnel.degree = vRow[off + 2]
     }
 
     // ── 경력 관련 필드 (라벨 | 값 이 같은 행에 있는 구조) ───
-    // cells[1]이 비어있으면 colspan으로 합쳐진 경우 cells[1] = '' 일 수 있으나
-    // parseHtmlTables가 <pre> 내부 텍스트를 cells[1]에 넣어준다 (확인 완료)
-    if (cells[0] === '주요 경력' || (cells[0].includes('주요 경력') && !cells[0].includes('자격') && !cells[0].includes('및'))) {
-      const val = (cells[1] ?? '').trim()
-      if (val) personnel.career_summary = val
+    // rowspan 있는 경우: cells[0]=이름, cells[1]=라벨, cells[2]=값
+    // rowspan 없는 경우: cells[0]=라벨, cells[1]=값
+    const lblIdx  = findOffset(cells, '주요 경력', '주요경력')
+    const lblCell = cells[lblIdx] ?? ''
+    const valCell = (cells[lblIdx + 1] ?? '').trim()
+
+    if (lblCell.includes('주요 경력') && !lblCell.includes('자격') && !lblCell.includes('및')) {
+      if (valCell) personnel.career_summary = valCell
     }
-    if (cells[0].includes('주요 경력 및 자격') || cells[0].includes('주요경력및자격')) {
-      const val = (cells[1] ?? '').trim()
-      if (val) personnel.career_qualif = val
+    if (lblCell.includes('주요 경력 및 자격') || lblCell.includes('주요경력및자격')) {
+      if (valCell) personnel.career_qualif = valCell
     }
-    if (cells[0].includes('시스템 개발') || cells[0].includes('프로젝트 실무')) {
-      const val = (cells[1] ?? '').trim()
-      if (val) personnel.career_project = val
+
+    const lblIdx2  = findOffset(cells, '시스템 개발', '프로젝트 실무')
+    const lblCell2 = cells[lblIdx2] ?? ''
+    const valCell2 = (cells[lblIdx2 + 1] ?? '').trim()
+    if (lblCell2.includes('시스템 개발') || lblCell2.includes('프로젝트 실무')) {
+      if (valCell2) personnel.career_project = valCell2
     }
-    if (cells[0].includes('주요 이력') || cells[0].includes('전문가용')) {
-      const val = (cells[1] ?? '').trim()
-      if (val) personnel.career_expert = val
+
+    const lblIdx3  = findOffset(cells, '주요 이력', '전문가용')
+    const lblCell3 = cells[lblIdx3] ?? ''
+    const valCell3 = (cells[lblIdx3 + 1] ?? '').trim()
+    if (lblCell3.includes('주요 이력') || lblCell3.includes('전문가용')) {
+      if (valCell3) personnel.career_expert = valCell3
     }
   }
 
