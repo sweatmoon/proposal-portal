@@ -728,11 +728,11 @@ async function buildPhotoPptxFromTemplate(pages, templateZips) {
     return count
   }
 
-  // xmlDoc 전체에서 label을 모두 찾아 value로 치환
+  // xmlDoc 전체에서 label을 모두 찾아 value로 치환 (공백 정규화 매칭)
   function replaceAllLabels(xmlDoc, label, value) {
     const paras = Array.from(xmlDoc.getElementsByTagNameNS(A_NS, 'p'))
     let count = 0
-    paras.forEach(p => { count += replaceLabelInParagraph(p, label, value) })
+    paras.forEach(p => { count += replaceLabelInParagraphNorm(p, label, value) })
     return count
   }
 
@@ -766,17 +766,92 @@ async function buildPhotoPptxFromTemplate(pages, templateZips) {
     return null
   }
 
-  // [이름] 단락 기준으로 카드 슬롯 인덱스 반환 (슬라이드 내 등장 순서)
+  // [이름] 단락 기준으로 카드 슬롯 인덱스 반환 (슬라이드 내 등장 순서, 공백 정규화 매칭)
   function getNameParaOccurrences(xmlDoc) {
     const paras = Array.from(xmlDoc.getElementsByTagNameNS(A_NS, 'p'))
     const result = []
     paras.forEach((p, pi) => {
       const concat = Array.from(p.getElementsByTagNameNS(A_NS, 'r'))
         .map(r => { const t = r.getElementsByTagNameNS(A_NS, 't')[0]; return t ? t.textContent : '' })
-        .join('')
+        .join('').replace(/\s+/g, '')
       if (concat.includes('[이름]')) result.push({ para: p, paraIdx: pi })
     })
     return result
+  }
+
+  // 공백 정규화 치환 엔진: 런 concat을 공백 제거 후 label(공백 제거)을 탐색,
+  // 실제로는 원본 런에서 해당 범위를 찾아 value로 치환
+  // 예: "[ 감리이력1 ]" → normLabel("[감리이력1]")으로 위치를 찾되,
+  //     실제 런 범위를 공백 포함 원본 기준으로 계산하여 제거
+  function replaceLabelInParagraphNorm(pEl, label, value) {
+    const runs = Array.from(pEl.getElementsByTagNameNS(A_NS, 'r'))
+    if (!runs.length) return 0
+    const runData = runs.map(r => {
+      const tEl = r.getElementsByTagNameNS(A_NS, 't')[0]
+      return { el: r, tEl, text: tEl ? tEl.textContent : '' }
+    })
+
+    // 원본 concat과 공백제거 concat을 모두 계산
+    const origConcat = runData.map(r => r.text).join('')
+    const normConcat = origConcat.replace(/\s+/g, '')
+    const normLabelStr = label.replace(/\s+/g, '')
+
+    // 정규화 concat에서 label 위치 탐색
+    const normPos = normConcat.indexOf(normLabelStr)
+    if (normPos === -1) return 0
+
+    // 정규화 위치 → 원본 concat 위치로 역매핑
+    // normConcat[i]는 origConcat에서 공백 제거 후의 i번째 문자
+    // origPos: normConcat의 normPos번째 비공백 문자가 origConcat의 몇 번째인지
+    let normIdx = 0, origStart = -1, origEnd = -1
+    for (let oi = 0; oi < origConcat.length; oi++) {
+      if (!/\s/.test(origConcat[oi])) {
+        if (normIdx === normPos) origStart = oi
+        if (normIdx === normPos + normLabelStr.length - 1) { origEnd = oi + 1; break }
+        normIdx++
+      }
+    }
+    // origEnd가 끝 공백까지 포함하도록 확장 ("]" 뒤 공백 포함)
+    if (origEnd === -1) return 0
+
+    // 원본 concat 위치 → 런 인덱스 매핑
+    let charAccum = 0
+    let startRunIdx = -1, endRunIdx = -1
+    let startCharInRun = 0, endCharInRun = 0
+    for (let ri = 0; ri < runData.length; ri++) {
+      const rLen = runData[ri].text.length
+      if (startRunIdx === -1 && charAccum + rLen > origStart) {
+        startRunIdx = ri
+        startCharInRun = origStart - charAccum
+      }
+      if (endRunIdx === -1 && charAccum + rLen >= origEnd) {
+        endRunIdx = ri
+        endCharInRun = origEnd - charAccum
+        break
+      }
+      charAccum += rLen
+    }
+    if (startRunIdx === -1 || endRunIdx === -1) return 0
+
+    const startRun = runData[startRunIdx]
+    const before = startRun.text.slice(0, startCharInRun)
+    const afterEnd = runData[endRunIdx].text.slice(endCharInRun)
+
+    if (startRunIdx === endRunIdx) {
+      if (startRun.tEl) startRun.tEl.textContent = before + value + afterEnd
+    } else {
+      if (startRun.tEl) startRun.tEl.textContent = before + value
+      for (let ri = startRunIdx + 1; ri < endRunIdx; ri++) {
+        if (runData[ri].el.parentNode) runData[ri].el.parentNode.removeChild(runData[ri].el)
+      }
+      if (runData[endRunIdx].tEl) {
+        runData[endRunIdx].tEl.textContent = afterEnd
+        if (!afterEnd && runData[endRunIdx].el.parentNode) {
+          runData[endRunIdx].el.parentNode.removeChild(runData[endRunIdx].el)
+        }
+      }
+    }
+    return 1
   }
 
   // ── 슬라이드 생성 루프 ──────────────────────────────────────────
@@ -849,23 +924,30 @@ async function buildPhotoPptxFromTemplate(pages, templateZips) {
     // ── 카드별 placeholder 치환 (런 분산 처리 엔진 사용) ──
     // ⚠️ 중요: 치환 전에 모든 단락 참조를 미리 수집해야 함
     //          치환 후 xmlDoc을 재스캔하면 이미 치환된 단락이 사라져 idx가 밀림
+    // ⚠️ 템플릿에서 [ 감리이력1 ] 처럼 괄호 안에 공백이 있을 수 있으므로
+    //    정규화(공백 제거)된 concat 텍스트로 매핑 label을 탐색함
     const ALL_LABELS = [
       '[분야]', '[이름]', '[감리원등급]', '[자격구분]', '[자격요약]',
       '[감리횟수]', '[자격수]', '[감리경력]', '[IT경력기간]', '[IT경력]',
     ]
     for (let ri = 1; ri <= 10; ri++) ALL_LABELS.push('[감리이력' + ri + ']')
 
-    // 치환 전에 라벨별 단락 목록 미리 수집 (0-indexed occurrence 순서)
+    // 단락 concat에서 공백 제거 후 label(공백 제거)과 매칭
+    // 실제 치환 시엔 원본 concat에서 실제 텍스트를 정확히 찾아 대체
+    function normLabel(s) { return s.replace(/\s+/g, '') }
+    function paraMatchesLabel(pEl, label) {
+      const concat = Array.from(pEl.getElementsByTagNameNS(A_NS, 'r'))
+        .map(r => { const t = r.getElementsByTagNameNS(A_NS, 't')[0]; return t ? t.textContent : '' })
+        .join('')
+      return concat.replace(/\s+/g, '').includes(normLabel(label))
+    }
+
+    // 치환 전에 라벨별 단락 목록 미리 수집 (0-indexed occurrence 순서, 공백 무관 매칭)
     const preFetchedParas = {}
     ALL_LABELS.forEach(label => {
       const paras = Array.from(xmlDoc.getElementsByTagNameNS(A_NS, 'p'))
       const list = []
-      paras.forEach(p => {
-        const concat = Array.from(p.getElementsByTagNameNS(A_NS, 'r'))
-          .map(r => { const t = r.getElementsByTagNameNS(A_NS, 't')[0]; return t ? t.textContent : '' })
-          .join('')
-        if (concat.includes(label)) list.push(p)
-      })
+      paras.forEach(p => { if (paraMatchesLabel(p, label)) list.push(p) })
       preFetchedParas[label] = list
     })
 
@@ -891,7 +973,7 @@ async function buildPhotoPptxFromTemplate(pages, templateZips) {
       Object.entries(directMap).forEach(([label, value]) => {
         const paraList = preFetchedParas[label]
         const para = paraList && paraList[idx]
-        if (para) replaceLabelInParagraph(para, label, value)
+        if (para) replaceLabelInParagraphNorm(para, label, value)
       })
 
       // [감리이력1]~[감리이력10] 치환
@@ -901,7 +983,7 @@ async function buildPhotoPptxFromTemplate(pages, templateZips) {
         const value = 실적List[ri - 1] || ''
         const paraList = preFetchedParas[label]
         const para = paraList && paraList[idx]
-        if (para) replaceLabelInParagraph(para, label, value)
+        if (para) replaceLabelInParagraphNorm(para, label, value)
       }
     })
 

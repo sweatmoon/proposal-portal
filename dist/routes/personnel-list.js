@@ -225,10 +225,12 @@ app.get('/:id/photo-profile', async (c) => {
     ]);
     if (!person)
         return c.json({ ok: false, error: 'person not found' }, 404);
-    // ── [자격구분] 감리사 우선, 없으면 기술사 ──────────────────
+    // ── [자격구분] 감리사 우선, 없으면 기술사 — 키워드만 추출 ──
+    // cert_name 전체("소프트웨어감리사", "정보통신기술사" 등)가 아닌
+    // "감리사" 또는 "기술사" 키워드 자체만 반환
     const certGamri = certs.find(c2 => c2.cert_name.includes('감리사'));
     const certGisul = certs.find(c2 => c2.cert_name.includes('기술사'));
-    const 자격구분 = certGamri?.cert_name ?? certGisul?.cert_name ?? '';
+    const 자격구분 = certGamri ? '감리사' : certGisul ? '기술사' : '';
     // ── [감리경력] 최초 audit_yearmonth → 현재까지 ─────────────
     const toYM = (ym) => {
         const m = String(ym).match(/(\d{4})[.\s년](\d{1,2})/);
@@ -248,25 +250,39 @@ app.get('/:id/photo-profile', async (c) => {
         const mos = totalMonths % 12;
         감리경력 = yrs > 0 ? `${yrs}년 ${mos}개월` : `${mos}개월`;
     }
-    // ── [IT경력기간] period_start ~ period_end 합산 ─────────────
-    let itTotalMonths = 0;
-    for (const c2 of itCareer) {
-        const parseYM = (s) => {
-            if (!s)
-                return null;
-            const mt = String(s).match(/(\d{4})[.\-년](\d{1,2})/);
-            return mt ? { y: Number(mt[1]), m: Number(mt[2]) } : null;
-        };
-        const st = parseYM(c2.period_start);
-        const en = parseYM(c2.period_end) ?? { y: new Date().getFullYear(), m: new Date().getMonth() + 1 };
-        if (st)
-            itTotalMonths += Math.max(0, (en.y - st.y) * 12 + (en.m - st.m));
+    // ── [IT경력기간] MIN(period_start) ~ MAX(period_end) 기간 계산 ──
+    // 각 경력의 기간을 단순 합산하면 겹치는 기간이 과다 계산됨
+    // → 전체 경력 중 가장 이른 시작일 ~ 가장 늦은 종료일(없으면 현재)로 계산
+    let IT경력기간 = '';
+    const parseYMVal = (s) => {
+        if (!s)
+            return null;
+        const mt = String(s).match(/(\d{4})[.\-년](\d{1,2})/);
+        return mt ? { y: Number(mt[1]), m: Number(mt[2]) } : null;
+    };
+    const itStarts = itCareer.map(c2 => parseYMVal(c2.period_start)).filter(Boolean);
+    const itEnds = itCareer.map(c2 => parseYMVal(c2.period_end)).filter(Boolean);
+    if (itStarts.length > 0) {
+        // MIN start
+        const minStart = itStarts.reduce((a, b) => (a.y * 12 + a.m <= b.y * 12 + b.m ? a : b));
+        // MAX end (없으면 현재)
+        const now = new Date();
+        const nowYM = { y: now.getFullYear(), m: now.getMonth() + 1 };
+        const maxEnd = itEnds.length > 0
+            ? itEnds.reduce((a, b) => (a.y * 12 + a.m >= b.y * 12 + b.m ? a : b))
+            : nowYM;
+        // period_end가 없는 재직 중 경력이 있으면 현재를 최대값으로 비교
+        const hasOpenEnd = itCareer.some(c2 => !parseYMVal(c2.period_end));
+        const effectiveEnd = hasOpenEnd
+            ? (maxEnd.y * 12 + maxEnd.m >= nowYM.y * 12 + nowYM.m ? maxEnd : nowYM)
+            : maxEnd;
+        const totalMonths = Math.max(0, (effectiveEnd.y - minStart.y) * 12 + (effectiveEnd.m - minStart.m));
+        const itYrs = Math.floor(totalMonths / 12);
+        const itMos = totalMonths % 12;
+        IT경력기간 = totalMonths > 0
+            ? (itYrs > 0 ? `${itYrs}년 ${itMos}개월` : `${itMos}개월`)
+            : '';
     }
-    const itYrs = Math.floor(itTotalMonths / 12);
-    const itMos = itTotalMonths % 12;
-    const IT경력기간 = itTotalMonths > 0
-        ? (itYrs > 0 ? `${itYrs}년 ${itMos}개월` : `${itMos}개월`)
-        : '';
     // ── [실적1]~[실적10] audit-match 로직 (inline) ──────────────
     const mappingMap = new Map();
     for (const km of kmRows)
