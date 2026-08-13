@@ -528,10 +528,11 @@ const PHOTO_LAYOUT_META = {
   9: { file: 'ppt/slides/slide4.xml', rows: 3, cols: 3, orderIndexToSlot: [1, 2, 3, 6, 9, 4, 5, 7, 8] },
 }
 
-// 열 우선 슬롯 채움 순서 (왼쪽 열부터 위→아래로 채운 뒤 다음 열)
+// 행 우선 슬롯 채움 순서 (위쪽 행부터 왼→오른쪽으로 채운 뒤 다음 행)
+// 예) 3×3: [1,2,3, 4,5,6, 7,8,9] → 빈 슬롯이 항상 마지막 행 오른쪽에 위치
 function computeFillOrder(rows, cols) {
   const order = []
-  for (let c = 0; c < cols; c++) for (let r = 0; r < rows; r++) order.push(r * cols + c + 1)
+  for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) order.push(r * cols + c + 1)
   return order
 }
 
@@ -1134,9 +1135,15 @@ async function downloadPhotoAssignPptx(btn, opts) {
       }
     }
 
-    // 전문가/테스터: union-find 그룹화 (targetCatKeys에 있는 것만)
+    // 전문가/테스터: union-find 그룹화
+    // targetCatKeys에 있는 카테고리 + 그 include 대상 카테고리도 함께 포함
+    // (예: EXPERT 모드에서 required가 core를 include로 체크한 경우 core도 포함)
     const filteredCfg = {}
-    targetCatKeys.forEach(k => { if (cfg[k]) filteredCfg[k] = cfg[k] })
+    const expandedKeys = new Set(targetCatKeys)
+    targetCatKeys.forEach(k => {
+      if (cfg[k]) cfg[k].include.forEach(t => { if (cfg[t]) expandedKeys.add(t) })
+    })
+    expandedKeys.forEach(k => { if (cfg[k]) filteredCfg[k] = cfg[k] })
 
     const catGroups = groupPhotoCategories(filteredCfg)
     for (const catKeys of catGroups) {

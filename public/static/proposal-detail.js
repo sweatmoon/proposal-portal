@@ -1135,9 +1135,15 @@ async function downloadPhotoAssignPptx(btn, opts) {
       }
     }
 
-    // 전문가/테스터: union-find 그룹화 (targetCatKeys에 있는 것만)
+    // 전문가/테스터: union-find 그룹화
+    // targetCatKeys에 있는 카테고리 + 그 include 대상 카테고리도 함께 포함
+    // (예: EXPERT 모드에서 required가 core를 include로 체크한 경우 core도 포함)
     const filteredCfg = {}
-    targetCatKeys.forEach(k => { if (cfg[k]) filteredCfg[k] = cfg[k] })
+    const expandedKeys = new Set(targetCatKeys)
+    targetCatKeys.forEach(k => {
+      if (cfg[k]) cfg[k].include.forEach(t => { if (cfg[t]) expandedKeys.add(t) })
+    })
+    expandedKeys.forEach(k => { if (cfg[k]) filteredCfg[k] = cfg[k] })
 
     const catGroups = groupPhotoCategories(filteredCfg)
     for (const catKeys of catGroups) {
