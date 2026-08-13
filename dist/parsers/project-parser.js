@@ -329,8 +329,12 @@ export function parseProjectHtml(html) {
                     certNo = txt(certTd);
             }
             // 담당분야 + expertSubGroup
+            // 자격증 td(residencyIdx+2)는 certNo 추출에 이미 사용되므로 분야 탐색에서 제외
+            const certTdIndex = residencyIdx >= 0 ? residencyIdx + 2 : -1;
             let mainField = '', subField = '', separateCategoryField = '', expertSubGroup = '';
-            for (const c of rowTds) {
+            for (const [ci, c] of rowTds.entries()) {
+                if (ci === certTdIndex)
+                    continue; // 자격증 번호 td 명시적 제외
                 const style = c.getAttribute('style') || '';
                 const colspan = c.getAttribute('colspan');
                 if (colspan === '2' && !c.querySelector('.FontBlue')) {
@@ -381,9 +385,7 @@ export function parseProjectHtml(html) {
                     ft = ft.trim();
                     if (!ft || ft === '(K)')
                         continue;
-                    if (/^(서울|경기|부산|대구|인천|광주|대전|울산|정감협|행안부|행정안전부|강원|충북|충남|전북|전남|경북|경남|제주)/.test(ft))
-                        continue;
-                    if (/제\d+호$/.test(ft))
+                    if (/^(서울|경기|부산|대구|인천|광주|대전|울산|정감협|행안부|강원|충북|충남|전북|전남|경북|경남|제주)/.test(ft))
                         continue;
                     if (ft.length > 40)
                         continue;
