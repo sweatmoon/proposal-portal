@@ -522,10 +522,10 @@ async function downloadAssignPptx(btn, opts) {
 
 // 장표 레이아웃 메타 (원본 PPT의 슬라이드 파일명 + 카드 배치 매핑)
 const PHOTO_LAYOUT_META = {
-  2: { file: 'ppt/slides/slide1.xml', rows: 1, cols: 2, orderIndexToSlot: [1, 2] },
-  4: { file: 'ppt/slides/slide2.xml', rows: 2, cols: 2, orderIndexToSlot: [1, 2, 3, 4] },
-  6: { file: 'ppt/slides/slide3.xml', rows: 2, cols: 3, orderIndexToSlot: [1, 4, 5, 6, 2, 3] },
-  9: { file: 'ppt/slides/slide4.xml', rows: 3, cols: 3, orderIndexToSlot: [1, 2, 3, 6, 9, 4, 5, 7, 8] },
+  2: { file: 'ppt/slides/slide1.xml', rows: 1, cols: 2, orderIndexToSlot: [1, 2],          titleLabel: '2인장표' },
+  4: { file: 'ppt/slides/slide2.xml', rows: 2, cols: 2, orderIndexToSlot: [1, 2, 3, 4],    titleLabel: '4인장표' },
+  6: { file: 'ppt/slides/slide3.xml', rows: 2, cols: 3, orderIndexToSlot: [1, 4, 5, 6, 2, 3], titleLabel: '6인장표' },
+  9: { file: 'ppt/slides/slide4.xml', rows: 3, cols: 3, orderIndexToSlot: [1, 2, 3, 6, 9, 4, 5, 7, 8], titleLabel: '9인장표' },
 }
 
 // 행 우선 슬롯 채움 순서 (위쪽 행부터 왼→오른쪽으로 채운 뒤 다음 행)
@@ -741,20 +741,33 @@ async function buildPhotoPptxFromTemplate(pages, templateZips) {
     return count
   }
 
-  // [제목] 단락 치환: 제목 텍스트를 기존 런 서식 유지로 치환하고,
-  // totalPages >= 2 이면 뒤에 16pt 런 " (pageNum/totalPages)" 추가
-  function replaceTitleLabel(xmlDoc, titleText, pageNum, totalPages) {
+  // 제목 단락 치환: 장표 크기별 실제 placeholder 텍스트(예: '9인장표')를 찾아
+  // titleText로 치환하고, totalPages >= 2 이면 뒤에 16pt " (pageNum/totalPages)" 런 추가.
+  // titleLabel: PHOTO_LAYOUT_META의 titleLabel 값 (예: '9인장표')
+  function replaceTitleLabel(xmlDoc, titleText, pageNum, totalPages, titleLabel) {
     const paras = Array.from(xmlDoc.getElementsByTagNameNS(A_NS, 'p'))
+    // 탐색 후보: titleLabel(공백제거)을 포함하는 단락 또는 '[제목]' 포함 단락(하위 호환)
+    const candidates = titleLabel
+      ? [titleLabel.replace(/\s+/g, ''), '[제목]']
+      : ['[제목]']
+
     for (const pEl of paras) {
       const runs = Array.from(pEl.getElementsByTagNameNS(A_NS, 'r'))
       if (!runs.length) continue
       const concat = runs.map(r => {
         const t = r.getElementsByTagNameNS(A_NS, 't')[0]; return t ? t.textContent : ''
       }).join('').replace(/\s+/g, '')
-      if (!concat.includes('[제목]')) continue
 
-      // 1) [제목] → titleText 치환 (기존 런 서식 유지)
-      replaceLabelInParagraphNorm(pEl, '[제목]', titleText)
+      // 후보 중 하나라도 포함하면 제목 단락으로 인식
+      const matchedLabel = candidates.find(c => concat.includes(c))
+      if (!matchedLabel) continue
+
+      // 1) placeholder → titleText 치환 (기존 런 서식 유지)
+      // titleLabel은 공백 포함 원본 형태로 치환 (예: '9인장표' → 공백 정규화 매칭)
+      const labelToReplace = (titleLabel && concat.includes(titleLabel.replace(/\s+/g, '')))
+        ? titleLabel
+        : '[제목]'
+      replaceLabelInParagraphNorm(pEl, labelToReplace, titleText)
 
       // 2) totalPages >= 2 이면 뒤에 16pt (pageNum/totalPages) 런 추가
       if (totalPages >= 2) {
@@ -778,7 +791,7 @@ async function buildPhotoPptxFromTemplate(pages, templateZips) {
 
         pEl.appendChild(numRun)
       }
-      break // [제목]은 슬라이드당 1개
+      break // 제목은 슬라이드당 1개
     }
   }
 
@@ -997,7 +1010,8 @@ async function buildPhotoPptxFromTemplate(pages, templateZips) {
     cardsToRemove.forEach(ci => cardShapes[ci].forEach(sp => { if (sp.parentNode) sp.parentNode.removeChild(sp) }))
 
     // ── 슬라이드 전체 [제목] 치환 (목차명 + 다중 장표 시 16pt (N/total) 넘버링) ──
-    replaceTitleLabel(xmlDoc, page.slideTitle || '', page.pageNum || 1, page.totalPages || 1)
+    // meta.titleLabel 전달: 실제 템플릿 placeholder 텍스트('9인장표' 등)를 탐지
+    replaceTitleLabel(xmlDoc, page.slideTitle || '', page.pageNum || 1, page.totalPages || 1, meta.titleLabel)
 
     nameParaOccurrences.forEach((_nameOcc, idx) => {
       const slot = meta.orderIndexToSlot[idx]
