@@ -210,7 +210,7 @@ app.get('/:id/photo-profile', async (c) => {
         queryOne(`SELECT person_name, domain, auditor_grade, auditor_cert_no, personnel_id
        FROM proposal_members WHERE project_id = $1 AND personnel_id = $2 LIMIT 1`, [projectId, personnelId]),
         // 인력 기본 정보
-        queryOne(`SELECT name, career_qualif, career_project FROM personnel WHERE id = $1`, [personnelId]),
+        queryOne(`SELECT name, career_qualif, career_project, career_expert FROM personnel WHERE id = $1`, [personnelId]),
         // 자격증 전체
         query(`SELECT cert_name FROM personnel_certifications WHERE personnel_id = $1 ORDER BY cert_year DESC`, [personnelId]),
         // 감리실적 전체 (연월 ASC → 최초 연월 계산용)
@@ -355,6 +355,7 @@ app.get('/:id/photo-profile', async (c) => {
             자격구분,
             자격요약: person.career_qualif ?? '',
             IT경력: person.career_project ?? '',
+            주요이력: person.career_expert ?? '',
             감리횟수: auditHistory.length,
             자격수: certs.length,
             감리경력,

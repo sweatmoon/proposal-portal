@@ -928,7 +928,7 @@ async function buildPhotoPptxFromTemplate(pages, templateZips) {
     //    정규화(공백 제거)된 concat 텍스트로 매핑 label을 탐색함
     const ALL_LABELS = [
       '[분야]', '[이름]', '[감리원등급]', '[자격구분]', '[자격요약]',
-      '[감리횟수]', '[자격수]', '[감리경력]', '[IT경력기간]', '[IT경력]',
+      '[감리횟수]', '[자격수]', '[감리경력]', '[IT경력기간]', '[IT경력]', '[주요이력]',
     ]
     for (let ri = 1; ri <= 10; ri++) ALL_LABELS.push('[감리이력' + ri + ']')
 
@@ -969,6 +969,7 @@ async function buildPhotoPptxFromTemplate(pages, templateZips) {
         '[감리경력]':   pr.감리경력   || '',
         '[IT경력기간]': pr.IT경력기간 || '',
         '[IT경력]':     pr.IT경력     || '',
+        '[주요이력]':   pr.주요이력   || '',
       }
       Object.entries(directMap).forEach(([label, value]) => {
         const paraList = preFetchedParas[label]
