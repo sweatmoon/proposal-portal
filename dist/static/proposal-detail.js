@@ -182,21 +182,20 @@ function buildPhotoAssignCache() {
 }
 
 // ── 목차 기반 사진장표 UI ───────────────────────────────────────
-// 목차(슬라이드 그룹) 단위로 "제목 | 템플릿 크기 | 포함할 팀" 을 설정한다.
-// 각 목차는 완전히 독립적으로 동작하며 다른 목차의 선택과 무관하다.
+// DB에 등록된 *_PROFILE 메뉴 목록을 목차로 사용.
+// 각 목차(행) = 제목(고정, DB menu_number+menu_name) | 템플릿 크기 | 포함할 팀 체크박스
+// 각 목차는 완전히 독립적으로 동작.
 
-// 목차 행 ID 카운터 (고유 식별자용)
-let _pawTocIdSeq = 0
-
-// 새 목차 행 데이터 기본값 생성
-function _pawNewToc(cache, activeCats) {
-  const id = ++_pawTocIdSeq
-  // 기본 제목: 빈 문자열 (사용자가 직접 입력)
-  // 기본 팀: 활성 팀 중 첫 번째 자동 체크
-  const defaultCats = activeCats.length ? [activeCats[0].key] : []
-  const totalCount = defaultCats.reduce((s, k) => s + (cache[k] || []).length, 0)
-  return { id, title: '', sheetSize: suggestSheetSize(Math.max(totalCount, 1)), cats: defaultCats }
+// 메뉴 코드 → 기본 팀 키 매핑
+const PAW_MENU_DEFAULT_CATS = {
+  AUDITOR_PROFILE:      ['audit'],
+  CORE_EXPERT_PROFILE:  ['core'],
+  EXPERT_PROFILE:       ['required', 'security', 'tester'],
 }
+
+// 내부 목차 데이터 저장소
+// [{ id, menuCode, title, sheetSize, cats: ['audit', ...] }, ...]
+let _pawTocList = []
 
 // 목차 행 HTML 한 줄 생성
 function _pawTocRowHtml(toc, cache, activeCats) {
@@ -217,11 +216,8 @@ function _pawTocRowHtml(toc, cache, activeCats) {
 
   return `<div class="paw-toc-row" data-toc="${toc.id}"
     style="display:flex;align-items:center;gap:8px;padding:8px 10px;background:#f9fafb;border-radius:6px;flex-wrap:wrap;border:1px solid #e8eaf0">
-    <input type="text" class="paw-toc-title" data-toc="${toc.id}"
-      value="${toc.title.replace(/"/g, '&quot;')}"
-      placeholder="목차 제목 (예: 3.3 전문역량)"
-      style="flex:1;min-width:140px;max-width:200px;padding:3px 7px;border:1px solid #ccc;border-radius:4px;font-size:12px;font-family:inherit"
-      oninput="onPawTocTitleChange(${toc.id}, this.value)">
+    <span style="font-size:13px;font-weight:700;color:#1a2e4a;min-width:0;flex-shrink:0;max-width:220px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis"
+      title="${toc.title.replace(/"/g, '&quot;')}">${toc.title || '(제목 없음)'}</span>
     <span style="font-size:12px;color:#555;white-space:nowrap">템플릿
       <select class="paw-toc-sheet" data-toc="${toc.id}"
         style="margin:0 4px;padding:2px 4px;border-radius:4px;border:1px solid #ccc;font-size:12px"
@@ -229,19 +225,13 @@ function _pawTocRowHtml(toc, cache, activeCats) {
         ${sizeOpts}
       </select>
     </span>
-    <span style="font-size:12px;color:#555">팀
-      <span style="display:inline-flex;gap:6px;flex-wrap:wrap;margin-left:4px">${catBoxes}</span>
+    <span style="font-size:12px;color:#555;display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap">
+      ${catBoxes}
     </span>
-    <button onclick="removePawTocRow(${toc.id})"
-      style="background:#f5f5f5;border:1px solid #ddd;border-radius:4px;padding:2px 7px;font-size:12px;cursor:pointer;color:#777;line-height:1.4"
-      title="이 목차 삭제">✕</button>
   </div>`
 }
 
-// 내부 목차 데이터 저장소 (renderPhotoAssignRows 이후 유지)
-let _pawTocList = []
-
-// 목차 UI 전체 렌더링
+// 목차 UI 전체 렌더링 (비동기: PptMenuRegistry 로드 후 실행)
 function renderPhotoAssignRows() {
   const wrap = document.getElementById('photo-assign-rows')
   if (!wrap) return
@@ -256,69 +246,55 @@ function renderPhotoAssignRows() {
     return
   }
 
-  // 최초 렌더링 시 기본 목차 구성
-  // 감리원이 있으면 감리원 목차 1개, 전문가 계열은 팀별 각 1개 자동 생성
-  if (!_pawTocList.length) {
-    _pawTocIdSeq = 0
-    if (cache.audit && cache.audit.length) {
-      _pawTocList.push({ id: ++_pawTocIdSeq, title: '3.1 감리원 전문역량', sheetSize: 2, cats: ['audit'] })
-    }
-    const expertCats = activeCats.filter(c => c.key !== 'audit')
-    if (expertCats.length) {
-      // 전문가 계열은 한 목차에 모두 합치는 것이 기본 (사용자가 분리 가능)
-      const allExpertKeys = expertCats.map(c => c.key)
-      const totalCount = allExpertKeys.reduce((s, k) => s + (cache[k] || []).length, 0)
-      _pawTocList.push({
-        id: ++_pawTocIdSeq,
-        title: expertCats.length === 1 ? expertCats[0].label.replace(/^\S+\s/, '') + ' 전문역량' : '전문역량',
-        sheetSize: suggestSheetSize(totalCount),
-        cats: allExpertKeys,
-      })
-    }
-  }
+  wrap.innerHTML = '<span style="color:#aaa;font-size:13px">목차 정보 불러오는 중...</span>'
 
-  _renderPawTocDom(cache, activeCats)
+  // PptMenuRegistry에서 *_PROFILE 메뉴 목록 로드 → 목차 구성
+  PptMenuRegistry.load().then(registry => {
+    const profileCodes = ['AUDITOR_PROFILE', 'CORE_EXPERT_PROFILE', 'EXPERT_PROFILE']
+    const profileMenus = profileCodes
+      .map(code => registry.byCode[code])
+      .filter(Boolean)
+      .filter(m => m.is_enabled !== false)  // 비활성 목차 제외
+
+    _pawTocList = profileMenus.map((m, i) => {
+      const defaultCats = (PAW_MENU_DEFAULT_CATS[m.menu_code] || [])
+        .filter(k => activeCats.some(c => c.key === k))   // 실제 인원 있는 팀만
+      const totalCount = defaultCats.reduce((s, k) => s + (cache[k] || []).length, 0)
+      const title = [m.menu_number, m.menu_name].filter(Boolean).join(' ')
+      return {
+        id: i + 1,
+        menuCode: m.menu_code,
+        title,
+        sheetSize: suggestSheetSize(Math.max(totalCount, 1)),
+        cats: defaultCats,
+      }
+    })
+
+    // PROFILE 메뉴가 하나도 없으면 하드코딩 fallback
+    if (!_pawTocList.length) {
+      let seq = 0
+      if (cache.audit && cache.audit.length)
+        _pawTocList.push({ id: ++seq, menuCode: 'AUDITOR_PROFILE',     title: '3.1 감리원 전문역량',     sheetSize: 2, cats: ['audit'] })
+      const expKeys = activeCats.filter(c => c.key !== 'audit').map(c => c.key)
+      if (expKeys.length) {
+        const tot = expKeys.reduce((s, k) => s + cache[k].length, 0)
+        _pawTocList.push({ id: ++seq, menuCode: 'EXPERT_PROFILE', title: '전문역량', sheetSize: suggestSheetSize(tot), cats: expKeys })
+      }
+    }
+
+    _renderPawTocDom(cache, activeCats)
+  }).catch(() => {
+    // Registry 로드 실패 시 빈 안내
+    wrap.innerHTML = '<span style="color:#e53935;font-size:13px">목차 정보 로드 실패. 페이지를 새로고침해주세요.</span>'
+  })
 }
 
 // DOM만 다시 그리기 (데이터 보존)
 function _renderPawTocDom(cache, activeCats) {
   const wrap = document.getElementById('photo-assign-rows')
   if (!wrap) return
-
   const rowsHtml = _pawTocList.map(toc => _pawTocRowHtml(toc, cache, activeCats)).join('')
-  wrap.innerHTML = `
-    <div style="font-size:11px;color:#888;margin-bottom:6px">
-      목차마다 제목·템플릿 크기·포함할 팀을 설정하세요. 각 목차는 독립적으로 생성됩니다.
-    </div>
-    ${rowsHtml}
-    <button onclick="addPawTocRow()"
-      style="margin-top:6px;padding:5px 14px;font-size:12px;background:#e8f0fe;color:#1a73e8;border:1px solid #c5d8fd;border-radius:5px;cursor:pointer;font-weight:600">
-      + 목차 추가
-    </button>
-  `
-}
-
-// 목차 추가 버튼 핸들러
-function addPawTocRow() {
-  const cache = buildPhotoAssignCache()
-  if (!cache) return
-  const activeCats = PHOTO_CATS.filter(c => (cache[c.key] || []).length > 0)
-  _pawTocList.push(_pawNewToc(cache, activeCats))
-  _renderPawTocDom(cache, activeCats)
-}
-
-// 목차 삭제 버튼 핸들러
-function removePawTocRow(id) {
-  _pawTocList = _pawTocList.filter(t => t.id !== id)
-  const cache = buildPhotoAssignCache()
-  const activeCats = PHOTO_CATS.filter(c => (cache[c.key] || []).length > 0)
-  _renderPawTocDom(cache, activeCats)
-}
-
-// 목차 제목 변경 핸들러
-function onPawTocTitleChange(id, val) {
-  const toc = _pawTocList.find(t => t.id === id)
-  if (toc) toc.title = val
+  wrap.innerHTML = rowsHtml || '<span style="color:#aaa;font-size:13px">등록된 사진장표 목차가 없습니다.</span>'
 }
 
 // 목차 템플릿 크기 변경 핸들러
@@ -347,19 +323,17 @@ function onPawTocCatChange(id) {
 // 목차 설정 읽기 — 목차 배열 반환
 // 반환: [{ title, sheetSize, catKeys }, ...]
 function readPhotoAssignConfig() {
-  // DOM에서 최신 제목/템플릿 크기 동기화 (input은 oninput으로 실시간 반영되지만 안전하게 재확인)
+  // DOM에서 최신 템플릿 크기·팀 체크 동기화
   document.querySelectorAll('.paw-toc-row').forEach(row => {
     const id = parseInt(row.dataset.toc, 10)
     const toc = _pawTocList.find(t => t.id === id)
     if (!toc) return
-    const titleEl = row.querySelector('.paw-toc-title')
-    if (titleEl) toc.title = titleEl.value.trim()
     const sheetEl = row.querySelector('.paw-toc-sheet')
     if (sheetEl) toc.sheetSize = parseInt(sheetEl.value, 10)
     toc.cats = Array.from(row.querySelectorAll('.paw-toc-cat:checked')).map(cb => cb.dataset.cat)
   })
   return _pawTocList
-    .filter(toc => toc.cats.length > 0)          // 팀 미선택 목차 제외
+    .filter(toc => toc.cats.length > 0)   // 팀 미선택 목차 제외
     .map(toc => ({ title: toc.title, sheetSize: toc.sheetSize, catKeys: toc.cats }))
 }
 
@@ -1182,17 +1156,29 @@ async function downloadPhotoAssignPptx(btn, opts) {
     let tocList = []
     try { tocList = readPhotoAssignConfig() } catch (e) { tocList = [] }
 
-    // 목차 미설정 시 기본값: 팀별 각 1목차 자동 구성
+    // 목차 미설정 시 fallback:
+    // opts.menuCode 지정 시 해당 메뉴 코드에 맞는 단일 목차 구성
+    // 미지정 시 PptMenuRegistry 기반으로 전체 PROFILE 목차 구성
     if (!tocList.length) {
       const activeCats = PHOTO_CATS.filter(c => (cache[c.key] || []).length > 0)
-      if (cache.audit && cache.audit.length) {
-        tocList.push({ title: '감리원 전문역량', sheetSize: 2, catKeys: ['audit'] })
-      }
-      const expertCats = activeCats.filter(c => c.key !== 'audit')
-      if (expertCats.length) {
-        const allKeys = expertCats.map(c => c.key)
-        const total = allKeys.reduce((s, k) => s + cache[k].length, 0)
-        tocList.push({ title: '전문역량', sheetSize: suggestSheetSize(total), catKeys: allKeys })
+      const menuCode = opts.menuCode
+      if (menuCode && PAW_MENU_DEFAULT_CATS[menuCode]) {
+        // 단일 목차 (ppt-engine 직접 호출 케이스)
+        const defaultCatKeys = PAW_MENU_DEFAULT_CATS[menuCode]
+          .filter(k => activeCats.some(c => c.key === k))
+        const total = defaultCatKeys.reduce((s, k) => s + (cache[k] || []).length, 0)
+        if (defaultCatKeys.length && total > 0) {
+          tocList.push({ title: menuCode, sheetSize: suggestSheetSize(total), catKeys: defaultCatKeys })
+        }
+      } else {
+        // 전체 목차 fallback (하드코딩)
+        if (cache.audit && cache.audit.length)
+          tocList.push({ title: '감리원 전문역량', sheetSize: 2, catKeys: ['audit'] })
+        const expKeys = activeCats.filter(c => c.key !== 'audit').map(c => c.key)
+        if (expKeys.length) {
+          const tot = expKeys.reduce((s, k) => s + cache[k].length, 0)
+          tocList.push({ title: '전문역량', sheetSize: suggestSheetSize(tot), catKeys: expKeys })
+        }
       }
     }
 
