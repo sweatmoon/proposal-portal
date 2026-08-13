@@ -259,7 +259,13 @@ function groupPhotoCategories(cfg) {
   const parent = {}; keys.forEach(k => { parent[k] = k })
   const find = k => (parent[k] === k ? k : (parent[k] = find(parent[k])))
   const union = (a, b) => { const ra = find(a), rb = find(b); if (ra !== rb) parent[ra] = rb }
-  keys.forEach(k => { cfg[k].include.forEach(t => { if (cfg[t]) union(k, t) }) })
+  // solo=true인 카테고리는 독립 그룹 유지 — include 대상으로 지정돼도 union하지 않음
+  // (단독 슬라이드 + 타 그룹 중복 출력 의도)
+  keys.forEach(k => {
+    cfg[k].include.forEach(t => {
+      if (cfg[t] && !cfg[t].solo) union(k, t)
+    })
+  })
   const groups = {}
   PHOTO_CATS.forEach(({ key }) => {
     if (!cfg[key]) return
@@ -1170,12 +1176,23 @@ async function downloadPhotoAssignPptx(btn, opts) {
     const catGroups = groupPhotoCategories(filteredCfg)
     for (const catKeys of catGroups) {
       const firstCat = PHOTO_CATS.find(c => catKeys.includes(c.key))
-      const sheetSize = (cfg[firstCat.key] || {}).sheet || suggestSheetSize(1)
+      // solo=true 카테고리가 include 대상으로 포함된 경우 → 해당 카테고리 자체 sheet 무시,
+      // 그룹을 구성한 원본 카테고리(solo=false인 첫 번째)의 sheet 사용
+      const ownerCat = catKeys.find(k => filteredCfg[k] && !filteredCfg[k].solo) || firstCat.key
+      const sheetSize = (cfg[ownerCat] || cfg[firstCat.key] || {}).sheet || suggestSheetSize(1)
       const meta = PHOTO_LAYOUT_META[sheetSize]
       const fillOrder = computeFillOrder(meta.rows, meta.cols)
 
       const people = []
-      catKeys.forEach(catKey => {
+      // catKeys에 포함된 카테고리 인원 수집
+      // + 이 그룹의 include 대상 중 solo=true(독립 출력)인 카테고리도 인원 추가
+      //   (단독 슬라이드 + 타 그룹 중복 포함 의도)
+      const soloIncludeKeys = new Set()
+      catKeys.forEach(k => {
+        if (cfg[k]) cfg[k].include.forEach(t => { if (cfg[t] && cfg[t].solo) soloIncludeKeys.add(t) })
+      })
+      const allPeopleKeys = [...catKeys, ...soloIncludeKeys]
+      allPeopleKeys.forEach(catKey => {
         const catLabel = PHOTO_CATS.find(c => c.key === catKey).label.replace(/^\S+\s/, '')
         ;(cache[catKey] || []).forEach(p => {
           people.push({
