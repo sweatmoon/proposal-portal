@@ -242,9 +242,13 @@ function readPhotoAssignConfig() {
     const sheetEl = row.querySelector('.paw-sheet')
     if (!sheetEl) return // 감리원 행 (고정, 장표 크기 없음)
     const sheet = parseInt(sheetEl.value, 10)
+    const soloEl = row.querySelector('.paw-solo')
+    const solo = soloEl ? soloEl.checked : true  // 단독 체크박스 상태 읽기
     const include = new Set()
     row.querySelectorAll('.paw-include:checked').forEach(cb => include.add(cb.dataset.target))
-    cfg[cat] = { sheet, include }
+    // solo=false + include 아무것도 없으면 "출력 제외" 의사 → cfg에서 누락
+    if (!solo && include.size === 0) return
+    cfg[cat] = { sheet, include, solo }
   })
   return cfg
 }
@@ -1058,10 +1062,11 @@ async function downloadPhotoAssignPptx(btn, opts) {
     let cfg = {}
     try { cfg = readPhotoAssignConfig() } catch (e) { cfg = {} }
     if (!Object.keys(cfg).length) {
+      // 모달 미열림 시 기본값: 모든 카테고리를 단독 포함으로 처리
       PHOTO_CATS.forEach(c => {
         if (c.key === 'audit') return
         const cnt = (cache[c.key] || []).length
-        if (cnt > 0) cfg[c.key] = { sheet: suggestSheetSize(cnt), include: new Set() }
+        if (cnt > 0) cfg[c.key] = { sheet: suggestSheetSize(cnt), include: new Set(), solo: true }
       })
     }
 
