@@ -727,7 +727,7 @@ async function buildPhotoPptxFromTemplate(pages, templateZips) {
     // ── 카드별 placeholder 치환 ──
     // 슬라이드 전체 placeholder 라벨 목록
     const CARD_PLACEHOLDERS = [
-      '[분야]', '[이름]', '[등급]', '[자격구분]', '[자격요약]',
+      '[분야]', '[이름]', '[감리원등급]', '[자격구분]', '[자격요약]',
       '[감리횟수]', '[자격수]', '[감리경력]', '[IT경력기간]', '[IT경력]',
       '[감리이력1]', '[감리이력2]', '[감리이력3]', '[감리이력4]', '[감리이력5]',
       '[감리이력6]', '[감리이력7]', '[감리이력8]', '[감리이력9]', '[감리이력10]',
@@ -749,7 +749,7 @@ async function buildPhotoPptxFromTemplate(pages, templateZips) {
       const directMap = {
         '[분야]':      p.field || '',
         '[이름]':      p.name  || '',
-        '[등급]':      p.grade || '',
+        '[감리원등급]': p.grade || '',
         '[자격구분]':  pr.자격구분   || '',
         '[자격요약]':  pr.자격요약   || '',
         '[감리횟수]':  pr.감리횟수   != null ? String(pr.감리횟수)   : '',
