@@ -918,8 +918,8 @@ async function buildPhotoPptxFromTemplate(pages, templateZips) {
     })
     cardsToRemove.forEach(ci => cardShapes[ci].forEach(sp => { if (sp.parentNode) sp.parentNode.removeChild(sp) }))
 
-    // ── 슬라이드 전체 [제목] 치환 (빈 문자열로 제거) ──
-    replaceAllLabels(xmlDoc, '[제목]', '')
+    // ── 슬라이드 전체 [제목] 치환 (groupFilter별 목차명으로 치환) ──
+    replaceAllLabels(xmlDoc, '[제목]', page.slideTitle || '')
 
     // ── 카드별 placeholder 치환 (런 분산 처리 엔진 사용) ──
     // ⚠️ 중요: 치환 전에 모든 단락 참조를 미리 수집해야 함
@@ -1027,23 +1027,28 @@ async function downloadPhotoAssignPptx(btn, opts) {
     const gf = opts.groupFilter
     let targetAuditPeople = []
     let targetCatKeys     = []   // 전문가 계열 처리 대상 key 목록
+    let slideTitle        = ''   // [제목] placeholder 치환값
 
     if (!gf || gf === 'ALL') {
       // 기존 동작: 감리원 + 전문가 전체
       targetAuditPeople = cache.audit || []
       targetCatKeys = ['core', 'required', 'security', 'tester']
+      slideTitle = '전문 역량'
     } else if (gf === 'AUDITOR') {
       // 3.1 단계 감리원의 전문 역량
       targetAuditPeople = cache.audit || []
       targetCatKeys = []
+      slideTitle = '3.1 단계 감리원의 전문 역량'
     } else if (gf === 'CORE_EXPERT') {
       // 3.2 핵심기술 점검팀의 전문 역량
       targetAuditPeople = []
       targetCatKeys = ['core']
+      slideTitle = '3.2 핵심기술 점검팀의 전문 역량'
     } else if (gf === 'EXPERT') {
       // 3.3 필수기술·보안·테스트팀 전문 역량
       targetAuditPeople = []
       targetCatKeys = ['required', 'security', 'tester']
+      slideTitle = '3.3 필수기술·보안·테스트팀 전문 역량'
     }
 
     // 체크리스트 설정 읽기 (모달 미열림 시 기본값 fallback)
@@ -1076,7 +1081,7 @@ async function downloadPhotoAssignPptx(btn, opts) {
         const pagePeople = auditPeople.slice(start, start + sheetSize)
         const slotPeople = {}
         pagePeople.forEach((p, i) => { slotPeople[fillOrder[i]] = p })
-        pages.push({ sheetSize, slotPeople })
+        pages.push({ sheetSize, slotPeople, slideTitle })
       }
     }
 
@@ -1109,7 +1114,7 @@ async function downloadPhotoAssignPptx(btn, opts) {
         const pagePeople = people.slice(start, start + sheetSize)
         const slotPeople = {}
         pagePeople.forEach((p, i) => { slotPeople[fillOrder[i]] = p })
-        pages.push({ sheetSize, slotPeople })
+        pages.push({ sheetSize, slotPeople, slideTitle })
       }
     }
 
