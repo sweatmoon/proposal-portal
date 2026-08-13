@@ -740,6 +740,47 @@ async function buildPhotoPptxFromTemplate(pages, templateZips) {
     return count
   }
 
+  // [제목] 단락 치환: 제목 텍스트를 기존 런 서식 유지로 치환하고,
+  // totalPages >= 2 이면 뒤에 16pt 런 " (pageNum/totalPages)" 추가
+  function replaceTitleLabel(xmlDoc, titleText, pageNum, totalPages) {
+    const paras = Array.from(xmlDoc.getElementsByTagNameNS(A_NS, 'p'))
+    for (const pEl of paras) {
+      const runs = Array.from(pEl.getElementsByTagNameNS(A_NS, 'r'))
+      if (!runs.length) continue
+      const concat = runs.map(r => {
+        const t = r.getElementsByTagNameNS(A_NS, 't')[0]; return t ? t.textContent : ''
+      }).join('').replace(/\s+/g, '')
+      if (!concat.includes('[제목]')) continue
+
+      // 1) [제목] → titleText 치환 (기존 런 서식 유지)
+      replaceLabelInParagraphNorm(pEl, '[제목]', titleText)
+
+      // 2) totalPages >= 2 이면 뒤에 16pt (pageNum/totalPages) 런 추가
+      if (totalPages >= 2) {
+        // 마지막 런을 복제해 서식 참조
+        const lastRun = Array.from(pEl.getElementsByTagNameNS(A_NS, 'r')).pop()
+        if (!lastRun) continue
+
+        const numRun = lastRun.cloneNode(true)
+        // 텍스트 설정
+        const numT = numRun.getElementsByTagNameNS(A_NS, 't')[0]
+        if (numT) numT.textContent = ' (' + pageNum + '/' + totalPages + ')'
+
+        // rPr 가져오거나 생성 후 sz=1600(16pt) 설정
+        let rPr = numRun.getElementsByTagNameNS(A_NS, 'rPr')[0]
+        if (!rPr) {
+          rPr = xmlDoc.createElementNS(A_NS, 'a:rPr')
+          numRun.insertBefore(rPr, numRun.firstChild)
+        }
+        rPr.setAttribute('sz', '1600')
+        // 기존 b(볼드) 속성은 유지, 별도 제거 불필요
+
+        pEl.appendChild(numRun)
+      }
+      break // [제목]은 슬라이드당 1개
+    }
+  }
+
   // 슬라이드에서 label이 몇 번 등장하는지 카운트
   function countLabel(xmlDoc, label) {
     const paras = Array.from(xmlDoc.getElementsByTagNameNS(A_NS, 'p'))
@@ -954,8 +995,8 @@ async function buildPhotoPptxFromTemplate(pages, templateZips) {
     })
     cardsToRemove.forEach(ci => cardShapes[ci].forEach(sp => { if (sp.parentNode) sp.parentNode.removeChild(sp) }))
 
-    // ── 슬라이드 전체 [제목] 치환 (groupFilter별 목차명으로 치환) ──
-    replaceAllLabels(xmlDoc, '[제목]', page.slideTitle || '')
+    // ── 슬라이드 전체 [제목] 치환 (목차명 + 다중 장표 시 16pt (N/total) 넘버링) ──
+    replaceTitleLabel(xmlDoc, page.slideTitle || '', page.pageNum || 1, page.totalPages || 1)
 
     nameParaOccurrences.forEach((_nameOcc, idx) => {
       const slot = meta.orderIndexToSlot[idx]
@@ -1127,6 +1168,18 @@ async function downloadPhotoAssignPptx(btn, opts) {
     }
 
     if (!pages.length) { showAutoAlert('❌ 생성할 인력이 없습니다.', false); return null }
+
+    // ── slideTitle 기준 pageNum / totalPages 계산 ──
+    // 동일 slideTitle 끼리 묶어서 (현재번호/전체수) 계산
+    // 1장짜리는 넘버링 없이 제목만, 2장 이상부터 (N/total) 추가
+    const titleCountMap = {}
+    pages.forEach(pg => { titleCountMap[pg.slideTitle] = (titleCountMap[pg.slideTitle] || 0) + 1 })
+    const titleSeqMap = {}
+    pages.forEach(pg => {
+      titleSeqMap[pg.slideTitle] = (titleSeqMap[pg.slideTitle] || 0) + 1
+      pg.pageNum    = titleSeqMap[pg.slideTitle]
+      pg.totalPages = titleCountMap[pg.slideTitle]
+    })
 
     // ── photo-profile API 호출: 등장하는 모든 인원의 profile 로드 ──
     const proposalId = parsedData.proposalId || 0
