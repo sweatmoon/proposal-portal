@@ -2029,20 +2029,42 @@ app.get('/ppt-templates', async (c) => {
       return
     }
 
+    // variant별로 슬롯 고정 여부 판단 (PERSON_N 패턴이 있으면 슬롯별 개별 업로드)
+    const hasVariantSlots = templates.some(t => /^PERSON_\d+$/i.test(t.variant_code))
+
     // 템플릿 목록
     const tplCards = templates.map(t => {
-      const hasFile = !!t.pptx_b64_key
+      const hasFile  = !!t.pptx_b64_key
       const fileName = t.pptx_file_path || (hasFile ? '업로드됨' : null)
+      const isSlot   = /^PERSON_\d+$/i.test(t.variant_code)
+      const fileInputId = 'tplFile_' + t.variant_code
+      const fileLabelId = 'tplLabel_' + t.variant_code
       return \`
-        <div class="flex items-center justify-between bg-white border border-slate-200 rounded-lg px-3 py-2">
-          <div class="flex items-center gap-2 min-w-0">
-            <i class="fas fa-file-powerpoint \${hasFile ? 'text-emerald-500' : 'text-slate-300'} flex-shrink-0"></i>
-            <span class="text-xs truncate \${hasFile ? 'text-slate-700 font-medium' : 'text-slate-400'}">
-              \${hasFile ? (fileName || '파일 업로드됨') : '파일 없음'}
-            </span>
-            \${t.variant_code !== 'DEFAULT' ? '<span class="text-xs font-mono bg-indigo-50 text-indigo-500 px-1.5 py-0.5 rounded flex-shrink-0">' + t.variant_code + '</span>' : ''}
+        <div class="bg-white border border-slate-200 rounded-lg px-3 py-2">
+          <div class="flex items-center justify-between gap-2">
+            <div class="flex items-center gap-2 min-w-0">
+              <i class="fas fa-file-powerpoint \${hasFile ? 'text-emerald-500' : 'text-slate-300'} flex-shrink-0"></i>
+              <span class="text-xs truncate \${hasFile ? 'text-slate-700 font-medium' : 'text-slate-400'}">
+                \${hasFile ? (fileName || '파일 업로드됨') : '파일 없음'}
+              </span>
+              \${t.variant_code !== 'DEFAULT' ? '<span class="text-xs font-mono bg-indigo-50 text-indigo-500 px-1.5 py-0.5 rounded flex-shrink-0">' + t.variant_code + '</span>' : ''}
+            </div>
+            \${isSlot ? \`
+              <label class="flex items-center gap-1.5 cursor-pointer flex-shrink-0">
+                <span id="\${fileLabelId}" class="text-xs text-slate-400 truncate max-w-[100px]">파일 선택...</span>
+                <input id="\${fileInputId}" type="file" accept=".pptx" class="hidden"
+                  onchange="onSlotFileChange('\${t.variant_code}', this)">
+                <button onclick="document.getElementById('\${fileInputId}').click()"
+                  class="text-xs px-2 py-1 rounded bg-slate-100 hover:bg-indigo-100 text-slate-600 hover:text-indigo-700 border border-slate-200 transition flex-shrink-0">
+                  <i class="fas fa-folder-open mr-1"></i>선택
+                </button>
+                <button onclick="uploadSlotTemplate(\${menu.id}, '\${t.variant_code}')"
+                  class="text-xs px-2 py-1 rounded bg-amber-500 hover:bg-amber-600 text-white font-medium transition flex-shrink-0">
+                  <i class="fas fa-upload mr-1"></i>업로드
+                </button>
+              </label>
+            \` : ''}
           </div>
-
         </div>
       \`
     }).join('')
@@ -2096,7 +2118,8 @@ app.get('/ppt-templates', async (c) => {
             </div>
           \`}
 
-          <!-- 업로드 폼 -->
+          <!-- 업로드 폼: PERSON 슬롯이 없는 일반 메뉴에만 표시 -->
+          \${!hasVariantSlots ? \`
           <div class="bg-amber-50 rounded-xl p-3 border border-amber-200">
             <label class="block">
               <div id="tplFileDropZone"
@@ -2119,6 +2142,7 @@ app.get('/ppt-templates', async (c) => {
               <i class="fas fa-upload mr-1"></i>업로드 & 추가
             </button>
           </div>
+          \` : ''}
         </div>
 
       </div>
@@ -2201,6 +2225,37 @@ app.get('/ppt-templates', async (c) => {
   }
 
   // ── 템플릿 추가 (파일 업로드) ────────────────────────────────
+  // ── 슬롯별 파일 선택 표시 ────────────────────────────────────
+  function onSlotFileChange(variantCode, input) {
+    const labelEl = document.getElementById('tplLabel_' + variantCode)
+    if (!labelEl) return
+    labelEl.textContent = input.files && input.files[0] ? input.files[0].name : '파일 선택...'
+  }
+
+  // ── 슬롯별 템플릿 업로드 (기존 레코드 덮어쓰기) ───────────────
+  async function uploadSlotTemplate(menuId, variantCode) {
+    const fileEl = document.getElementById('tplFile_' + variantCode)
+    const file   = fileEl && fileEl.files && fileEl.files[0]
+    if (!file) { showAlert('파일을 먼저 선택하세요', false); return }
+
+    const formData = new FormData()
+    formData.append('template_name', variantCode)
+    formData.append('variant_code',  variantCode)
+    formData.append('pptx_file',     file)
+
+    const r = await fetch('/api/ppt-menus/' + menuId + '/templates', { method: 'POST', body: formData })
+    const j = await r.json()
+    if (j.ok) {
+      showAlert('✅ ' + variantCode + ' 업로드 완료', true)
+      if (fileEl) fileEl.value = ''
+      const labelEl = document.getElementById('tplLabel_' + variantCode)
+      if (labelEl) labelEl.textContent = '파일 선택...'
+      selectMenu(menuId)
+    } else {
+      showAlert('❌ ' + j.error, false)
+    }
+  }
+
   async function addTemplate(menuId) {
     const name     = document.getElementById('newTplName').value.trim()
     const variant  = document.getElementById('newTplVariant').value.trim() || 'DEFAULT'

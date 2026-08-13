@@ -1004,7 +1004,14 @@ app.post('/:id/templates', async (c) => {
     const row = await queryOne<{ id: number }>(`
       INSERT INTO ppt_templates
         (menu_id, template_name, variant_code, pptx_b64_key, pptx_file_path, capacity, is_default, is_active)
-      VALUES ($1,$2,$3,$4,$5,$6,1,1) RETURNING id
+      VALUES ($1,$2,$3,$4,$5,$6,1,1)
+      ON CONFLICT (menu_id, variant_code, version) DO UPDATE
+        SET template_name  = EXCLUDED.template_name,
+            pptx_b64_key   = EXCLUDED.pptx_b64_key,
+            pptx_file_path = EXCLUDED.pptx_file_path,
+            capacity       = EXCLUDED.capacity,
+            is_active      = 1
+      RETURNING id
     `, [menuId, template_name, variant_code, pptx_b64_key, pptx_file_path, capacity ?? null])
     return c.json({ ok: true, id: row?.id, file_name: pptx_file_path })
   } catch (e: unknown) {
