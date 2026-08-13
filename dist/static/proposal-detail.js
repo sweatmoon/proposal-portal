@@ -1162,6 +1162,12 @@ async function downloadPhotoAssignPptx(btn, opts) {
     let tocList = []
     try { tocList = readPhotoAssignConfig() } catch (e) { tocList = [] }
 
+    // opts.menuCode 지정 시 → 해당 menuCode 목차만 필터링
+    // (ppt-engine이 AUDITOR/CORE_EXPERT/EXPERT_PROFILE 각각 호출할 때 3개 전부 생성되는 버그 방지)
+    if (opts.menuCode && tocList.length) {
+      tocList = tocList.filter(t => t.menuCode === opts.menuCode)
+    }
+
     // 목차 미설정 시 fallback:
     // opts.menuCode 지정 시 해당 메뉴 코드에 맞는 단일 목차 구성
     // 미지정 시 PptMenuRegistry 기반으로 전체 PROFILE 목차 구성
