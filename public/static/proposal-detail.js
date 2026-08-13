@@ -729,8 +729,8 @@ async function buildPhotoPptxFromTemplate(pages, templateZips) {
     const CARD_PLACEHOLDERS = [
       '[분야]', '[이름]', '[등급]', '[자격구분]', '[자격요약]',
       '[감리횟수]', '[자격수]', '[감리경력]', '[IT경력기간]', '[IT경력]',
-      '[실적1]', '[실적2]', '[실적3]', '[실적4]', '[실적5]',
-      '[실적6]', '[실적7]', '[실적8]', '[실적9]', '[실적10]',
+      '[감리이력1]', '[감리이력2]', '[감리이력3]', '[감리이력4]', '[감리이력5]',
+      '[감리이력6]', '[감리이력7]', '[감리이력8]', '[감리이력9]', '[감리이력10]',
     ]
     // 각 라벨의 노드 목록 수집 (슬라이드 전체 기준)
     const labelNodeMap = {}
@@ -763,10 +763,10 @@ async function buildPhotoPptxFromTemplate(pages, templateZips) {
         if (nodes && nodes[idx]) fillPlaceholder(nodes[idx], value)
       })
 
-      // [실적1]~[실적10] 치환
+      // [감리이력1]~[감리이력10] 치환
       const 실적List = pr.실적 || []
       for (let ri = 1; ri <= 10; ri++) {
-        const label = `[실적${ri}]`
+        const label = `[감리이력${ri}]`
         const nodes = labelNodeMap[label]
         const value = 실적List[ri - 1] || ''
         if (nodes && nodes[idx]) fillPlaceholder(nodes[idx], value)

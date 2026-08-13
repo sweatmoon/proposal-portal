@@ -225,7 +225,7 @@ app.get('/:id/audit-match', async (c) => {
  *     감리횟수, 자격수,                    ← COUNT
  *     감리경력,                            ← audit_history 최초연월 → 현재
  *     IT경력기간,                          ← personnel_it_career 합산
- *     실적: string[],                      ← audit-match 상위 10건 "[키워드] 기관명, 사업명"
+ *     실적: string[],                      ← audit-match 상위 10건 "[키워드] 기관명, 사업명" (코드에선 [감리이력N] placeholder로 매핑)
  *   }
  * }
  */
