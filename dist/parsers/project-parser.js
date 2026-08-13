@@ -381,7 +381,9 @@ export function parseProjectHtml(html) {
                     ft = ft.trim();
                     if (!ft || ft === '(K)')
                         continue;
-                    if (/^(서울|경기|부산|대구|인천|광주|대전|울산|정감협|행안부|강원|충북|충남|전북|전남|경북|경남|제주)/.test(ft))
+                    if (/^(서울|경기|부산|대구|인천|광주|대전|울산|정감협|행안부|행정안전부|강원|충북|충남|전북|전남|경북|경남|제주)/.test(ft))
+                        continue;
+                    if (/제\d+호$/.test(ft))
                         continue;
                     if (ft.length > 40)
                         continue;
