@@ -1151,13 +1151,21 @@ async function downloadPhotoAssignPptx(btn, opts) {
 
     // 전문가/테스터: union-find 그룹화
     // targetCatKeys에 있는 카테고리 + 그 include 대상 카테고리도 함께 포함
-    // (예: EXPERT 모드에서 required가 core를 include로 체크한 경우 core도 포함)
+    // ※ include 대상 카테고리는 solo=false & include.size=0 → readPhotoAssignConfig에서
+    //   cfg에 포함되지 않을 수 있으므로, cfg 여부와 무관하게 include 타깃을 expandedKeys에 추가
     const filteredCfg = {}
     const expandedKeys = new Set(targetCatKeys)
     targetCatKeys.forEach(k => {
-      if (cfg[k]) cfg[k].include.forEach(t => { if (cfg[t]) expandedKeys.add(t) })
+      if (cfg[k]) cfg[k].include.forEach(t => { expandedKeys.add(t) })
     })
-    expandedKeys.forEach(k => { if (cfg[k]) filteredCfg[k] = cfg[k] })
+    expandedKeys.forEach(k => {
+      if (cfg[k]) {
+        filteredCfg[k] = cfg[k]
+      } else if (targetCatKeys.some(tk => cfg[tk] && cfg[tk].include.has(k))) {
+        // cfg에 없지만 include 대상인 카테고리: 빈 include Set으로 등록 (인원만 포함)
+        filteredCfg[k] = { sheet: cfg[targetCatKeys.find(tk => cfg[tk] && cfg[tk].include.has(k))].sheet, include: new Set(), solo: false }
+      }
+    })
 
     const catGroups = groupPhotoCategories(filteredCfg)
     for (const catKeys of catGroups) {
