@@ -2290,6 +2290,15 @@ app.get('/ppt-templates', async (c) => {
     }
   }
 
+  // ── 템플릿 파일 삭제 (pptx_b64_key만 지움, 슬롯 레코드 유지) ──
+  async function deleteTplConfirm(tid, menuId) {
+    if (!confirm('업로드된 파일을 삭제하시겠습니까?\\n(슬롯은 유지됩니다)')) return
+    const r = await fetch('/api/ppt-menus/templates/' + tid + '/file', { method: 'DELETE' })
+    const j = await r.json()
+    showAlert(j.ok ? '✅ 파일 삭제 완료' : '❌ ' + j.error, j.ok)
+    if (j.ok) selectMenu(menuId)
+  }
+
   // ── 템플릿 삭제 ────────────────────────────────────────────────
   async function deleteTpl(tid) {
     if (!confirm('템플릿을 삭제하시겠습니까?')) return

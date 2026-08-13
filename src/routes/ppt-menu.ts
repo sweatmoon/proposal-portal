@@ -1053,6 +1053,18 @@ app.delete('/templates/:tid', async (c) => {
   }
 })
 
+/** DELETE /api/ppt-templates/:tid/file — 파일(b64)만 지우고 슬롯 레코드 유지 */
+app.delete('/templates/:tid/file', async (c) => {
+  try {
+    const tid = Number(c.req.param('tid'))
+    await exec(`UPDATE ppt_templates SET pptx_b64_key=NULL, pptx_file_path=NULL WHERE id=$1`, [tid])
+    return c.json({ ok: true })
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : String(e)
+    return c.json({ ok: false, error: msg }, 500)
+  }
+})
+
 // ═══════════════════════════════════════════════════════════════════
 // [6] 구성순서 (ppt_compositions) CRUD
 // ═══════════════════════════════════════════════════════════════════
