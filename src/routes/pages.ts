@@ -1697,14 +1697,8 @@ app.get('/ppt-templates', async (c) => {
         <button onclick="runSeed()" class="px-3 py-1.5 text-xs rounded-lg bg-amber-50 hover:bg-amber-100 text-amber-700 border border-amber-300 transition">
           <i class="fas fa-seedling mr-1"></i>기본 메뉴 시드
         </button>
-        <button onclick="openAddMenu()" class="px-3 py-1.5 text-xs rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white transition">
-          <i class="fas fa-plus mr-1"></i>메뉴 추가
-        </button>
         <button onclick="openMasterModal()" class="px-3 py-1.5 text-xs rounded-lg bg-violet-600 hover:bg-violet-700 text-white transition">
           <i class="fas fa-layer-group mr-1"></i>마스터 템플릿
-        </button>
-        <button onclick="openPresetModal()" class="px-3 py-1.5 text-xs rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white transition">
-          <i class="fas fa-bookmark mr-1"></i>프리셋
         </button>
       </div>
     </div>
@@ -2008,203 +2002,113 @@ app.get('/ppt-templates', async (c) => {
 
   function renderDetail(menu, templates) {
     const rule = menu.rule || {}
-    const cfg = (() => { try { return JSON.parse(rule.rule_config || '{}') } catch (_) { return {} } })()
-    const MODE_LABELS = {
-      'BUILD_TABLE':   '표 직접 생성 (PptxGenJS로 표 그리기)',
-      'BUILD_OBJECTS': '도형 직접 생성 (PptxGenJS로 개별 객체)',
-      'CLONE_SLIDE':   '슬라이드 복제 (템플릿 슬라이드를 복사·치환)',
-      'REPLACE':       '변수 치환 (템플릿 placeholder 값만 교체)',
-      'HYBRID':        '혼합 (치환 + 표/도형 추가)',
-    }
-    const STRAT_LABELS = {
-      'PPTX_TEMPLATE':     'PPTX 파일 템플릿 (업로드된 .pptx 파일 기반)',
-      'PPTX_XML_TEMPLATE': 'XML 직접 편집 (슬라이드 XML을 코드로 수정)',
-      'FRAME_TEMPLATE':    '프레임 생성 (PptxGenJS로 빈 슬라이드에 직접 그리기)',
-      'VARIANT_TEMPLATE':  'Variant 선택 (인원 수·조건에 따라 템플릿 자동 선택)',
-    }
-    const PAGIN_LABELS = {
-      'SINGLE':           '단일 슬라이드 (무조건 1장)',
-      'MAX_ROWS':         '행 수 초과 시 분할 (maxRowsPerSlide 기준)',
-      'VARIANT_OVERFLOW': 'Variant 슬롯 초과 시 새 슬라이드 추가',
-    }
-    const POST_LABELS = {
-      'NONE':        '없음',
-      'OOXML_PATCH': 'OOXML 직접 패치 (XML 후처리)',
-    }
-    const MERGE_LABELS = {
-      'STANDARD':        '기본 합본 (슬라이드만 복사, 폰트·테마 공유)',
-      'FOREIGN_TEMPLATE':'외부 템플릿 합본 (마스터/테마/레이아웃까지 복사)',
-    }
-    const modeOpts = Object.entries(MODE_LABELS).map(([v, lbl]) =>
-      \`<option value="\${v}" \${rule.generation_mode===v?'selected':''}>\${lbl}</option>\`).join('')
-    const stratOpts = Object.entries(STRAT_LABELS).map(([v, lbl]) =>
-      \`<option value="\${v}" \${rule.template_strategy===v?'selected':''}>\${lbl}</option>\`).join('')
-    const paginOpts = Object.entries(PAGIN_LABELS).map(([v, lbl]) =>
-      \`<option value="\${v}" \${rule.pagination_mode===v?'selected':''}>\${lbl}</option>\`).join('')
-    const postOpts  = Object.entries(POST_LABELS).map(([v, lbl]) =>
-      \`<option value="\${v}" \${rule.postprocess_mode===v?'selected':''}>\${lbl}</option>\`).join('')
-    const mergeOpts = Object.entries(MERGE_LABELS).map(([v, lbl]) =>
-      \`<option value="\${v}" \${rule.merge_strategy===v?'selected':''}>\${lbl}</option>\`).join('')
+    const isSection = !menu.parent_id
 
-    const tplRows = templates.map(t => {
-      const hasFile  = !!t.pptx_b64_key
-      const fileName = t.pptx_file_path || (hasFile ? '업로드됨' : '-')
-      const fileBadge = hasFile
-        ? \`<span class="inline-flex items-center gap-1 text-xs text-emerald-700 bg-emerald-50 border border-emerald-200 rounded px-2 py-0.5"><i class="fas fa-file-powerpoint text-emerald-500"></i>\${fileName}</span>\`
-        : \`<span class="text-xs text-slate-400">파일 없음</span>\`
+    // 섹션(대분류)이면 간단히 표시
+    if (isSection) {
+      document.getElementById('detailPanel').innerHTML = \`
+        <div class="p-6 h-full flex items-center justify-center text-slate-400">
+          <div class="text-center">
+            <i class="fas fa-folder-open text-4xl mb-3 text-amber-300"></i>
+            <p class="text-sm font-medium text-slate-600">\${menu.menu_number} \${menu.menu_name}</p>
+            <p class="text-xs mt-1">하위 메뉴를 선택하세요</p>
+          </div>
+        </div>
+      \`
+      return
+    }
+
+    // 템플릿 목록
+    const tplCards = templates.map(t => {
+      const hasFile = !!t.pptx_b64_key
+      const fileName = t.pptx_file_path || (hasFile ? '업로드됨' : null)
       return \`
-      <tr class="border-t border-slate-100 hover:bg-slate-50">
-        <td class="px-3 py-2 text-xs font-mono text-indigo-600">\${t.variant_code}</td>
-        <td class="px-3 py-2 text-xs text-slate-700">\${t.template_name}</td>
-        <td class="px-3 py-2 text-xs text-center text-slate-500">\${t.capacity ?? '-'}</td>
-        <td class="px-3 py-2 text-xs">\${fileBadge}</td>
-        <td class="px-3 py-2 text-xs text-center">
-          <span class="px-1.5 py-0.5 rounded-full text-xs \${t.is_active?'bg-emerald-100 text-emerald-700':'bg-slate-100 text-slate-400'}">\${t.is_active?'활성':'비활성'}</span>
-        </td>
-        <td class="px-3 py-2 text-xs text-center">
-          <button onclick="deleteTpl(\${t.id})" class="text-red-400 hover:text-red-600"><i class="fas fa-trash"></i></button>
-        </td>
-      </tr>
-    \`}).join('')
+        <div class="flex items-center justify-between bg-white border border-slate-200 rounded-lg px-3 py-2">
+          <div class="flex items-center gap-2 min-w-0">
+            <i class="fas fa-file-powerpoint \${hasFile ? 'text-emerald-500' : 'text-slate-300'} flex-shrink-0"></i>
+            <span class="text-xs truncate \${hasFile ? 'text-slate-700 font-medium' : 'text-slate-400'}">
+              \${hasFile ? (fileName || '파일 업로드됨') : '파일 없음'}
+            </span>
+            \${t.variant_code !== 'DEFAULT' ? '<span class="text-xs font-mono bg-indigo-50 text-indigo-500 px-1.5 py-0.5 rounded flex-shrink-0">' + t.variant_code + '</span>' : ''}
+          </div>
+          <button onclick="deleteTpl(\${t.id})" class="ml-2 text-red-300 hover:text-red-500 flex-shrink-0 transition">
+            <i class="fas fa-trash text-xs"></i>
+          </button>
+        </div>
+      \`
+    }).join('')
 
     document.getElementById('detailPanel').innerHTML = \`
       <div class="p-5 h-full overflow-y-auto">
 
         <!-- 헤더 -->
-        <div class="flex items-start justify-between mb-5">
+        <div class="flex items-start justify-between mb-4">
           <div>
             <div class="flex items-center gap-2 mb-1">
               \${menu.menu_number ? '<span class="text-xs bg-slate-100 text-slate-500 px-2 py-0.5 rounded font-mono">' + menu.menu_number + '</span>' : ''}
-              <h2 class="text-lg font-bold text-slate-800">\${menu.menu_name}</h2>
+              <h2 class="text-base font-bold text-slate-800">\${menu.menu_name}</h2>
             </div>
-            <div class="flex items-center gap-2">
-              <code class="text-xs bg-indigo-50 text-indigo-600 px-2 py-0.5 rounded">\${menu.menu_code}</code>
-              <span class="text-xs px-2 py-0.5 rounded-full \${menu.is_enabled?'bg-emerald-100 text-emerald-700':'bg-slate-100 text-slate-400'}">\${menu.is_enabled?'사용중':'미사용'}</span>
-            </div>
+            <code class="text-xs bg-indigo-50 text-indigo-400 px-2 py-0.5 rounded">\${menu.menu_code}</code>
           </div>
-          <div class="flex gap-2">
-            <button onclick="openEditMenu(\${menu.id})" class="px-2 py-1 text-xs rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-600 border border-slate-200">
-              <i class="fas fa-edit mr-1"></i>편집
-            </button>
-            <button onclick="deleteMenu(\${menu.id})" class="px-2 py-1 text-xs rounded-lg bg-red-50 hover:bg-red-100 text-red-500 border border-red-200">
-              <i class="fas fa-trash mr-1"></i>삭제
-            </button>
-          </div>
-        </div>
-
-        <!-- 생성 규칙 -->
-        <div class="mb-5 bg-slate-50 rounded-xl p-4 border border-slate-200">
-          <div class="text-sm font-bold text-slate-700 mb-3 flex items-center gap-2">
-            <i class="fas fa-cogs text-indigo-400"></i>생성 규칙 설정
-          </div>
-          <div class="grid grid-cols-2 gap-3 mb-3">
-            <div class="col-span-2">
-              <label class="text-xs text-slate-500 font-medium mb-1 flex items-center gap-1 block">
-                슬라이드 생성 방식
-                <span class="tip-icon" data-tip="mode"><i class="fas fa-question-circle text-slate-300 cursor-help"></i></span>
-              </label>
-              <select id="ruleMode" onchange="onRuleModeChange(this.value)"
-                class="w-full border border-slate-300 rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-indigo-300">\${modeOpts}</select>
-            </div>
-            <div class="col-span-2">
-              <label class="text-xs text-slate-500 font-medium mb-1 flex items-center gap-1 block">
-                템플릿 종류
-                <span class="tip-icon" data-tip="strategy"><i class="fas fa-question-circle text-slate-300 cursor-help"></i></span>
-              </label>
-              <select id="ruleStrategy" class="w-full border border-slate-300 rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-indigo-300">\${stratOpts}</select>
-            </div>
-            <div id="wrap-rulePagination">
-              <label class="text-xs text-slate-500 font-medium mb-1 flex items-center gap-1 block">
-                페이지 분할 방식
-                <span class="tip-icon" data-tip="pagination"><i class="fas fa-question-circle text-slate-300 cursor-help"></i></span>
-              </label>
-              <select id="rulePagination" class="w-full border border-slate-300 rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-indigo-300">\${paginOpts}</select>
-            </div>
-            <div>
-              <label class="text-xs text-slate-500 font-medium mb-1 flex items-center gap-1 block">
-                합본(병합) 방식
-                <span class="tip-icon" data-tip="merge"><i class="fas fa-question-circle text-slate-300 cursor-help"></i></span>
-              </label>
-              <select id="ruleMerge" class="w-full border border-slate-300 rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-indigo-300">\${mergeOpts}</select>
-            </div>
-            <div id="wrap-ruleCalc">
-              <label class="text-xs text-slate-500 font-medium mb-1 flex items-center gap-1 block">
-                데이터 계산 함수명
-                <span class="tip-icon" data-tip="calc"><i class="fas fa-question-circle text-slate-300 cursor-help"></i></span>
-              </label>
-              <input id="ruleCalc" type="text" value="\${rule.calculator_code||''}" placeholder="예: computeAssignRows"
-                class="w-full border border-slate-300 rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-indigo-300">
-            </div>
-            <div id="wrap-ruleRenderer">
-              <label class="text-xs text-slate-500 font-medium mb-1 flex items-center gap-1 block">
-                슬라이드 렌더 함수명
-                <span class="tip-icon" data-tip="renderer"><i class="fas fa-question-circle text-slate-300 cursor-help"></i></span>
-              </label>
-              <input id="ruleRenderer" type="text" value="\${rule.renderer_code||''}" placeholder="예: renderAssignTable"
-                class="w-full border border-slate-300 rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-indigo-300">
-            </div>
-          </div>
-          <div id="wrap-rulePostprocess" class="mb-3">
-            <label class="text-xs text-slate-500 font-medium mb-1 flex items-center gap-1 block">
-              후처리 방식
-              <span class="tip-icon" data-tip="postprocess"><i class="fas fa-question-circle text-slate-300 cursor-help"></i></span>
-            </label>
-            <select id="rulePostprocess" class="w-full border border-slate-300 rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-indigo-300">\${postOpts}</select>
-          </div>
-          <div class="mb-3">
-            <label class="text-xs text-slate-500 font-medium mb-1 flex items-center gap-1 block">
-              추가 설정값 (JSON)
-              <span class="tip-icon" data-tip="config"><i class="fas fa-question-circle text-slate-300 cursor-help"></i></span>
-            </label>
-            <textarea id="ruleConfig" rows="3" placeholder='예: {"maxRowsPerSlide":15,"variants":[2,4,6,9]}'
-              class="w-full border border-slate-300 rounded-lg px-2 py-1.5 text-xs font-mono focus:outline-none focus:ring-2 focus:ring-indigo-300">\${rule.rule_config||''}</textarea>
-          </div>
-          <button onclick="saveRule(\${menu.id})" class="px-3 py-1.5 text-xs rounded-lg bg-indigo-600 text-white hover:bg-indigo-700">
-            <i class="fas fa-save mr-1"></i>규칙 저장
+          <button onclick="deleteMenu(\${menu.id})" class="px-2 py-1 text-xs rounded-lg bg-red-50 hover:bg-red-100 text-red-400 border border-red-200 transition">
+            <i class="fas fa-trash mr-1"></i>삭제
           </button>
         </div>
 
-        <!-- 템플릿 목록 -->
+        <!-- 켜고/끄기 -->
+        <div class="mb-4 flex items-center justify-between bg-slate-50 rounded-xl px-4 py-3 border border-slate-200">
+          <div>
+            <div class="text-sm font-semibold text-slate-700">장표 사용 여부</div>
+            <div class="text-xs text-slate-400 mt-0.5">제안서 생성 시 이 장표를 포함할지 설정합니다</div>
+          </div>
+          <label class="relative inline-flex items-center cursor-pointer">
+            <input type="checkbox" id="toggleEnabled" \${menu.is_enabled ? 'checked' : ''}
+              onchange="toggleMenuEnabled(\${menu.id}, this.checked)"
+              class="sr-only peer">
+            <div class="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer
+              peer-checked:after:translate-x-full peer-checked:after:border-white
+              after:content-[''] after:absolute after:top-[2px] after:left-[2px]
+              after:bg-white after:border-gray-300 after:border after:rounded-full
+              after:h-5 after:w-5 after:transition-all
+              peer-checked:bg-emerald-500"></div>
+          </label>
+        </div>
+
+        <!-- 템플릿 파일 -->
         <div class="mb-4">
           <div class="text-sm font-bold text-slate-700 mb-2 flex items-center gap-2">
-            <i class="fas fa-copy text-amber-400"></i>템플릿 목록
+            <i class="fas fa-file-powerpoint text-amber-400"></i>템플릿 파일
             <span class="text-xs font-normal text-slate-400">(총 \${templates.length}개)</span>
           </div>
-          <div class="overflow-x-auto rounded-xl border border-slate-200">
-            <table class="w-full text-sm">
-              <thead>
-                <tr class="bg-slate-50 border-b border-slate-200">
-                  <th class="px-3 py-2 text-xs text-left text-slate-500 font-semibold">Variant</th>
-                  <th class="px-3 py-2 text-xs text-left text-slate-500 font-semibold">이름</th>
-                  <th class="px-3 py-2 text-xs text-center text-slate-500 font-semibold">Capacity</th>
-                  <th class="px-3 py-2 text-xs text-left text-slate-500 font-semibold">파일</th>
-                  <th class="px-3 py-2 text-xs text-center text-slate-500 font-semibold">상태</th>
-                  <th class="px-3 py-2 text-xs text-center text-slate-500 font-semibold"></th>
-                </tr>
-              </thead>
-              <tbody>\${tplRows || '<tr><td colspan="6" class="text-center py-4 text-slate-400 text-xs">템플릿 없음</td></tr>'}</tbody>
-            </table>
-          </div>
-          <!-- 템플릿 추가 폼 -->
-          <div class="mt-3 bg-amber-50 rounded-lg p-3 border border-amber-200">
-            <div class="text-xs font-semibold text-amber-700 mb-2"><i class="fas fa-upload mr-1"></i>템플릿 파일 업로드</div>
-            <div class="grid grid-cols-2 gap-2 mb-2">
-              <input id="newTplName" type="text" placeholder="템플릿 이름 (필수)" class="border border-slate-300 rounded px-2 py-1 text-xs">
-              <input id="newTplVariant" type="text" placeholder="Variant (예: PERSON_4)" value="DEFAULT" class="border border-slate-300 rounded px-2 py-1 text-xs">
-              <input id="newTplCapacity" type="number" placeholder="Capacity (행/슬라이드당 인원 수)" class="border border-slate-300 rounded px-2 py-1 text-xs">
-              <div></div>
+
+          \${templates.length > 0 ? \`
+            <div class="space-y-1.5 mb-3">\${tplCards}</div>
+          \` : \`
+            <div class="mb-3 text-xs text-slate-400 bg-slate-50 rounded-lg px-4 py-3 border border-slate-200">
+              <i class="fas fa-info-circle mr-1"></i>업로드된 템플릿 파일이 없습니다
             </div>
-            <label class="block mb-2">
-              <span class="text-xs text-slate-500 font-medium">PPTX 파일 선택</span>
-              <div id="tplFileDropZone" class="mt-1 flex items-center gap-2 border-2 border-dashed border-amber-300 rounded-lg px-3 py-2 cursor-pointer hover:border-amber-500 hover:bg-amber-100 transition"
-                   onclick="document.getElementById('newTplFile').click()">
-                <i class="fas fa-file-powerpoint text-amber-500 text-lg"></i>
-                <span id="tplFileLabel" class="text-xs text-slate-500 truncate">클릭하거나 파일을 여기에 끌어다 놓으세요 (.pptx)</span>
+          \`}
+
+          <!-- 업로드 폼 -->
+          <div class="bg-amber-50 rounded-xl p-3 border border-amber-200">
+            <label class="block">
+              <div id="tplFileDropZone"
+                class="flex items-center gap-3 border-2 border-dashed border-amber-300 rounded-lg px-4 py-3 cursor-pointer hover:border-amber-500 hover:bg-amber-100 transition"
+                onclick="document.getElementById('newTplFile').click()">
+                <i class="fas fa-file-powerpoint text-amber-400 text-xl flex-shrink-0"></i>
+                <span id="tplFileLabel" class="text-xs text-slate-500 truncate">
+                  클릭하거나 파일을 여기에 끌어다 놓으세요 (.pptx)
+                </span>
               </div>
-              <input id="newTplFile" type="file" accept=".pptx,application/vnd.openxmlformats-officedocument.presentationml.presentation"
+              <input id="newTplFile" type="file"
+                accept=".pptx,application/vnd.openxmlformats-officedocument.presentationml.presentation"
                 class="hidden" onchange="onTplFileChange(this)">
             </label>
-            <button onclick="addTemplate(\${menu.id})" class="px-3 py-1 text-xs rounded bg-amber-600 text-white hover:bg-amber-700">
+            <input type="hidden" id="newTplName" value="">
+            <input type="hidden" id="newTplVariant" value="DEFAULT">
+            <input type="hidden" id="newTplCapacity" value="">
+            <button onclick="addTemplate(\${menu.id})"
+              class="mt-2 w-full py-1.5 text-xs rounded-lg bg-amber-500 text-white hover:bg-amber-600 font-medium transition">
               <i class="fas fa-upload mr-1"></i>업로드 & 추가
             </button>
           </div>
@@ -2212,8 +2116,6 @@ app.get('/ppt-templates', async (c) => {
 
       </div>
     \`
-    // 현재 mode에 맞게 필드 비활성화 초기 적용
-    onRuleModeChange(rule.generation_mode || 'BUILD_TABLE')
   }
 
   // ── mode 변경 시 관련 필드 활성/비활성 처리 ───────────────────
@@ -2263,14 +2165,31 @@ app.get('/ppt-templates', async (c) => {
     if (input.files && input.files[0]) {
       label.textContent = input.files[0].name
       label.classList.add('text-amber-700', 'font-semibold')
-      // 이름 자동 채우기 (비어있을 때)
+      // 이름 자동 채우기
       const nameEl = document.getElementById('newTplName')
-      if (nameEl && !nameEl.value) {
-        nameEl.value = input.files[0].name.replace(/\.pptx$/i, '')
-      }
+      if (nameEl) nameEl.value = input.files[0].name.replace(/\.pptx$/i, '')
     } else {
       label.textContent = '클릭하거나 파일을 여기에 끌어다 놓으세요 (.pptx)'
       label.classList.remove('text-amber-700', 'font-semibold')
+    }
+  }
+
+  // ── 켜고/끄기 토글 ────────────────────────────────────────────
+  async function toggleMenuEnabled(menuId, enabled) {
+    const r = await fetch('/api/ppt-menus/' + menuId, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ is_enabled: enabled ? 1 : 0 })
+    })
+    const j = await r.json()
+    if (!j.ok) {
+      showAlert('❌ ' + j.error, false)
+      // 실패 시 토글 원복
+      document.getElementById('toggleEnabled').checked = !enabled
+    } else {
+      await loadTree()
+      _selectedMenuId = menuId
+      renderTree(_treeData)
     }
   }
 
