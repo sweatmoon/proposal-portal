@@ -1174,6 +1174,20 @@ async function downloadPhotoAssignPptx(btn, opts) {
     })
 
     const catGroups = groupPhotoCategories(filteredCfg)
+
+    // solo=true 카테고리가 다른 그룹의 include 대상인 경우를 미리 파악
+    // → 해당 solo 카테고리는 독립 그룹 슬라이드를 만들되, include한 그룹 슬라이드에도 중복 포함
+    // → include한 그룹 처리 시 solo 카테고리 people을 앞에 삽입 (순서: solo포함대상 → 나머지)
+    const soloIncludedBy = {}  // soloKey → 자신을 include한 catKey Set
+    targetCatKeys.forEach(k => {
+      if (cfg[k]) cfg[k].include.forEach(t => {
+        if (cfg[t] && cfg[t].solo) {
+          soloIncludedBy[t] = soloIncludedBy[t] || new Set()
+          soloIncludedBy[t].add(k)
+        }
+      })
+    })
+
     for (const catKeys of catGroups) {
       const firstCat = PHOTO_CATS.find(c => catKeys.includes(c.key))
       // solo=true 카테고리가 include 대상으로 포함된 경우 → 해당 카테고리 자체 sheet 무시,
@@ -1184,14 +1198,19 @@ async function downloadPhotoAssignPptx(btn, opts) {
       const fillOrder = computeFillOrder(meta.rows, meta.cols)
 
       const people = []
-      // catKeys에 포함된 카테고리 인원 수집
-      // + 이 그룹의 include 대상 중 solo=true(독립 출력)인 카테고리도 인원 추가
-      //   (단독 슬라이드 + 타 그룹 중복 포함 의도)
+      // 이 그룹의 include 대상 중 solo=true인 카테고리를 먼저 앞에 배치
+      // (단독 슬라이드 + 이 그룹에 중복 포함 의도 → 순서: solo포함대상 → catKeys 나머지)
       const soloIncludeKeys = new Set()
       catKeys.forEach(k => {
         if (cfg[k]) cfg[k].include.forEach(t => { if (cfg[t] && cfg[t].solo) soloIncludeKeys.add(t) })
       })
-      const allPeopleKeys = [...catKeys, ...soloIncludeKeys]
+      // solo 카테고리가 이 그룹의 catKeys에 있으면 독립 그룹이므로 중복 삽입 제외
+      // (catKeys에 solo=true인 것만 있는 그룹 = 독립 그룹 → soloIncludeKeys 없음)
+      const isIndependentSoloGroup = catKeys.every(k => filteredCfg[k] && filteredCfg[k].solo)
+      const insertSoloFirst = !isIndependentSoloGroup
+      const allPeopleKeys = insertSoloFirst
+        ? [...soloIncludeKeys, ...catKeys.filter(k => !soloIncludeKeys.has(k))]
+        : [...catKeys]
       allPeopleKeys.forEach(catKey => {
         const catLabel = PHOTO_CATS.find(c => c.key === catKey).label.replace(/^\S+\s/, '')
         ;(cache[catKey] || []).forEach(p => {
