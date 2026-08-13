@@ -937,12 +937,12 @@ async function downloadPhotoAssignPptx(btn, opts) {
                             : 'AUDITOR_PROFILE'
       const menu = registry.byCode[profileMenuCode]
       const tpls = menu && Array.isArray(menu.templates) ? menu.templates : []
-      // variant_name에서 PERSON_2/4/6/9 구분
+      // variant_code에서 PERSON_2/4/6/9 구분 (DB 컬럼명: variant_code)
       const VARIANT_RE = /PERSON[_-]?(\d+)/i
       const b64Map = {}
       tpls.forEach(t => {
         if (!t.pptx_b64_key) return
-        const vn = t.variant_name || t.template_name || ''
+        const vn = t.variant_code || t.variant_name || t.template_name || ''
         const m = vn.match(VARIANT_RE)
         if (m) b64Map[Number(m[1])] = t.pptx_b64_key
       })
