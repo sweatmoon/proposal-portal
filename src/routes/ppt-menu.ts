@@ -314,7 +314,7 @@ app.post('/seed', async (c) => {
     const MENUS: MenuDef[] = [
       // ── 다. 감리 일정 및 절차 ─────────────────────────────────────
       {
-        parentKey: 'SECTION_SCHEDULE', code: 'SCHEDULE_PLAN', name: '1.1 감리 일정 계획',
+        parentKey: 'SECTION_SCHEDULE', code: 'SCHEDULE_PLAN', name: '감리 일정 계획',
         number: '1.1', sort: 310, enabled: 1,
         mode: 'CLONE_SLIDE', strategy: 'PPTX_XML_TEMPLATE',
         calc: '', renderer: '',
@@ -323,7 +323,7 @@ app.post('/seed', async (c) => {
         templates: [{ variant: 'DEFAULT', capacity: null }],
       },
       {
-        parentKey: 'SECTION_SCHEDULE', code: 'DETAIL_SCHEDULE', name: '1.2 세부 감리 일정 (1/2)',
+        parentKey: 'SECTION_SCHEDULE', code: 'DETAIL_SCHEDULE', name: '세부 감리 일정 (1/2)',
         number: '1.2', sort: 320, enabled: 1,
         mode: 'BUILD_TABLE', strategy: 'FRAME_TEMPLATE',
         calc: 'computeDetailSchedule1Rows', renderer: 'renderDetailScheduleTable',
@@ -335,7 +335,7 @@ app.post('/seed', async (c) => {
         ],
       },
       {
-        parentKey: 'SECTION_SCHEDULE', code: 'AUDIT_PROCEDURE', name: '2.1 단계별 감리 수행 절차',
+        parentKey: 'SECTION_SCHEDULE', code: 'AUDIT_PROCEDURE', name: '단계별 감리 수행 절차',
         number: '2.1', sort: 330, enabled: 1,
         mode: 'CLONE_SLIDE', strategy: 'PPTX_XML_TEMPLATE',
         calc: '', renderer: '',
@@ -344,7 +344,7 @@ app.post('/seed', async (c) => {
         templates: [{ variant: 'DEFAULT', capacity: null }],
       },
       {
-        parentKey: 'SECTION_SCHEDULE', code: 'ACTION_CONFIRM_PROCEDURE', name: '3.1 시정조치확인 수행 절차',
+        parentKey: 'SECTION_SCHEDULE', code: 'ACTION_CONFIRM_PROCEDURE', name: '시정조치확인 수행 절차',
         number: '3.1', sort: 340, enabled: 1,
         mode: 'CLONE_SLIDE', strategy: 'PPTX_XML_TEMPLATE',
         calc: '', renderer: '',
@@ -353,7 +353,7 @@ app.post('/seed', async (c) => {
         templates: [{ variant: 'DEFAULT', capacity: null }],
       },
       {
-        parentKey: 'SECTION_SCHEDULE', code: 'ACTION_CONFIRM_STAFF', name: '3.2 시정조치확인 수행 인력',
+        parentKey: 'SECTION_SCHEDULE', code: 'ACTION_CONFIRM_STAFF', name: '시정조치확인 수행 인력',
         number: '3.2', sort: 350, enabled: 1,
         mode: 'CLONE_SLIDE', strategy: 'PPTX_XML_TEMPLATE',
         calc: '', renderer: '',
@@ -364,7 +364,7 @@ app.post('/seed', async (c) => {
 
       // ── 라. 감리 인력 ──────────────────────────────────────────────
       {
-        parentKey: 'SECTION_MANPOWER', code: 'MANPOWER_BASIS', name: '1.1 감리 인력 편성 근거',
+        parentKey: 'SECTION_MANPOWER', code: 'MANPOWER_BASIS', name: '감리 인력 편성 근거',
         number: '1.1', sort: 410, enabled: 1,
         mode: 'CLONE_SLIDE', strategy: 'PPTX_XML_TEMPLATE',
         calc: '', renderer: '',
@@ -373,7 +373,7 @@ app.post('/seed', async (c) => {
         templates: [{ variant: 'DEFAULT', capacity: null }],
       },
       {
-        parentKey: 'SECTION_MANPOWER', code: 'ORGANIZATION', name: '1.2 감리 수행 조직',
+        parentKey: 'SECTION_MANPOWER', code: 'ORGANIZATION', name: '감리 수행 조직',
         number: '1.2', sort: 420, enabled: 1,
         mode: 'CLONE_SLIDE', strategy: 'PPTX_XML_TEMPLATE',
         calc: '', renderer: '',
@@ -382,7 +382,7 @@ app.post('/seed', async (c) => {
         templates: [{ variant: 'DEFAULT', capacity: null }],
       },
       {
-        parentKey: 'SECTION_MANPOWER', code: 'ORGANIZATION_ROLE', name: '1.3 감리 조직별 역할',
+        parentKey: 'SECTION_MANPOWER', code: 'ORGANIZATION_ROLE', name: '감리 조직별 역할',
         number: '1.3', sort: 430, enabled: 1,
         mode: 'CLONE_SLIDE', strategy: 'PPTX_XML_TEMPLATE',
         calc: '', renderer: '',
@@ -391,7 +391,7 @@ app.post('/seed', async (c) => {
         templates: [{ variant: 'DEFAULT', capacity: null }],
       },
       {
-        parentKey: 'SECTION_MANPOWER', code: 'MANPOWER_MD', name: '1.4 감리 인력 투입 공수',
+        parentKey: 'SECTION_MANPOWER', code: 'MANPOWER_MD', name: '감리 인력 투입 공수',
         number: '1.4', sort: 440, enabled: 1,
         mode: 'BUILD_TABLE', strategy: 'FRAME_TEMPLATE',
         calc: 'computeManpowerMd', renderer: 'renderManpowerMdTable',
@@ -400,7 +400,7 @@ app.post('/seed', async (c) => {
         templates: [{ variant: 'DEFAULT', capacity: null }],
       },
       {
-        parentKey: 'SECTION_MANPOWER', code: 'FULLTIME_RATIO', name: '1.5 상근 감리원 투입 비율',
+        parentKey: 'SECTION_MANPOWER', code: 'FULLTIME_RATIO', name: '상근 감리원 투입 비율',
         number: '1.5', sort: 450, enabled: 1,
         mode: 'CLONE_SLIDE', strategy: 'PPTX_XML_TEMPLATE',
         calc: '', renderer: '',
@@ -409,7 +409,7 @@ app.post('/seed', async (c) => {
         templates: [{ variant: 'DEFAULT', capacity: null }],
       },
       {
-        parentKey: 'SECTION_MANPOWER', code: 'PM_PROFILE_CAPABILITY', name: '2.1 총괄 감리원의 전문 역량',
+        parentKey: 'SECTION_MANPOWER', code: 'PM_PROFILE_CAPABILITY', name: '총괄 감리원의 전문 역량',
         number: '2.1', sort: 460, enabled: 1,
         mode: 'CLONE_SLIDE', strategy: 'PPTX_XML_TEMPLATE',
         calc: '', renderer: '',
@@ -418,7 +418,7 @@ app.post('/seed', async (c) => {
         templates: [{ variant: 'DEFAULT', capacity: 1 }],
       },
       {
-        parentKey: 'SECTION_MANPOWER', code: 'PM_PROFILE_REQUIREMENTS', name: '2.2 총괄 감리원 자격 요건',
+        parentKey: 'SECTION_MANPOWER', code: 'PM_PROFILE_REQUIREMENTS', name: '총괄 감리원 자격 요건',
         number: '2.2', sort: 470, enabled: 1,
         mode: 'CLONE_SLIDE', strategy: 'PPTX_XML_TEMPLATE',
         calc: '', renderer: '',
@@ -427,7 +427,7 @@ app.post('/seed', async (c) => {
         templates: [{ variant: 'DEFAULT', capacity: 1 }],
       },
       {
-        parentKey: 'SECTION_MANPOWER', code: 'AUDITOR_PROFILE', name: '3.1 단계 감리원의 전문 역량',
+        parentKey: 'SECTION_MANPOWER', code: 'AUDITOR_PROFILE', name: '단계 감리원의 전문 역량',
         number: '3.1', sort: 480, enabled: 1,
         mode: 'CLONE_SLIDE', strategy: 'PPTX_XML_TEMPLATE',
         calc: 'computeAuditorProfiles', renderer: 'buildPhotoPptxFromTemplate',
@@ -441,7 +441,7 @@ app.post('/seed', async (c) => {
         ],
       },
       {
-        parentKey: 'SECTION_MANPOWER', code: 'CORE_EXPERT_PROFILE', name: '3.2 핵심기술 점검팀의 전문 역량',
+        parentKey: 'SECTION_MANPOWER', code: 'CORE_EXPERT_PROFILE', name: '핵심기술 점검팀의 전문 역량',
         number: '3.2', sort: 490, enabled: 0,
         mode: 'CLONE_SLIDE', strategy: 'PPTX_XML_TEMPLATE',
         calc: 'computeCoreExpertProfiles', renderer: 'buildPhotoPptxFromTemplate',
@@ -455,7 +455,7 @@ app.post('/seed', async (c) => {
         ],
       },
       {
-        parentKey: 'SECTION_MANPOWER', code: 'EXPERT_PROFILE', name: '3.3 필수기술, 보안 점검팀 및 테스트팀의 전문 역량',
+        parentKey: 'SECTION_MANPOWER', code: 'EXPERT_PROFILE', name: '필수기술, 보안 점검팀 및 테스트팀의 전문 역량',
         number: '3.3', sort: 500, enabled: 0,
         mode: 'CLONE_SLIDE', strategy: 'PPTX_XML_TEMPLATE',
         calc: 'computeExpertProfiles', renderer: 'buildPhotoPptxFromTemplate',
@@ -469,7 +469,7 @@ app.post('/seed', async (c) => {
         ],
       },
       {
-        parentKey: 'SECTION_MANPOWER', code: 'AUDITOR_HISTORY', name: '3.4 감리원별 유사 감리 실적 및 경력, 자격',
+        parentKey: 'SECTION_MANPOWER', code: 'AUDITOR_HISTORY', name: '감리원별 유사 감리 실적 및 경력, 자격',
         number: '3.4', sort: 510, enabled: 1,
         mode: 'CLONE_SLIDE', strategy: 'PPTX_XML_TEMPLATE',
         calc: 'computeAuditorHistory', renderer: 'cloneHistoryTemplate',
@@ -478,7 +478,7 @@ app.post('/seed', async (c) => {
         templates: [{ variant: 'DEFAULT', capacity: 1 }],
       },
       {
-        parentKey: 'SECTION_MANPOWER', code: 'EXPERT_HISTORY', name: '3.5 전문가별 유사 감리 실적 및 경력, 자격',
+        parentKey: 'SECTION_MANPOWER', code: 'EXPERT_HISTORY', name: '전문가별 유사 감리 실적 및 경력, 자격',
         number: '3.5', sort: 520, enabled: 0,
         mode: 'CLONE_SLIDE', strategy: 'PPTX_XML_TEMPLATE',
         calc: 'computeExpertHistory', renderer: 'cloneHistoryTemplate',
@@ -487,7 +487,7 @@ app.post('/seed', async (c) => {
         templates: [{ variant: 'DEFAULT', capacity: 1 }],
       },
       {
-        parentKey: 'SECTION_MANPOWER', code: 'CONTINUING_EDU', name: '3.6 참여 감리원 계속교육 이수 실적',
+        parentKey: 'SECTION_MANPOWER', code: 'CONTINUING_EDU', name: '참여 감리원 계속교육 이수 실적',
         number: '3.6', sort: 530, enabled: 1,
         mode: 'CLONE_SLIDE', strategy: 'PPTX_XML_TEMPLATE',
         calc: '', renderer: '',
@@ -496,7 +496,7 @@ app.post('/seed', async (c) => {
         templates: [{ variant: 'DEFAULT', capacity: null }],
       },
       {
-        parentKey: 'SECTION_MANPOWER', code: 'MANPOWER_RATIO', name: '3.7 감리원 및 전문가 투입 비율',
+        parentKey: 'SECTION_MANPOWER', code: 'MANPOWER_RATIO', name: '감리원 및 전문가 투입 비율',
         number: '3.7', sort: 540, enabled: 1,
         mode: 'CLONE_SLIDE', strategy: 'PPTX_XML_TEMPLATE',
         calc: '', renderer: '',
@@ -507,7 +507,7 @@ app.post('/seed', async (c) => {
 
       // ── 마. 품질 및 지원 ───────────────────────────────────────────
       {
-        parentKey: 'SECTION_QUALITY', code: 'QA_SYSTEM', name: '1.1 제안사 품질보증체계',
+        parentKey: 'SECTION_QUALITY', code: 'QA_SYSTEM', name: '제안사 품질보증체계',
         number: '1.1', sort: 610, enabled: 1,
         mode: 'CLONE_SLIDE', strategy: 'PPTX_XML_TEMPLATE',
         calc: '', renderer: '',
@@ -516,7 +516,7 @@ app.post('/seed', async (c) => {
         templates: [{ variant: 'DEFAULT', capacity: null }],
       },
       {
-        parentKey: 'SECTION_QUALITY', code: 'QA_MANAGEMENT', name: '1.2 감리 품질관리 수행 방안',
+        parentKey: 'SECTION_QUALITY', code: 'QA_MANAGEMENT', name: '감리 품질관리 수행 방안',
         number: '1.2', sort: 620, enabled: 1,
         mode: 'CLONE_SLIDE', strategy: 'PPTX_XML_TEMPLATE',
         calc: '', renderer: '',
@@ -525,7 +525,7 @@ app.post('/seed', async (c) => {
         templates: [{ variant: 'DEFAULT', capacity: null }],
       },
       {
-        parentKey: 'SECTION_QUALITY', code: 'REPORT_QUALITY', name: '1.3 감리보고서 품질 지표 관리 방안',
+        parentKey: 'SECTION_QUALITY', code: 'REPORT_QUALITY', name: '감리보고서 품질 지표 관리 방안',
         number: '1.3', sort: 630, enabled: 1,
         mode: 'CLONE_SLIDE', strategy: 'PPTX_XML_TEMPLATE',
         calc: '', renderer: '',
@@ -534,7 +534,7 @@ app.post('/seed', async (c) => {
         templates: [{ variant: 'DEFAULT', capacity: null }],
       },
       {
-        parentKey: 'SECTION_QUALITY', code: 'DELIVERABLE_MGMT', name: '1.4 단계별 산출물 관리',
+        parentKey: 'SECTION_QUALITY', code: 'DELIVERABLE_MGMT', name: '단계별 산출물 관리',
         number: '1.4', sort: 640, enabled: 1,
         mode: 'CLONE_SLIDE', strategy: 'PPTX_XML_TEMPLATE',
         calc: '', renderer: '',
@@ -543,7 +543,7 @@ app.post('/seed', async (c) => {
         templates: [{ variant: 'DEFAULT', capacity: null }],
       },
       {
-        parentKey: 'SECTION_QUALITY', code: 'RESEARCH_SUPPORT', name: '1.5 제안사 연구 및 기술지원, 교육 수행 체계',
+        parentKey: 'SECTION_QUALITY', code: 'RESEARCH_SUPPORT', name: '제안사 연구 및 기술지원, 교육 수행 체계',
         number: '1.5', sort: 650, enabled: 1,
         mode: 'CLONE_SLIDE', strategy: 'PPTX_XML_TEMPLATE',
         calc: '', renderer: '',
@@ -552,7 +552,7 @@ app.post('/seed', async (c) => {
         templates: [{ variant: 'DEFAULT', capacity: null }],
       },
       {
-        parentKey: 'SECTION_QUALITY', code: 'AUTO_TOOL_PLAN', name: '2.1 단계별 자동화 도구 적용 방안',
+        parentKey: 'SECTION_QUALITY', code: 'AUTO_TOOL_PLAN', name: '단계별 자동화 도구 적용 방안',
         number: '2.1', sort: 660, enabled: 1,
         mode: 'CLONE_SLIDE', strategy: 'PPTX_XML_TEMPLATE',
         calc: '', renderer: '',
@@ -561,7 +561,7 @@ app.post('/seed', async (c) => {
         templates: [{ variant: 'DEFAULT', capacity: null }],
       },
       {
-        parentKey: 'SECTION_QUALITY', code: 'AUTO_TOOL_OBJECTIVITY', name: '2.2 자동화 도구 객관성·타당성 확보 방안',
+        parentKey: 'SECTION_QUALITY', code: 'AUTO_TOOL_OBJECTIVITY', name: '자동화 도구 객관성·타당성 확보 방안',
         number: '2.2', sort: 670, enabled: 1,
         mode: 'CLONE_SLIDE', strategy: 'PPTX_XML_TEMPLATE',
         calc: '', renderer: '',
@@ -570,7 +570,7 @@ app.post('/seed', async (c) => {
         templates: [{ variant: 'DEFAULT', capacity: null }],
       },
       {
-        parentKey: 'SECTION_QUALITY', code: 'AUTO_TOOL_DETAIL', name: '2.3 자동화 도구 적용 상세',
+        parentKey: 'SECTION_QUALITY', code: 'AUTO_TOOL_DETAIL', name: '자동화 도구 적용 상세',
         number: '2.3', sort: 680, enabled: 0,
         mode: 'CLONE_SLIDE', strategy: 'PPTX_XML_TEMPLATE',
         calc: '', renderer: '',
@@ -579,7 +579,7 @@ app.post('/seed', async (c) => {
         templates: [{ variant: 'DEFAULT', capacity: null }],
       },
       {
-        parentKey: 'SECTION_QUALITY', code: 'ADDITIONAL_SUPPORT', name: '3.1 추가 지원 사항',
+        parentKey: 'SECTION_QUALITY', code: 'ADDITIONAL_SUPPORT', name: '추가 지원 사항',
         number: '3.1', sort: 690, enabled: 0,
         mode: 'CLONE_SLIDE', strategy: 'PPTX_XML_TEMPLATE',
         calc: '', renderer: '',
@@ -588,7 +588,7 @@ app.post('/seed', async (c) => {
         templates: [{ variant: 'DEFAULT', capacity: null }],
       },
       {
-        parentKey: 'SECTION_QUALITY', code: 'CONSTANT_SUPPORT', name: '3.2 제안사 상시 지원 프로세스',
+        parentKey: 'SECTION_QUALITY', code: 'CONSTANT_SUPPORT', name: '제안사 상시 지원 프로세스',
         number: '3.2', sort: 700, enabled: 1,
         mode: 'CLONE_SLIDE', strategy: 'PPTX_XML_TEMPLATE',
         calc: '', renderer: '',
@@ -597,7 +597,7 @@ app.post('/seed', async (c) => {
         templates: [{ variant: 'DEFAULT', capacity: null }],
       },
       {
-        parentKey: 'SECTION_QUALITY', code: 'RISK_MANAGEMENT', name: '3.3 위험 관리',
+        parentKey: 'SECTION_QUALITY', code: 'RISK_MANAGEMENT', name: '위험 관리',
         number: '3.3', sort: 710, enabled: 1,
         mode: 'CLONE_SLIDE', strategy: 'PPTX_XML_TEMPLATE',
         calc: '', renderer: '',
@@ -606,7 +606,7 @@ app.post('/seed', async (c) => {
         templates: [{ variant: 'DEFAULT', capacity: null }],
       },
       {
-        parentKey: 'SECTION_QUALITY', code: 'SECURITY_MANAGEMENT', name: '3.4 감리 보안 관리',
+        parentKey: 'SECTION_QUALITY', code: 'SECURITY_MANAGEMENT', name: '감리 보안 관리',
         number: '3.4', sort: 720, enabled: 1,
         mode: 'CLONE_SLIDE', strategy: 'PPTX_XML_TEMPLATE',
         calc: '', renderer: '',
@@ -624,7 +624,7 @@ app.post('/seed', async (c) => {
         templates: [{ variant: 'DEFAULT', capacity: null }],
       },
       {
-        parentKey: 'SECTION_QUALITY', code: 'COMPLIANCE', name: '3.6 주관기관 요청사항 준수 여부',
+        parentKey: 'SECTION_QUALITY', code: 'COMPLIANCE', name: '주관기관 요청사항 준수 여부',
         number: '3.6', sort: 740, enabled: 1,
         mode: 'BUILD_TABLE', strategy: 'FRAME_TEMPLATE',
         calc: 'computeSummaryTableData', renderer: 'renderComplianceTable',
@@ -635,7 +635,7 @@ app.post('/seed', async (c) => {
 
       // ── 바. 제안사 소개 ────────────────────────────────────────────
       {
-        parentKey: 'SECTION_COMPANY', code: 'COMPANY_OVERVIEW', name: '1.1 제안사 일반 현황',
+        parentKey: 'SECTION_COMPANY', code: 'COMPANY_OVERVIEW', name: '제안사 일반 현황',
         number: '1.1', sort: 810, enabled: 1,
         mode: 'CLONE_SLIDE', strategy: 'PPTX_XML_TEMPLATE',
         calc: '', renderer: '',
@@ -644,7 +644,7 @@ app.post('/seed', async (c) => {
         templates: [{ variant: 'DEFAULT', capacity: null }],
       },
       {
-        parentKey: 'SECTION_COMPANY', code: 'FINANCIAL_CREDIT', name: '1.2 제안사 재무 현황 및 신용 등급',
+        parentKey: 'SECTION_COMPANY', code: 'FINANCIAL_CREDIT', name: '제안사 재무 현황 및 신용 등급',
         number: '1.2', sort: 820, enabled: 1,
         mode: 'CLONE_SLIDE', strategy: 'PPTX_XML_TEMPLATE',
         calc: '', renderer: '',
@@ -653,7 +653,7 @@ app.post('/seed', async (c) => {
         templates: [{ variant: 'DEFAULT', capacity: null }],
       },
       {
-        parentKey: 'SECTION_COMPANY', code: 'COMPANY_ORG', name: '2.1 제안사 조직 및 인력 현황',
+        parentKey: 'SECTION_COMPANY', code: 'COMPANY_ORG', name: '제안사 조직 및 인력 현황',
         number: '2.1', sort: 830, enabled: 1,
         mode: 'CLONE_SLIDE', strategy: 'PPTX_XML_TEMPLATE',
         calc: '', renderer: '',
@@ -662,7 +662,7 @@ app.post('/seed', async (c) => {
         templates: [{ variant: 'DEFAULT', capacity: null }],
       },
       {
-        parentKey: 'SECTION_COMPANY', code: 'COMPANY_TECH', name: '3.1 주요 사업 분야 및 보유 기술',
+        parentKey: 'SECTION_COMPANY', code: 'COMPANY_TECH', name: '주요 사업 분야 및 보유 기술',
         number: '3.1', sort: 840, enabled: 1,
         mode: 'CLONE_SLIDE', strategy: 'PPTX_XML_TEMPLATE',
         calc: '', renderer: '',
@@ -671,7 +671,7 @@ app.post('/seed', async (c) => {
         templates: [{ variant: 'DEFAULT', capacity: null }],
       },
       {
-        parentKey: 'SECTION_COMPANY', code: 'COMPANY_PERFORMANCE', name: '3.2 제안사 사업 실적',
+        parentKey: 'SECTION_COMPANY', code: 'COMPANY_PERFORMANCE', name: '제안사 사업 실적',
         number: '3.2', sort: 850, enabled: 1,
         mode: 'CLONE_SLIDE', strategy: 'PPTX_XML_TEMPLATE',
         calc: '', renderer: '',
