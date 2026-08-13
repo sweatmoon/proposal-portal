@@ -250,8 +250,8 @@ app.get('/:id/photo-profile', async (c) => {
       [projectId, personnelId]
     ),
     // 인력 기본 정보
-    queryOne<{ name: string; career_qualif: string | null; career_project: string | null }>(
-      `SELECT name, career_qualif, career_project FROM personnel WHERE id = $1`, [personnelId]
+    queryOne<{ name: string; career_qualif: string | null; career_project: string | null; career_expert: string | null }>(
+      `SELECT name, career_qualif, career_project, career_expert FROM personnel WHERE id = $1`, [personnelId]
     ),
     // 자격증 전체
     query<{ cert_name: string }>(
@@ -414,6 +414,7 @@ app.get('/:id/photo-profile', async (c) => {
       자격구분,
       자격요약:  person.career_qualif  ?? '',
       IT경력:    person.career_project ?? '',
+      주요이력:  person.career_expert  ?? '',
       감리횟수:  auditHistory.length,
       자격수:    certs.length,
       감리경력,
