@@ -225,12 +225,15 @@ app.get('/:id/photo-profile', async (c) => {
     ]);
     if (!person)
         return c.json({ ok: false, error: 'person not found' }, 404);
-    // ── [자격구분] 감리사 우선, 없으면 기술사 — 키워드만 추출 ──
-    // cert_name 전체("소프트웨어감리사", "정보통신기술사" 등)가 아닌
-    // "감리사" 또는 "기술사" 키워드 자체만 반환
+    // ── [자격구분] 감리사 > 기술사 > 감리원 우선순위 ──────────────
+    // 자격증 기반: cert_name에서 키워드만 추출
+    // 자격증 없으면 auditor_grade로 '감리원' fallback
     const certGamri = certs.find(c2 => c2.cert_name.includes('감리사'));
     const certGisul = certs.find(c2 => c2.cert_name.includes('기술사'));
-    const 자격구분 = certGamri ? '감리사' : certGisul ? '기술사' : '';
+    const 자격구분 = certGamri ? '감리사'
+        : certGisul ? '기술사'
+            : (member?.auditor_grade ?? '').trim() ? '감리원'
+                : '';
     // ── [감리경력] 최초 audit_yearmonth → 현재까지 ─────────────
     const toYM = (ym) => {
         const m = String(ym).match(/(\d{4})[.\s년](\d{1,2})/);
