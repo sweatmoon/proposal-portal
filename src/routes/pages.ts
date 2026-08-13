@@ -2040,29 +2040,31 @@ app.get('/ppt-templates', async (c) => {
       const fileInputId = 'tplFile_' + t.variant_code
       const fileLabelId = 'tplLabel_' + t.variant_code
       return \`
-        <div class="bg-white border border-slate-200 rounded-lg px-3 py-2">
-          <div class="flex items-center justify-between gap-2">
-            <div class="flex items-center gap-2 min-w-0">
-              <i class="fas fa-file-powerpoint \${hasFile ? 'text-emerald-500' : 'text-slate-300'} flex-shrink-0"></i>
-              <span class="text-xs truncate \${hasFile ? 'text-slate-700 font-medium' : 'text-slate-400'}">
-                \${hasFile ? (fileName || '파일 업로드됨') : '파일 없음'}
-              </span>
-              \${t.variant_code !== 'DEFAULT' ? '<span class="text-xs font-mono bg-indigo-50 text-indigo-500 px-1.5 py-0.5 rounded flex-shrink-0">' + t.variant_code + '</span>' : ''}
-            </div>
+        <div class="bg-white border border-slate-200 rounded-lg px-3 py-2.5">
+          <div class="flex items-center gap-2">
+            <i class="fas fa-file-powerpoint \${hasFile ? 'text-emerald-500' : 'text-slate-300'} flex-shrink-0"></i>
+            <span class="text-xs truncate flex-1 \${hasFile ? 'text-slate-700 font-medium' : 'text-slate-400'}">
+              \${hasFile ? (fileName || '파일 업로드됨') : '파일 없음'}
+            </span>
+            \${t.variant_code !== 'DEFAULT' ? '<span class="text-xs font-mono bg-indigo-50 text-indigo-500 px-1.5 py-0.5 rounded flex-shrink-0">' + t.variant_code + '</span>' : ''}
             \${isSlot ? \`
-              <label class="flex items-center gap-1.5 cursor-pointer flex-shrink-0">
-                <span id="\${fileLabelId}" class="text-xs text-slate-400 truncate max-w-[100px]">파일 선택...</span>
-                <input id="\${fileInputId}" type="file" accept=".pptx" class="hidden"
-                  onchange="onSlotFileChange('\${t.variant_code}', this)">
-                <button onclick="document.getElementById('\${fileInputId}').click()"
-                  class="text-xs px-2 py-1 rounded bg-slate-100 hover:bg-indigo-100 text-slate-600 hover:text-indigo-700 border border-slate-200 transition flex-shrink-0">
-                  <i class="fas fa-folder-open mr-1"></i>선택
-                </button>
-                <button onclick="uploadSlotTemplate(\${menu.id}, '\${t.variant_code}')"
-                  class="text-xs px-2 py-1 rounded bg-amber-500 hover:bg-amber-600 text-white font-medium transition flex-shrink-0">
-                  <i class="fas fa-upload mr-1"></i>업로드
-                </button>
-              </label>
+              <input id="\${fileInputId}" type="file" accept=".pptx" class="hidden"
+                onchange="onSlotFileChange('\${t.variant_code}', this)">
+              <span id="\${fileLabelId}" class="text-xs text-slate-400 truncate max-w-[90px] flex-shrink-0"></span>
+              <button onclick="document.getElementById('\${fileInputId}').click()"
+                class="text-xs px-2 py-1 rounded bg-slate-100 hover:bg-indigo-100 text-slate-600 hover:text-indigo-700 border border-slate-200 transition flex-shrink-0">
+                <i class="fas fa-folder-open"></i>
+              </button>
+              <button onclick="uploadSlotTemplate(\${menu.id}, '\${t.variant_code}')"
+                class="text-xs px-2 py-1 rounded bg-amber-500 hover:bg-amber-600 text-white font-medium transition flex-shrink-0">
+                <i class="fas fa-upload"></i>
+              </button>
+            \` : ''}
+            \${hasFile ? \`
+              <button onclick="deleteTplConfirm(\${t.id}, \${menu.id})"
+                class="text-xs px-2 py-1 rounded bg-red-50 hover:bg-red-100 text-red-400 hover:text-red-600 border border-red-200 transition flex-shrink-0" title="파일 삭제">
+                <i class="fas fa-trash"></i>
+              </button>
             \` : ''}
           </div>
         </div>
