@@ -2031,9 +2031,7 @@ app.get('/ppt-templates', async (c) => {
             </span>
             \${t.variant_code !== 'DEFAULT' ? '<span class="text-xs font-mono bg-indigo-50 text-indigo-500 px-1.5 py-0.5 rounded flex-shrink-0">' + t.variant_code + '</span>' : ''}
           </div>
-          <button onclick="deleteTpl(\${t.id})" class="ml-2 text-red-300 hover:text-red-500 flex-shrink-0 transition">
-            <i class="fas fa-trash text-xs"></i>
-          </button>
+
         </div>
       \`
     }).join('')
@@ -2050,9 +2048,7 @@ app.get('/ppt-templates', async (c) => {
             </div>
             <code class="text-xs bg-indigo-50 text-indigo-400 px-2 py-0.5 rounded">\${menu.menu_code}</code>
           </div>
-          <button onclick="deleteMenu(\${menu.id})" class="px-2 py-1 text-xs rounded-lg bg-red-50 hover:bg-red-100 text-red-400 border border-red-200 transition">
-            <i class="fas fa-trash mr-1"></i>삭제
-          </button>
+
         </div>
 
         <!-- 켜고/끄기 -->
