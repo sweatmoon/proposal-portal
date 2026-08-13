@@ -632,28 +632,151 @@ async function buildPhotoPptxFromTemplate(pages, templateZips) {
     return { x: +off.getAttribute('x'), y: +off.getAttribute('y'), w: +ext.getAttribute('cx'), h: +ext.getAttribute('cy') }
   }
 
-  // placeholder 치환: [xxx] 텍스트를 value로 교체
-  function fillPlaceholder(tNode, value) {
-    const run = tNode.parentNode
-    let prev = run.previousSibling
-    while (prev && !(prev.nodeType === 1 && prev.localName === 'r')) prev = prev.previousSibling
-    if (prev) {
-      const pt = prev.getElementsByTagNameNS(A_NS, 't')[0]
-      if (pt && /\[$/.test(pt.textContent)) pt.textContent = pt.textContent.replace(/\[$/, '')
+  // ── 런(run) 분산 placeholder 치환 엔진 ──────────────────────────
+  // PPTX XML에서 [분야], [이름] 등이 여러 <a:r> 런에 분산될 수 있음
+  // 예: <a:r>[</a:r><a:r>이름</a:r><a:r>]</a:r>
+  //     <a:r>[ </a:r><a:r>감리이력</a:r><a:r>1 ]</a:r>
+  //     <a:r>[IT</a:r><a:r>경력기간</a:r><a:r>]</a:r>
+  // 접근: 단락(<a:p>) 내 모든 런의 텍스트를 이어붙여 [xxx] 찾고,
+  //       해당 범위 런들을 첫 번째 런에 value로 합치고 나머지 런 제거
+
+  // 단락 내 런 배열의 연결 텍스트에서 label 위치 찾기
+  function findLabelInRuns(runs, label) {
+    // runs: Array of {el, text} — <a:r> 요소와 텍스트
+    const concat = runs.map(r => r.text).join('')
+    let idx = -1
+    while (true) {
+      idx = concat.indexOf(label, idx + 1)
+      if (idx === -1) break
+      // label이 끝난 뒤가 다음 placeholder 시작이거나 공백이어야 노이즈 제거
+      const after = concat[idx + label.length]
+      if (after === undefined || after === ' ' || after === '[' || after === '\n') {
+        return { concat, startIdx: idx, endIdx: idx + label.length }
+      }
+      // label이 더 긴 placeholder의 부분인 경우 skip (예: [이름] vs [이름없음])
     }
-    let next = run.nextSibling
-    while (next && !(next.nodeType === 1 && next.localName === 'r')) next = next.nextSibling
-    if (next) {
-      const nt = next.getElementsByTagNameNS(A_NS, 't')[0]
-      if (nt && /^\]/.test(nt.textContent)) nt.textContent = nt.textContent.replace(/^\]/, '')
+    // 마지막 시도: 정확히 끝
+    idx = concat.lastIndexOf(label)
+    if (idx !== -1 && concat.slice(idx) === label) {
+      return { concat, startIdx: idx, endIdx: idx + label.length }
     }
-    tNode.textContent = value
+    return null
   }
 
-  // 슬라이드 전체 텍스트 노드에서 정확히 일치하는 placeholder 찾기
-  function collectNodes(xmlDoc, label) {
-    return Array.from(xmlDoc.getElementsByTagNameNS(A_NS, 't'))
-      .filter(t => t.textContent === label)
+  // 단락의 런들에서 label을 찾아 value로 치환 (분산 런 포함)
+  // 반환값: 치환 성공한 횟수
+  function replaceLabelInParagraph(pEl, label, value) {
+    const runs = Array.from(pEl.getElementsByTagNameNS(A_NS, 'r'))
+    if (!runs.length) return 0
+    const runData = runs.map(r => {
+      const tEl = r.getElementsByTagNameNS(A_NS, 't')[0]
+      return { el: r, tEl, text: tEl ? tEl.textContent : '' }
+    })
+    const concat = runData.map(r => r.text).join('')
+    // 모든 occurrence 치환 (같은 단락에 같은 placeholder 여러 개 가능)
+    let count = 0
+    let searchFrom = 0
+    while (true) {
+      const pos = concat.indexOf(label, searchFrom)
+      if (pos === -1) break
+      searchFrom = pos + label.length
+
+      // label이 걸쳐있는 런 범위 찾기
+      let charAccum = 0
+      let startRunIdx = -1, endRunIdx = -1
+      let startCharInRun = 0, endCharInRun = 0
+      for (let ri = 0; ri < runData.length; ri++) {
+        const rLen = runData[ri].text.length
+        if (startRunIdx === -1 && charAccum + rLen > pos) {
+          startRunIdx = ri
+          startCharInRun = pos - charAccum
+        }
+        if (endRunIdx === -1 && charAccum + rLen >= pos + label.length) {
+          endRunIdx = ri
+          endCharInRun = (pos + label.length) - charAccum
+          break
+        }
+        charAccum += rLen
+      }
+      if (startRunIdx === -1 || endRunIdx === -1) break
+
+      // startRun의 텍스트에서 label 이전 부분만 남기고 value 설정
+      const startRun = runData[startRunIdx]
+      const before = startRun.text.slice(0, startCharInRun)
+      const afterEnd = runData[endRunIdx].text.slice(endCharInRun)
+
+      if (startRunIdx === endRunIdx) {
+        // 같은 런 안에 있는 경우
+        if (startRun.tEl) startRun.tEl.textContent = before + value + afterEnd
+      } else {
+        // 여러 런에 걸친 경우: startRun에 value, 중간 런들 제거, endRun에 after
+        if (startRun.tEl) startRun.tEl.textContent = before + value
+        for (let ri = startRunIdx + 1; ri < endRunIdx; ri++) {
+          if (runData[ri].el.parentNode) runData[ri].el.parentNode.removeChild(runData[ri].el)
+        }
+        if (endRunIdx > startRunIdx && runData[endRunIdx].tEl) {
+          runData[endRunIdx].tEl.textContent = afterEnd
+          if (!afterEnd && runData[endRunIdx].el.parentNode) {
+            runData[endRunIdx].el.parentNode.removeChild(runData[endRunIdx].el)
+          }
+        }
+      }
+      count++
+      // runData 갱신 (제거된 런 반영)
+      break  // 단락당 1회 치환 (카드 분리는 단락 단위로 처리됨)
+    }
+    return count
+  }
+
+  // xmlDoc 전체에서 label을 모두 찾아 value로 치환
+  function replaceAllLabels(xmlDoc, label, value) {
+    const paras = Array.from(xmlDoc.getElementsByTagNameNS(A_NS, 'p'))
+    let count = 0
+    paras.forEach(p => { count += replaceLabelInParagraph(p, label, value) })
+    return count
+  }
+
+  // 슬라이드에서 label이 몇 번 등장하는지 카운트
+  function countLabel(xmlDoc, label) {
+    const paras = Array.from(xmlDoc.getElementsByTagNameNS(A_NS, 'p'))
+    let count = 0
+    paras.forEach(p => {
+      const concat = Array.from(p.getElementsByTagNameNS(A_NS, 'r'))
+        .map(r => { const t = r.getElementsByTagNameNS(A_NS, 't')[0]; return t ? t.textContent : '' })
+        .join('')
+      let idx = -1
+      while ((idx = concat.indexOf(label, idx + 1)) !== -1) count++
+    })
+    return count
+  }
+
+  // N번째(0-indexed) occurrence의 단락 반환
+  function getParagraphOfOccurrence(xmlDoc, label, occIdx) {
+    const paras = Array.from(xmlDoc.getElementsByTagNameNS(A_NS, 'p'))
+    let found = 0
+    for (const p of paras) {
+      const concat = Array.from(p.getElementsByTagNameNS(A_NS, 'r'))
+        .map(r => { const t = r.getElementsByTagNameNS(A_NS, 't')[0]; return t ? t.textContent : '' })
+        .join('')
+      if (concat.includes(label)) {
+        if (found === occIdx) return p
+        found++
+      }
+    }
+    return null
+  }
+
+  // [이름] 단락 기준으로 카드 슬롯 인덱스 반환 (슬라이드 내 등장 순서)
+  function getNameParaOccurrences(xmlDoc) {
+    const paras = Array.from(xmlDoc.getElementsByTagNameNS(A_NS, 'p'))
+    const result = []
+    paras.forEach((p, pi) => {
+      const concat = Array.from(p.getElementsByTagNameNS(A_NS, 'r'))
+        .map(r => { const t = r.getElementsByTagNameNS(A_NS, 't')[0]; return t ? t.textContent : '' })
+        .join('')
+      if (concat.includes('[이름]')) result.push({ para: p, paraIdx: pi })
+    })
+    return result
   }
 
   // ── 슬라이드 생성 루프 ──────────────────────────────────────────
@@ -700,16 +823,17 @@ async function buildPhotoPptxFromTemplate(pages, templateZips) {
       if (idx >= 0) cardShapes[idx].push(sp)
     })
 
-    // ── [이름] 노드 기준으로 슬롯 순서 매핑 ──
-    const nameNodes = Array.from(xmlDoc.getElementsByTagNameNS(A_NS, 't'))
-      .filter(t => t.textContent === '[이름]')
+    // ── [이름] 단락 기준으로 슬롯 순서 결정 (런 분산 처리) ──
+    const nameParaOccurrences = getNameParaOccurrences(xmlDoc)
 
     // ── 미배정 슬롯 카드 삭제 ──
+    // [이름] 단락이 속한 <a:p>의 조상 <p:sp>를 찾아 cardIndex 판별
     const cardsToRemove = new Set()
-    nameNodes.forEach((tNode, idx) => {
+    nameParaOccurrences.forEach(({ para }, idx) => {
       const slot = meta.orderIndexToSlot[idx]
       if (page.slotPeople[slot]) return
-      let sp = tNode
+      // para(<a:p>) 조상에서 <p:sp> 찾기
+      let sp = para
       while (sp && !(sp.nodeType === 1 && sp.localName === 'sp')) sp = sp.parentNode
       const xf = sp && xfrmOf.get(sp)
       if (xf) {
@@ -719,58 +843,65 @@ async function buildPhotoPptxFromTemplate(pages, templateZips) {
     })
     cardsToRemove.forEach(ci => cardShapes[ci].forEach(sp => { if (sp.parentNode) sp.parentNode.removeChild(sp) }))
 
-    // ── 슬라이드 전체 [제목] 치환 ──
-    collectNodes(xmlDoc, '[제목]').forEach(tNode => {
-      // 제목: 첫 번째 배정된 사람의 분야 또는 페이지 제목 사용 (빈 문자열로 fallback)
-      fillPlaceholder(tNode, '')
-    })
+    // ── 슬라이드 전체 [제목] 치환 (빈 문자열로 제거) ──
+    replaceAllLabels(xmlDoc, '[제목]', '')
 
-    // ── 카드별 placeholder 치환 ──
-    // 슬라이드 전체 placeholder 라벨 목록
-    const CARD_PLACEHOLDERS = [
+    // ── 카드별 placeholder 치환 (런 분산 처리 엔진 사용) ──
+    // ⚠️ 중요: 치환 전에 모든 단락 참조를 미리 수집해야 함
+    //          치환 후 xmlDoc을 재스캔하면 이미 치환된 단락이 사라져 idx가 밀림
+    const ALL_LABELS = [
       '[분야]', '[이름]', '[감리원등급]', '[자격구분]', '[자격요약]',
       '[감리횟수]', '[자격수]', '[감리경력]', '[IT경력기간]', '[IT경력]',
-      '[감리이력1]', '[감리이력2]', '[감리이력3]', '[감리이력4]', '[감리이력5]',
-      '[감리이력6]', '[감리이력7]', '[감리이력8]', '[감리이력9]', '[감리이력10]',
     ]
-    // 각 라벨의 노드 목록 수집 (슬라이드 전체 기준)
-    const labelNodeMap = {}
-    CARD_PLACEHOLDERS.forEach(label => {
-      labelNodeMap[label] = collectNodes(xmlDoc, label)
+    for (let ri = 1; ri <= 10; ri++) ALL_LABELS.push('[감리이력' + ri + ']')
+
+    // 치환 전에 라벨별 단락 목록 미리 수집 (0-indexed occurrence 순서)
+    const preFetchedParas = {}
+    ALL_LABELS.forEach(label => {
+      const paras = Array.from(xmlDoc.getElementsByTagNameNS(A_NS, 'p'))
+      const list = []
+      paras.forEach(p => {
+        const concat = Array.from(p.getElementsByTagNameNS(A_NS, 'r'))
+          .map(r => { const t = r.getElementsByTagNameNS(A_NS, 't')[0]; return t ? t.textContent : '' })
+          .join('')
+        if (concat.includes(label)) list.push(p)
+      })
+      preFetchedParas[label] = list
     })
 
-    // [이름] 노드 기준 인덱스 → 슬롯 매핑으로 카드별 치환
-    nameNodes.forEach((_, idx) => {
+    nameParaOccurrences.forEach((_nameOcc, idx) => {
       const slot = meta.orderIndexToSlot[idx]
       const p = page.slotPeople[slot]
       if (!p) return
       const pr = p.profile || {}
 
-      // 직접 매핑 필드 치환 (같은 인덱스 위치의 노드를 치환)
+      // 직접 매핑 필드: 미리 수집된 idx번째 단락에 치환
       const directMap = {
-        '[분야]':      p.field || '',
-        '[이름]':      p.name  || '',
-        '[감리원등급]': p.grade || '',
-        '[자격구분]':  pr.자격구분   || '',
-        '[자격요약]':  pr.자격요약   || '',
-        '[감리횟수]':  pr.감리횟수   != null ? String(pr.감리횟수)   : '',
-        '[자격수]':    pr.자격수     != null ? String(pr.자격수)     : '',
-        '[감리경력]':  pr.감리경력   || '',
+        '[분야]':       p.field || '',
+        '[이름]':       p.name  || '',
+        '[감리원등급]':  p.grade || '',
+        '[자격구분]':   pr.자격구분   || '',
+        '[자격요약]':   pr.자격요약   || '',
+        '[감리횟수]':   pr.감리횟수   != null ? String(pr.감리횟수)   : '',
+        '[자격수]':     pr.자격수     != null ? String(pr.자격수)     : '',
+        '[감리경력]':   pr.감리경력   || '',
         '[IT경력기간]': pr.IT경력기간 || '',
-        '[IT경력]':    pr.IT경력     || '',
+        '[IT경력]':     pr.IT경력     || '',
       }
       Object.entries(directMap).forEach(([label, value]) => {
-        const nodes = labelNodeMap[label]
-        if (nodes && nodes[idx]) fillPlaceholder(nodes[idx], value)
+        const paraList = preFetchedParas[label]
+        const para = paraList && paraList[idx]
+        if (para) replaceLabelInParagraph(para, label, value)
       })
 
       // [감리이력1]~[감리이력10] 치환
       const 실적List = pr.실적 || []
       for (let ri = 1; ri <= 10; ri++) {
-        const label = `[감리이력${ri}]`
-        const nodes = labelNodeMap[label]
+        const label = '[감리이력' + ri + ']'
         const value = 실적List[ri - 1] || ''
-        if (nodes && nodes[idx]) fillPlaceholder(nodes[idx], value)
+        const paraList = preFetchedParas[label]
+        const para = paraList && paraList[idx]
+        if (para) replaceLabelInParagraph(para, label, value)
       }
     })
 
