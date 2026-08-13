@@ -1,5 +1,5 @@
 # 빌드 산출물
-dist/
+# dist/ — Railway가 직접 dist를 사용하므로 git에 포함
 node_modules/
 
 # 환경변수 (절대 커밋 금지)
