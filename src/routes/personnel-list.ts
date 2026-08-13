@@ -213,6 +213,199 @@ app.get('/:id/audit-match', async (c) => {
 })
 
 /**
+ * GET /api/personnel/:id/photo-profile?projectId=N
+ * 사진장표 생성에 필요한 placeholder 데이터 전체 반환
+ *
+ * 반환 구조:
+ * {
+ *   ok: true,
+ *   data: {
+ *     이름, 분야, 등급, 자격구분,          ← proposal_members
+ *     자격요약, IT경력,                    ← personnel.career_qualif / career_project
+ *     감리횟수, 자격수,                    ← COUNT
+ *     감리경력,                            ← audit_history 최초연월 → 현재
+ *     IT경력기간,                          ← personnel_it_career 합산
+ *     실적: string[],                      ← audit-match 상위 10건 "[키워드] 기관명, 사업명"
+ *   }
+ * }
+ */
+app.get('/:id/photo-profile', async (c) => {
+  const personnelId = Number(c.req.param('id'))
+  const projectId   = Number(c.req.query('projectId') || '0')
+
+  if (isNaN(personnelId) || personnelId <= 0)
+    return c.json({ ok: false, error: 'invalid personnelId' }, 400)
+  if (isNaN(projectId) || projectId <= 0)
+    return c.json({ ok: false, error: 'projectId required' }, 400)
+
+  // ── 병렬 조회 ──────────────────────────────────────────────
+  const [member, person, certs, auditHistory, itCareer, kwRows, kmRows] = await Promise.all([
+    // 제안 인력 행 (분야, 등급, 자격번호)
+    queryOne<{
+      person_name: string; domain: string; auditor_grade: string
+      auditor_cert_no: string; personnel_id: number | null
+    }>(
+      `SELECT person_name, domain, auditor_grade, auditor_cert_no, personnel_id
+       FROM proposal_members WHERE project_id = $1 AND personnel_id = $2 LIMIT 1`,
+      [projectId, personnelId]
+    ),
+    // 인력 기본 정보
+    queryOne<{ name: string; career_qualif: string | null; career_project: string | null }>(
+      `SELECT name, career_qualif, career_project FROM personnel WHERE id = $1`, [personnelId]
+    ),
+    // 자격증 전체
+    query<{ cert_name: string }>(
+      `SELECT cert_name FROM personnel_certifications WHERE personnel_id = $1 ORDER BY cert_year DESC`,
+      [personnelId]
+    ),
+    // 감리실적 전체 (연월 ASC → 최초 연월 계산용)
+    query<{ audit_yearmonth: string; project_name: string; client_org: string | null; domain: string | null }>(
+      `SELECT audit_yearmonth, project_name, client_org, domain
+       FROM personnel_audit_history WHERE personnel_id = $1 ORDER BY audit_yearmonth ASC`,
+      [personnelId]
+    ),
+    // IT경력 (기간 합산용)
+    query<{ period_start: string | null; period_end: string | null }>(
+      `SELECT period_start, period_end FROM personnel_it_career WHERE personnel_id = $1`,
+      [personnelId]
+    ),
+    // 프로젝트 키워드
+    query<{ keyword: string; sort_order: number }>(
+      `SELECT keyword, sort_order FROM keywords WHERE project_id = $1 ORDER BY sort_order ASC`,
+      [projectId]
+    ),
+    // 키워드 변환 룰
+    query<{ original_keyword: string; mapped_keyword: string }>(
+      `SELECT original_keyword, mapped_keyword FROM keyword_mappings WHERE project_id = $1`,
+      [projectId]
+    ),
+  ])
+
+  if (!person) return c.json({ ok: false, error: 'person not found' }, 404)
+
+  // ── [자격구분] 감리사 우선, 없으면 기술사 ──────────────────
+  const certGamri  = certs.find(c2 => c2.cert_name.includes('감리사'))
+  const certGisul  = certs.find(c2 => c2.cert_name.includes('기술사'))
+  const 자격구분 = certGamri?.cert_name ?? certGisul?.cert_name ?? ''
+
+  // ── [감리경력] 최초 audit_yearmonth → 현재까지 ─────────────
+  const toYM = (ym: string): string => {
+    const m = String(ym).match(/(\d{4})[.\s년](\d{1,2})/)
+    return m ? `${m[1]}.${m[2].padStart(2, '0')}` : String(ym)
+  }
+  const sortedYM = auditHistory
+    .map(h => toYM(h.audit_yearmonth))
+    .filter(s => /^\d{4}\.\d{2}$/.test(s))
+    .sort()
+
+  let 감리경력 = ''
+  if (sortedYM.length > 0) {
+    const [sy, sm] = sortedYM[0].split('.').map(Number)
+    const now = new Date()
+    const ny = now.getFullYear(), nm = now.getMonth() + 1
+    const totalMonths = Math.max(0, (ny - sy) * 12 + (nm - sm))
+    const yrs = Math.floor(totalMonths / 12)
+    const mos = totalMonths % 12
+    감리경력 = yrs > 0 ? `${yrs}년 ${mos}개월` : `${mos}개월`
+  }
+
+  // ── [IT경력기간] period_start ~ period_end 합산 ─────────────
+  let itTotalMonths = 0
+  for (const c2 of itCareer) {
+    const parseYM = (s: string | null): { y: number; m: number } | null => {
+      if (!s) return null
+      const mt = String(s).match(/(\d{4})[.\-년](\d{1,2})/)
+      return mt ? { y: Number(mt[1]), m: Number(mt[2]) } : null
+    }
+    const st = parseYM(c2.period_start)
+    const en = parseYM(c2.period_end) ?? { y: new Date().getFullYear(), m: new Date().getMonth() + 1 }
+    if (st) itTotalMonths += Math.max(0, (en.y - st.y) * 12 + (en.m - st.m))
+  }
+  const itYrs = Math.floor(itTotalMonths / 12)
+  const itMos = itTotalMonths % 12
+  const IT경력기간 = itTotalMonths > 0
+    ? (itYrs > 0 ? `${itYrs}년 ${itMos}개월` : `${itMos}개월`)
+    : ''
+
+  // ── [실적1]~[실적10] audit-match 로직 (inline) ──────────────
+  const mappingMap = new Map<string, string>()
+  for (const km of kmRows) mappingMap.set(km.original_keyword, km.mapped_keyword)
+
+  const memberDomain = member?.domain ?? ''
+  const domainTokens = memberDomain
+    .split(/[\s,()（）\/]+/)
+    .map((s: string) => s.trim().replace(/\s+/g, ''))
+    .filter((s: string) => s.length >= 2)
+
+  // 중복 제거 후 매칭/정렬
+  const seen = new Set<string>()
+  const rawRows = auditHistory
+    .slice()
+    .reverse() // DESC로 전환
+    .filter(h => {
+      const key = h.project_name.trim()
+      if (seen.has(key)) return false
+      seen.add(key); return true
+    })
+    .map(h => {
+      const combined = [h.project_name, h.domain ?? '', h.client_org ?? '']
+        .join('').replace(/\s+/g, '')
+      const matched: string[] = []
+      for (const kw of kwRows) {
+        if (combined.includes(kw.keyword.replace(/\s+/g, ''))) matched.push(kw.keyword)
+      }
+      const mapped = matched.map(kw => mappingMap.get(kw) ?? kw)
+      const topOrder = matched.length > 0
+        ? (kwRows.find(k => k.keyword === matched[0])?.sort_order ?? 9999)
+        : 9999
+      let matchType: 'keyword' | 'domain' | 'none' = 'none'
+      if (matched.length > 0) {
+        matchType = 'keyword'
+      } else if (domainTokens.length > 0) {
+        const hd = (h.domain ?? '').replace(/\s+/g, '')
+        if (hd.length > 0 && domainTokens.some((tok: string) => hd.includes(tok))) matchType = 'domain'
+      }
+      return { ...h, matched_keywords: matched, mapped_keywords: mapped,
+               match_count: matched.length, match_type: matchType, top_sort_order: topOrder }
+    })
+
+  const groupOrder = { keyword: 0, domain: 1, none: 2 }
+  rawRows.sort((a, b) => {
+    const ga = groupOrder[a.match_type], gb = groupOrder[b.match_type]
+    if (ga !== gb) return ga - gb
+    if (a.match_type === 'keyword' && a.top_sort_order !== b.top_sort_order)
+      return a.top_sort_order - b.top_sort_order
+    return b.audit_yearmonth.localeCompare(a.audit_yearmonth)
+  })
+
+  // 상위 10건 → "[키워드] 기관명, 사업명" 형식
+  const 실적 = rawRows.slice(0, 10).map(h => {
+    const kwLabel = h.mapped_keywords.length > 0
+      ? `[ ${h.mapped_keywords[0]} ] `
+      : h.match_type === 'domain' ? `[ ${h.domain ?? ''} ] ` : ''
+    const org = h.client_org ? `${h.client_org}, ` : ''
+    return `${kwLabel}${org}${h.project_name}`
+  })
+
+  return c.json({
+    ok: true,
+    data: {
+      이름:      member?.person_name ?? person.name,
+      분야:      member?.domain      ?? '',
+      등급:      member?.auditor_grade ?? '',
+      자격구분,
+      자격요약:  person.career_qualif  ?? '',
+      IT경력:    person.career_project ?? '',
+      감리횟수:  auditHistory.length,
+      자격수:    certs.length,
+      감리경력,
+      IT경력기간,
+      실적,
+    },
+  })
+})
+
+/**
  * POST /api/personnel/fix-links
  * proposal_members.personnel_id 가 NULL인 행을 person_name 기준으로 일괄 업데이트
  */

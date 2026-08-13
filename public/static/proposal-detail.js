@@ -547,43 +547,78 @@ const PHOTO_CAT_TITLES = {
 }
 
 // ── buildPhotoPptxFromTemplate ──────────────────────────────────
-// pages = [{ sheetSize: 2|4|6|9, slotPeople: { slotNum: {name, field, grade} } }]
-// → JSZip 객체 반환 (generateAsync로 blob 변환 필요)
-async function buildPhotoPptxFromTemplate(pages) {
+// ── buildPhotoPptxFromTemplate (A안) ────────────────────────────
+// pages = [{
+//   sheetSize: 2|4|6|9,
+//   slotPeople: { slotNum: { name, field, grade, profile:{...} } }
+// }]
+// templateZips = { 2: JSZip, 4: JSZip, 6: JSZip, 9: JSZip }
+//   — DB에서 로드한 PERSON_2/4/6/9 각각의 ZIP 객체
+//   — 각 ZIP의 첫 번째 슬라이드(slide1.xml)를 템플릿으로 사용
+// → 최종 합본 JSZip 반환
+async function buildPhotoPptxFromTemplate(pages, templateZips) {
   if (typeof JSZip === 'undefined') throw new Error('JSZip을 찾을 수 없습니다.')
-  if (typeof PHOTO_TEMPLATE_PPTX_B64 === 'undefined') throw new Error('PHOTO_TEMPLATE_PPTX_B64를 찾을 수 없습니다. photo-template.b64.js 로드를 확인하세요.')
+  if (!templateZips) throw new Error('templateZips가 없습니다. PERSON_2/4/6/9 템플릿을 업로드하세요.')
 
-  const bytes = Uint8Array.from(atob(PHOTO_TEMPLATE_PPTX_B64), c => c.charCodeAt(0))
-  const zip = await JSZip.loadAsync(bytes)
-
-  // 4개 원본 템플릿 슬라이드 XML 미리 읽기
-  const templateTexts = {}
-  for (const size of [2, 4, 6, 9]) {
-    templateTexts[size] = await zip.file(PHOTO_LAYOUT_META[size].file).async('string')
+  // 각 size별 ZIP에서 첫 번째 슬라이드 XML 미리 읽기
+  // ZIP 안 슬라이드 목록을 presentation.xml.rels에서 순서대로 파악
+  async function getFirstSlideXml(tplZip) {
+    const presRels = await tplZip.file('ppt/_rels/presentation.xml.rels').async('string')
+    const matches = [...presRels.matchAll(/Target="slides\/(slide\d+\.xml)"/g)]
+    if (!matches.length) throw new Error('슬라이드를 찾을 수 없습니다.')
+    // presentation.xml에서 sldIdLst 순서로 첫 번째 슬라이드 결정
+    const presXml = await tplZip.file('ppt/presentation.xml').async('string')
+    const idOrder = [...presXml.matchAll(/r:id="(rId\d+)"/g)].map(m => m[1])
+    const relMap = {}
+    for (const m of [...presRels.matchAll(/Id="(rId\d+)"[^>]*Target="slides\/(slide\d+\.xml)"/g)]) {
+      relMap[m[1]] = m[2]
+    }
+    const firstFile = idOrder.map(rid => relMap[rid]).find(f => f) || matches[0][1]
+    return {
+      xml:  await tplZip.file(`ppt/slides/${firstFile}`).async('string'),
+      file: firstFile,
+    }
   }
 
-  // presentation.xml에서 원본 4개 슬라이드 참조 제거
-  let presXml = await zip.file('ppt/presentation.xml').async('string')
-  let presRelsXml = await zip.file('ppt/_rels/presentation.xml.rels').async('string')
+  // size → { xml, tplZip } マップ
+  const templateData = {}
+  for (const size of [2, 4, 6, 9]) {
+    if (!templateZips[size]) throw new Error(`PERSON_${size} 템플릿이 업로드되지 않았습니다.`)
+    const { xml, file } = await getFirstSlideXml(templateZips[size])
+    templateData[size] = { xml, file, zip: templateZips[size] }
+  }
 
-  const slideRelRe = /<Relationship Id="(rId\d+)"[^>]*Target="slides\/(slide[1-4]\.xml)"\s*\/>/g
-  const ridToRemove = []
-  let relMatch
-  while ((relMatch = slideRelRe.exec(presRelsXml))) ridToRemove.push(relMatch[1])
-  presRelsXml = presRelsXml.replace(slideRelRe, '')
-  ridToRemove.forEach(rid => {
-    presXml = presXml.replace(new RegExp(`<p:sldId[^>]*r:id="${rid}"\\s*/>`), '')
-  })
+  // ── 합본용 베이스 ZIP: PERSON_2 ZIP을 기반으로 사용 ──────────
+  // (마스터/테마/레이아웃은 PERSON_2 것을 그대로 유지)
+  const baseZip = templateZips[2]
+  let presXml     = await baseZip.file('ppt/presentation.xml').async('string')
+  let presRelsXml = await baseZip.file('ppt/_rels/presentation.xml.rels').async('string')
+  let ctXml       = await baseZip.file('[Content_Types].xml').async('string')
 
-  let maxRid = 0
-  presRelsXml.replace(/Id="rId(\d+)"/g, (_, n) => { maxRid = Math.max(maxRid, parseInt(n, 10)); return _ })
-  let maxSldId = 255
-  presXml.replace(/<p:sldId id="(\d+)"/g, (_, n) => { maxSldId = Math.max(maxSldId, parseInt(n, 10)); return _ })
+  // 기존 슬라이드 모두 제거 (마스터/레이아웃은 유지)
+  presXml     = presXml.replace(/<p:sldIdLst>[\s\S]*?<\/p:sldIdLst>/, '<p:sldIdLst></p:sldIdLst>')
+  presRelsXml = presRelsXml.replace(/<Relationship\b[^/]*Type="[^"]*\/slide"[^/]*\/>/g, '')
+  ctXml       = ctXml.replace(/<Override[^>]*presentationml\.slide\+xml[^>]*\/>/g, '')
 
-  let newRelEntries = '', newSldIdEntries = '', newContentTypeEntries = ''
+  let maxRid   = 0; presRelsXml.replace(/Id="rId(\d+)"/g, (_, n) => { maxRid   = Math.max(maxRid,   +n); return _ })
+  let maxSldId = 255; presXml.replace(/<p:sldId id="(\d+)"/g, (_, n) => { maxSldId = Math.max(maxSldId, +n); return _ })
+
+  let newRels = '', newIds = '', newCt = ''
 
   const A_NS = 'http://schemas.openxmlformats.org/drawingml/2006/main'
   const P_NS = 'http://schemas.openxmlformats.org/presentationml/2006/main'
+
+  // ── slideLayout 참조 보존: 원본 슬라이드의 .rels에서 꺼냄 ──
+  async function getSlideLayoutRel(tplZip, slideFile) {
+    const relsPath = `ppt/slides/_rels/${slideFile}.rels`
+    const relsFile = tplZip.file(relsPath)
+    if (relsFile) return await relsFile.async('string')
+    // 없으면 기본 fallback
+    return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\r\n'
+      + '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+      + '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideLayout" Target="../slideLayouts/slideLayout6.xml"/>'
+      + '</Relationships>'
+  }
 
   function shapeXfrm(sp) {
     const spPr = sp.getElementsByTagNameNS(P_NS, 'spPr')[0]
@@ -596,7 +631,7 @@ async function buildPhotoPptxFromTemplate(pages) {
     return { x: +off.getAttribute('x'), y: +off.getAttribute('y'), w: +ext.getAttribute('cx'), h: +ext.getAttribute('cy') }
   }
 
-  // "[값]" placeholder run의 실제 값을 채우고, 인접 run의 대괄호 문자만 제거
+  // placeholder 치환: [xxx] 텍스트를 value로 교체
   function fillPlaceholder(tNode, value) {
     const run = tNode.parentNode
     let prev = run.previousSibling
@@ -614,15 +649,25 @@ async function buildPhotoPptxFromTemplate(pages) {
     tNode.textContent = value
   }
 
-  pages.forEach((page, i) => {
-    const meta = PHOTO_LAYOUT_META[page.sheetSize]
-    const fname = `slideGen${i + 1}.xml`
+  // 슬라이드 전체 텍스트 노드에서 정확히 일치하는 placeholder 찾기
+  function collectNodes(xmlDoc, label) {
+    return Array.from(xmlDoc.getElementsByTagNameNS(A_NS, 't'))
+      .filter(t => t.textContent === label)
+  }
 
-    const xmlDoc = new DOMParser().parseFromString(templateTexts[page.sheetSize], 'application/xml')
+  // ── 슬라이드 생성 루프 ──────────────────────────────────────────
+  for (let i = 0; i < pages.length; i++) {
+    const page = pages[i]
+    const size = page.sheetSize
+    const { xml: tplXml, file: tplFile, zip: tplZip } = templateData[size]
+    const meta = PHOTO_LAYOUT_META[size]
+    const fname = `photoSlide${i + 1}.xml`
+
+    const xmlDoc = new DOMParser().parseFromString(tplXml, 'application/xml')
     const spTree = xmlDoc.getElementsByTagNameNS(P_NS, 'spTree')[0]
     const shapeEls = Array.from(spTree.childNodes).filter(n => n.nodeType === 1 && (n.localName === 'sp' || n.localName === 'cxnSp'))
 
-    // 카드 배경 도형 자동 탐지: N개 정확히 반복되는 도형 중 면적 최대인 것
+    // ── 카드 배경 도형 자동 탐지: N개 정확히 반복되는 도형 중 면적 최대인 것 ──
     const N = meta.rows * meta.cols
     const xfrmOf = new Map()
     const sizeGroups = {}
@@ -654,18 +699,13 @@ async function buildPhotoPptxFromTemplate(pages) {
       if (idx >= 0) cardShapes[idx].push(sp)
     })
 
-    function collectPlaceholderNodes(label) {
-      return Array.from(xmlDoc.getElementsByTagNameNS(A_NS, 't')).filter(t => t.textContent === label)
-    }
-    const labelLists = {
-      '감리 분야': collectPlaceholderNodes('감리 분야'),
-      '감리원명': collectPlaceholderNodes('감리원명'),
-      '감리원등급': collectPlaceholderNodes('감리원등급'),
-    }
+    // ── [이름] 노드 기준으로 슬롯 순서 매핑 ──
+    const nameNodes = Array.from(xmlDoc.getElementsByTagNameNS(A_NS, 't'))
+      .filter(t => t.textContent === '[이름]')
 
-    // 미배정 슬롯 카드 삭제
+    // ── 미배정 슬롯 카드 삭제 ──
     const cardsToRemove = new Set()
-    labelLists['감리원명'].forEach((tNode, idx) => {
+    nameNodes.forEach((tNode, idx) => {
       const slot = meta.orderIndexToSlot[idx]
       if (page.slotPeople[slot]) return
       let sp = tNode
@@ -676,40 +716,82 @@ async function buildPhotoPptxFromTemplate(pages) {
         if (ci >= 0) cardsToRemove.add(ci)
       }
     })
-
-    // 배정 슬롯 값 채우기
-    const fieldKeyOf = { '감리 분야': 'field', '감리원명': 'name', '감리원등급': 'grade' }
-    ;['감리 분야', '감리원명', '감리원등급'].forEach(label => {
-      labelLists[label].forEach((tNode, idx) => {
-        const slot = meta.orderIndexToSlot[idx]
-        const p = page.slotPeople[slot]
-        if (p) fillPlaceholder(tNode, p[fieldKeyOf[label]])
-      })
-    })
-
     cardsToRemove.forEach(ci => cardShapes[ci].forEach(sp => { if (sp.parentNode) sp.parentNode.removeChild(sp) }))
 
-    const xml = new XMLSerializer().serializeToString(xmlDoc)
-    zip.file(`ppt/slides/${fname}`, xml)
-    zip.file(`ppt/slides/_rels/${fname}.rels`, PHOTO_SLIDE_RELS_XML)
+    // ── 슬라이드 전체 [제목] 치환 ──
+    collectNodes(xmlDoc, '[제목]').forEach(tNode => {
+      // 제목: 첫 번째 배정된 사람의 분야 또는 페이지 제목 사용 (빈 문자열로 fallback)
+      fillPlaceholder(tNode, '')
+    })
+
+    // ── 카드별 placeholder 치환 ──
+    // 슬라이드 전체 placeholder 라벨 목록
+    const CARD_PLACEHOLDERS = [
+      '[분야]', '[이름]', '[등급]', '[자격구분]', '[자격요약]',
+      '[감리횟수]', '[자격수]', '[감리경력]', '[IT경력기간]', '[IT경력]',
+      '[실적1]', '[실적2]', '[실적3]', '[실적4]', '[실적5]',
+      '[실적6]', '[실적7]', '[실적8]', '[실적9]', '[실적10]',
+    ]
+    // 각 라벨의 노드 목록 수집 (슬라이드 전체 기준)
+    const labelNodeMap = {}
+    CARD_PLACEHOLDERS.forEach(label => {
+      labelNodeMap[label] = collectNodes(xmlDoc, label)
+    })
+
+    // [이름] 노드 기준 인덱스 → 슬롯 매핑으로 카드별 치환
+    nameNodes.forEach((_, idx) => {
+      const slot = meta.orderIndexToSlot[idx]
+      const p = page.slotPeople[slot]
+      if (!p) return
+      const pr = p.profile || {}
+
+      // 직접 매핑 필드 치환 (같은 인덱스 위치의 노드를 치환)
+      const directMap = {
+        '[분야]':      p.field || '',
+        '[이름]':      p.name  || '',
+        '[등급]':      p.grade || '',
+        '[자격구분]':  pr.자격구분   || '',
+        '[자격요약]':  pr.자격요약   || '',
+        '[감리횟수]':  pr.감리횟수   != null ? String(pr.감리횟수)   : '',
+        '[자격수]':    pr.자격수     != null ? String(pr.자격수)     : '',
+        '[감리경력]':  pr.감리경력   || '',
+        '[IT경력기간]': pr.IT경력기간 || '',
+        '[IT경력]':    pr.IT경력     || '',
+      }
+      Object.entries(directMap).forEach(([label, value]) => {
+        const nodes = labelNodeMap[label]
+        if (nodes && nodes[idx]) fillPlaceholder(nodes[idx], value)
+      })
+
+      // [실적1]~[실적10] 치환
+      const 실적List = pr.실적 || []
+      for (let ri = 1; ri <= 10; ri++) {
+        const label = `[실적${ri}]`
+        const nodes = labelNodeMap[label]
+        const value = 실적List[ri - 1] || ''
+        if (nodes && nodes[idx]) fillPlaceholder(nodes[idx], value)
+      }
+    })
+
+    // ── 슬라이드 XML 저장 ──
+    const slideRelsXml = await getSlideLayoutRel(tplZip, tplFile)
+    baseZip.file(`ppt/slides/${fname}`, new XMLSerializer().serializeToString(xmlDoc))
+    baseZip.file(`ppt/slides/_rels/${fname}.rels`, slideRelsXml)
 
     const rid = `rId${++maxRid}`
     const sldId = ++maxSldId
-    newRelEntries += `<Relationship Id="${rid}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide" Target="slides/${fname}"/>`
-    newSldIdEntries += `<p:sldId id="${sldId}" r:id="${rid}"/>`
-    newContentTypeEntries += `<Override PartName="/ppt/slides/${fname}" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slide+xml"/>`
-  })
+    newRels += `<Relationship Id="${rid}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide" Target="slides/${fname}"/>`
+    newIds  += `<p:sldId id="${sldId}" r:id="${rid}"/>`
+    newCt   += `<Override PartName="/ppt/slides/${fname}" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slide+xml"/>`
+  }
 
-  presRelsXml = presRelsXml.replace('</Relationships>', newRelEntries + '</Relationships>')
-  presXml = presXml.replace('</p:sldIdLst>', newSldIdEntries + '</p:sldIdLst>')
-  zip.file('ppt/presentation.xml', presXml)
-  zip.file('ppt/_rels/presentation.xml.rels', presRelsXml)
-
-  let ctXml = await zip.file('[Content_Types].xml').async('string')
-  ctXml = ctXml.replace('</Types>', newContentTypeEntries + '</Types>')
-  zip.file('[Content_Types].xml', ctXml)
-
-  return zip
+  presRelsXml = presRelsXml.replace('</Relationships>', newRels + '</Relationships>')
+  presXml     = presXml.replace('</p:sldIdLst>',        newIds  + '</p:sldIdLst>')
+  ctXml       = ctXml.replace('</Types>',               newCt   + '</Types>')
+  baseZip.file('ppt/presentation.xml',          presXml)
+  baseZip.file('ppt/_rels/presentation.xml.rels', presRelsXml)
+  baseZip.file('[Content_Types].xml',            ctXml)
+  return baseZip
 }
 
 // ── downloadPhotoAssignPptx ─────────────────────────────────────
@@ -761,14 +843,16 @@ async function downloadPhotoAssignPptx(btn, opts) {
       })
     }
 
-    // pages 배열 구성: { sheetSize, slotPeople: { slotNum: {name, field, grade} } }
+    // pages 배열 구성: { sheetSize, slotPeople: { slotNum: {name, field, grade, personnelId} } }
     const pages = []
+    const pidMap = parsedData.personnelIdMap || {}
 
     // 감리원: 2인 장표 고정
     const auditPeople = targetAuditPeople.map(p => ({
       name: p.name,
       field: (parsedData.personFieldMap || {})[p.name] || '감리원',
       grade: getEffectiveGrade(p.name),
+      personnelId: pidMap[p.name] || 0,
     }))
     if (auditPeople.length) {
       const sheetSize = 2
@@ -801,6 +885,7 @@ async function downloadPhotoAssignPptx(btn, opts) {
             name: p.name,
             field: (parsedData.personFieldMap || {})[p.name] || catLabel,
             grade: getEffectiveGrade(p.name),
+            personnelId: pidMap[p.name] || 0,
           })
         })
       })
@@ -816,7 +901,74 @@ async function downloadPhotoAssignPptx(btn, opts) {
 
     if (!pages.length) { showAutoAlert('❌ 생성할 인력이 없습니다.', false); return null }
 
-    const zip = await buildPhotoPptxFromTemplate(pages)
+    // ── photo-profile API 호출: 등장하는 모든 인원의 profile 로드 ──
+    const proposalId = parsedData.proposalId || 0
+    const allPeople = []
+    pages.forEach(pg => Object.values(pg.slotPeople).forEach(p => { if (!allPeople.find(x => x.personnelId === p.personnelId)) allPeople.push(p) }))
+    const profileMap = {}
+    await Promise.all(
+      allPeople
+        .filter(p => p.personnelId)
+        .map(async p => {
+          try {
+            const res = await fetch(`/api/personnel/${p.personnelId}/photo-profile?projectId=${proposalId}`)
+            if (res.ok) {
+              const json = await res.json()
+              if (json.ok) profileMap[p.personnelId] = json.data
+            }
+          } catch (e) { console.warn('photo-profile 로드 실패:', p.name, e) }
+        })
+    )
+    // slotPeople에 profile 주입
+    pages.forEach(pg => {
+      Object.values(pg.slotPeople).forEach(p => {
+        p.profile = profileMap[p.personnelId] || {}
+      })
+    })
+
+    // ── templateZips 로드: AUDITOR_PROFILE(2인 고정) 또는 전체 4종 ──
+    // PptMenuRegistry에서 AUDITOR_PROFILE(또는 *_PROFILE) 메뉴의 templates 꺼내기
+    let templateZips = null
+    try {
+      const registry = await PptMenuRegistry.load()
+      // 사용할 메뉴 코드: groupFilter 별로 다를 수 있으나 템플릿은 공통으로 AUDITOR_PROFILE 메뉴에서 로드
+      const profileMenuCode = gf === 'CORE_EXPERT' ? 'CORE_EXPERT_PROFILE'
+                            : gf === 'EXPERT'       ? 'EXPERT_PROFILE'
+                            : 'AUDITOR_PROFILE'
+      const menu = registry.byCode[profileMenuCode]
+      const tpls = menu && Array.isArray(menu.templates) ? menu.templates : []
+      // variant_name에서 PERSON_2/4/6/9 구분
+      const VARIANT_RE = /PERSON[_-]?(\d+)/i
+      const b64Map = {}
+      tpls.forEach(t => {
+        if (!t.pptx_b64_key) return
+        const vn = t.variant_name || t.template_name || ''
+        const m = vn.match(VARIANT_RE)
+        if (m) b64Map[Number(m[1])] = t.pptx_b64_key
+      })
+      // b64 → JSZip 변환
+      const sizes = [2, 4, 6, 9]
+      const missingSize = sizes.find(s => !b64Map[s])
+      if (missingSize) {
+        console.warn(`PERSON_${missingSize} 템플릿이 DB에 없습니다. 사진장표 생성을 건너뜁니다.`)
+        showAutoAlert(`❌ PERSON_${missingSize} 템플릿을 업로드해주세요.`, false)
+        return null
+      }
+      templateZips = {}
+      await Promise.all(sizes.map(async s => {
+        const b64 = b64Map[s]
+        const bin = atob(b64)
+        const bytes = new Uint8Array(bin.length)
+        for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i)
+        templateZips[s] = await JSZip.loadAsync(bytes)
+      }))
+    } catch (e) {
+      console.error('templateZips 로드 실패:', e)
+      showAutoAlert('❌ 사진장표 템플릿 로드 실패: ' + e.message, false)
+      return null
+    }
+
+    const zip = await buildPhotoPptxFromTemplate(pages, templateZips)
     if (opts.returnZip) return { zip }
 
     const today = new Date().toISOString().slice(0, 10)

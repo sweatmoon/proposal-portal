@@ -514,6 +514,14 @@ app.get('/proposals/:id', async (c) => {
     auditNames.push(name)
   })
 
+  // personnelIdMap: 이름 → personnel_id (photo-profile API 호출용)
+  const personnelIdMap: Record<string, number> = {}
+  members.forEach(m => {
+    const name = String(m.person_name ?? '')
+    const pid  = m.personnel_id ? Number(m.personnel_id) : 0
+    if (name && pid) personnelIdMap[name] = pid
+  })
+
   // JSON 직렬화 (클라이언트에 전달)
   // </script> 문자열이 JSON 값 안에 있으면 브라우저가 스크립트 태그를 조기 종료하므로
   // 반드시 <\/script> 로 이스케이프 처리해야 함
@@ -524,6 +532,7 @@ app.get('/proposals/:id', async (c) => {
   const personFieldMapJSON = safeJSON(personFieldMap)
   const personGradeMapJSON = safeJSON(personGradeMap)
   const portalOrderJSON = safeJSON(portalOrder)
+  const personnelIdMapJSON = safeJSON(personnelIdMap)
   const projectDataJSON = safeJSON({
     projectTitle: String(project.project_name ?? ''),
     requestMD: 0, requestStageCount: 0, requestAuditDays: 0,
@@ -1011,6 +1020,7 @@ app.get('/proposals/:id', async (c) => {
   // 데이터 주입 (서버에서 렌더링된 JSON) — 함수는 외부 JS로 분리
   // ══════════════════════════════════════════════════════════
   var parsedData = {
+    proposalId:    ${id},
     projectTitle:  ${projectDataJSON}.projectTitle,
     requestMD:     ${project.required_md ?? 0},
     requestStageCount: 0,
@@ -1021,6 +1031,7 @@ app.get('/proposals/:id', async (c) => {
     personFieldMap:${personFieldMapJSON},
     personGradeMap:${personGradeMapJSON},
     portalOrder:   ${portalOrderJSON},
+    personnelIdMap:${personnelIdMapJSON},
   }
   var activeHL = null
   var correctionMode = null
