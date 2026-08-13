@@ -901,29 +901,11 @@ async function buildPhotoPptxFromTemplate(pages, templateZips) {
     // ── [이름] 단락 기준으로 슬롯 순서 결정 (런 분산 처리) ──
     const nameParaOccurrences = getNameParaOccurrences(xmlDoc)
 
-    // ── 미배정 슬롯 카드 삭제 ──
-    // [이름] 단락이 속한 <a:p>의 조상 <p:sp>를 찾아 cardIndex 판별
-    const cardsToRemove = new Set()
-    nameParaOccurrences.forEach(({ para }, idx) => {
-      const slot = meta.orderIndexToSlot[idx]
-      if (page.slotPeople[slot]) return
-      // para(<a:p>) 조상에서 <p:sp> 찾기
-      let sp = para
-      while (sp && !(sp.nodeType === 1 && sp.localName === 'sp')) sp = sp.parentNode
-      const xf = sp && xfrmOf.get(sp)
-      if (xf) {
-        const ci = findCardIndex({ x: xf.x + xf.w / 2, y: xf.y + xf.h / 2 })
-        if (ci >= 0) cardsToRemove.add(ci)
-      }
-    })
-    cardsToRemove.forEach(ci => cardShapes[ci].forEach(sp => { if (sp.parentNode) sp.parentNode.removeChild(sp) }))
-
-    // ── 슬라이드 전체 [제목] 치환 (groupFilter별 목차명으로 치환) ──
-    replaceAllLabels(xmlDoc, '[제목]', page.slideTitle || '')
-
     // ── 카드별 placeholder 치환 (런 분산 처리 엔진 사용) ──
-    // ⚠️ 중요: 치환 전에 모든 단락 참조를 미리 수집해야 함
-    //          치환 후 xmlDoc을 재스캔하면 이미 치환된 단락이 사라져 idx가 밀림
+    // ⚠️ preFetchedParas는 반드시 카드 삭제 이전에 수집해야 함
+    //    카드 삭제 후 수집하면 빈 슬롯 단락이 제거되어 배열 크기가 줄고
+    //    nameParaOccurrences(삭제 전 N개) idx와 preFetchedParas(삭제 후 N-k개) idx가 어긋남
+    //    → 빈 슬롯 이후 인원들의 치환이 모두 실패 (ex. 9인 장표 8명 시 마지막 1명 누락)
     // ⚠️ 템플릿에서 [ 감리이력1 ] 처럼 괄호 안에 공백이 있을 수 있으므로
     //    정규화(공백 제거)된 concat 텍스트로 매핑 label을 탐색함
     const ALL_LABELS = [
@@ -942,7 +924,7 @@ async function buildPhotoPptxFromTemplate(pages, templateZips) {
       return concat.replace(/\s+/g, '').includes(normLabel(label))
     }
 
-    // 치환 전에 라벨별 단락 목록 미리 수집 (0-indexed occurrence 순서, 공백 무관 매칭)
+    // 카드 삭제 이전에 라벨별 단락 목록 미리 수집 (idx가 nameParaOccurrences와 1:1 대응)
     const preFetchedParas = {}
     ALL_LABELS.forEach(label => {
       const paras = Array.from(xmlDoc.getElementsByTagNameNS(A_NS, 'p'))
@@ -950,6 +932,26 @@ async function buildPhotoPptxFromTemplate(pages, templateZips) {
       paras.forEach(p => { if (paraMatchesLabel(p, label)) list.push(p) })
       preFetchedParas[label] = list
     })
+
+    // ── 미배정 슬롯 카드 삭제 (preFetch 이후에 실행) ──
+    // [이름] 단락이 속한 <a:p>의 조상 <p:sp>를 찾아 cardIndex 판별
+    const cardsToRemove = new Set()
+    nameParaOccurrences.forEach(({ para }, idx) => {
+      const slot = meta.orderIndexToSlot[idx]
+      if (page.slotPeople[slot]) return
+      // para(<a:p>) 조상에서 <p:sp> 찾기
+      let sp = para
+      while (sp && !(sp.nodeType === 1 && sp.localName === 'sp')) sp = sp.parentNode
+      const xf = sp && xfrmOf.get(sp)
+      if (xf) {
+        const ci = findCardIndex({ x: xf.x + xf.w / 2, y: xf.y + xf.h / 2 })
+        if (ci >= 0) cardsToRemove.add(ci)
+      }
+    })
+    cardsToRemove.forEach(ci => cardShapes[ci].forEach(sp => { if (sp.parentNode) sp.parentNode.removeChild(sp) }))
+
+    // ── 슬라이드 전체 [제목] 치환 (groupFilter별 목차명으로 치환) ──
+    replaceAllLabels(xmlDoc, '[제목]', page.slideTitle || '')
 
     nameParaOccurrences.forEach((_nameOcc, idx) => {
       const slot = meta.orderIndexToSlot[idx]
