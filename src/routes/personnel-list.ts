@@ -317,7 +317,7 @@ app.get('/:id/photo-profile', async (c) => {
   // ── [IT경력기간] MIN(period_start) ~ MAX(period_end) 기간 계산 ──
   // 각 경력의 기간을 단순 합산하면 겹치는 기간이 과다 계산됨
   // → 전체 경력 중 가장 이른 시작일 ~ 가장 늦은 종료일(없으면 현재)로 계산
-  let IT경력기간 = ''
+  let IT경력기간 = '0년 0개월'
   const parseYMVal = (s: string | null): { y: number; m: number } | null => {
     if (!s) return null
     const mt = String(s).match(/(\d{4})[.\-년](\d{1,2})/)
@@ -342,9 +342,7 @@ app.get('/:id/photo-profile', async (c) => {
     const totalMonths = Math.max(0, (effectiveEnd.y - minStart.y) * 12 + (effectiveEnd.m - minStart.m))
     const itYrs = Math.floor(totalMonths / 12)
     const itMos = totalMonths % 12
-    IT경력기간 = totalMonths > 0
-      ? (itYrs > 0 ? `${itYrs}년 ${itMos}개월` : `${itMos}개월`)
-      : ''
+    IT경력기간 = itYrs > 0 ? `${itYrs}년 ${itMos}개월` : `${itMos}개월`
   }
 
   // ── [실적1]~[실적10] audit-match 로직 (inline) ──────────────
