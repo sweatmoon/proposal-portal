@@ -2030,13 +2030,14 @@ app.get('/ppt-templates', async (c) => {
     }
 
     // variant별로 슬롯 고정 여부 판단 (PERSON_N 패턴이 있으면 슬롯별 개별 업로드)
-    const hasVariantSlots = templates.some(t => /^PERSON_\d+$/i.test(t.variant_code))
+    const PERSON_SLOT_RE = new RegExp('^PERSON_[0-9]+$', 'i')
+    const hasVariantSlots = templates.some(t => PERSON_SLOT_RE.test(t.variant_code))
 
     // 템플릿 목록
     const tplCards = templates.map(t => {
       const hasFile  = !!t.pptx_b64_key
       const fileName = t.pptx_file_path || (hasFile ? '업로드됨' : null)
-      const isSlot   = /^PERSON_\d+$/i.test(t.variant_code)
+      const isSlot   = PERSON_SLOT_RE.test(t.variant_code)
       const fileInputId = 'tplFile_' + t.variant_code
       const fileLabelId = 'tplLabel_' + t.variant_code
       return \`
