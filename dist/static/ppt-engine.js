@@ -598,21 +598,45 @@ async function generateMenuPpt(menu, vm) {
       break;
 
     // ── 사진장표 3종 ───────────────────────────────────────────────
+    // 목차 기반: 모달 UI의 _pawTocList 설정을 그대로 사용.
+    // 단, ppt-engine에서 직접 호출 시 해당 메뉴 코드에 맞는 팀만 임시 목차로 구성.
+
     // 3.1 단계 감리원의 전문 역량
     case 'AUDITOR_PROFILE':
-    case 'PHOTO_ASSIGN':          // 구버전 alias
-      result = await downloadPhotoAssignPptx(null, { returnZip: true, groupFilter: 'AUDITOR' });
+    case 'PHOTO_ASSIGN': {         // 구버전 alias
+      const _cache31 = buildPhotoAssignCache()
+      const _cnt31 = (_cache31 && _cache31.audit) ? _cache31.audit.length : 0
+      if (!_pawTocList.length && _cnt31 > 0) {
+        _pawTocList = [{ id: 1, title: '3.1 감리원 전문역량', sheetSize: 2, cats: ['audit'] }]
+      }
+      result = await downloadPhotoAssignPptx(null, { returnZip: true });
       break;
+    }
 
     // 3.2 핵심기술 점검팀의 전문 역량
-    case 'CORE_EXPERT_PROFILE':
-      result = await downloadPhotoAssignPptx(null, { returnZip: true, groupFilter: 'CORE_EXPERT' });
+    case 'CORE_EXPERT_PROFILE': {
+      const _cache32 = buildPhotoAssignCache()
+      const _cnt32 = (_cache32 && _cache32.core) ? _cache32.core.length : 0
+      if (!_pawTocList.length && _cnt32 > 0) {
+        _pawTocList = [{ id: 1, title: '3.2 핵심기술 전문역량', sheetSize: suggestSheetSize(_cnt32), cats: ['core'] }]
+      }
+      result = await downloadPhotoAssignPptx(null, { returnZip: true });
       break;
+    }
 
     // 3.3 필수기술·보안·테스트팀 전문 역량
-    case 'EXPERT_PROFILE':
-      result = await downloadPhotoAssignPptx(null, { returnZip: true, groupFilter: 'EXPERT' });
+    case 'EXPERT_PROFILE': {
+      const _cache33 = buildPhotoAssignCache()
+      if (!_pawTocList.length && _cache33) {
+        const _keys33 = ['required', 'security', 'tester'].filter(k => (_cache33[k] || []).length > 0)
+        const _total33 = _keys33.reduce((s, k) => s + _cache33[k].length, 0)
+        if (_total33 > 0) {
+          _pawTocList = [{ id: 1, title: '3.3 필수·보안·테스트 전문역량', sheetSize: suggestSheetSize(_total33), cats: _keys33 }]
+        }
+      }
+      result = await downloadPhotoAssignPptx(null, { returnZip: true });
       break;
+    }
 
     // ── 표장표 2종 ─────────────────────────────────────────────────
     // 3.4 감리원별 유사 감리 실적 및 경력·자격

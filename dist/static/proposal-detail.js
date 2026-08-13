@@ -150,6 +150,8 @@ function openAutoModal() {
     alert('PPT 라이브러리 로딩 중... 잠시 후 다시 시도해주세요.')
     return
   }
+  // 모달 열 때마다 목차 목록 초기화 → renderPhotoAssignRows에서 기본값 재구성
+  _pawTocList = []
   document.getElementById('autoModal').style.display = 'flex'
   renderPhotoAssignRows()
 }
@@ -179,7 +181,67 @@ function buildPhotoAssignCache() {
   return cache
 }
 
-// 사진장표 분류 체크리스트 HTML 렌더링
+// ── 목차 기반 사진장표 UI ───────────────────────────────────────
+// 목차(슬라이드 그룹) 단위로 "제목 | 템플릿 크기 | 포함할 팀" 을 설정한다.
+// 각 목차는 완전히 독립적으로 동작하며 다른 목차의 선택과 무관하다.
+
+// 목차 행 ID 카운터 (고유 식별자용)
+let _pawTocIdSeq = 0
+
+// 새 목차 행 데이터 기본값 생성
+function _pawNewToc(cache, activeCats) {
+  const id = ++_pawTocIdSeq
+  // 기본 제목: 빈 문자열 (사용자가 직접 입력)
+  // 기본 팀: 활성 팀 중 첫 번째 자동 체크
+  const defaultCats = activeCats.length ? [activeCats[0].key] : []
+  const totalCount = defaultCats.reduce((s, k) => s + (cache[k] || []).length, 0)
+  return { id, title: '', sheetSize: suggestSheetSize(Math.max(totalCount, 1)), cats: defaultCats }
+}
+
+// 목차 행 HTML 한 줄 생성
+function _pawTocRowHtml(toc, cache, activeCats) {
+  const catBoxes = activeCats.map(c => {
+    const count = (cache[c.key] || []).length
+    const checked = toc.cats.includes(c.key) ? ' checked' : ''
+    const shortLabel = c.label.replace(/^\S+\s/, '')
+    return `<label style="display:inline-flex;align-items:center;gap:3px;font-size:12px;cursor:pointer;white-space:nowrap">
+      <input type="checkbox" class="paw-toc-cat" data-toc="${toc.id}" data-cat="${c.key}"${checked}
+        onchange="onPawTocCatChange(${toc.id})">
+      <span>${shortLabel}</span><span style="color:#aaa;font-size:11px">(${count})</span>
+    </label>`
+  }).join('')
+
+  const sizeOpts = [2, 4, 6, 9].map(n =>
+    `<option value="${n}"${n === toc.sheetSize ? ' selected' : ''}>${n}인</option>`
+  ).join('')
+
+  return `<div class="paw-toc-row" data-toc="${toc.id}"
+    style="display:flex;align-items:center;gap:8px;padding:8px 10px;background:#f9fafb;border-radius:6px;flex-wrap:wrap;border:1px solid #e8eaf0">
+    <input type="text" class="paw-toc-title" data-toc="${toc.id}"
+      value="${toc.title.replace(/"/g, '&quot;')}"
+      placeholder="목차 제목 (예: 3.3 전문역량)"
+      style="flex:1;min-width:140px;max-width:200px;padding:3px 7px;border:1px solid #ccc;border-radius:4px;font-size:12px;font-family:inherit"
+      oninput="onPawTocTitleChange(${toc.id}, this.value)">
+    <span style="font-size:12px;color:#555;white-space:nowrap">템플릿
+      <select class="paw-toc-sheet" data-toc="${toc.id}"
+        style="margin:0 4px;padding:2px 4px;border-radius:4px;border:1px solid #ccc;font-size:12px"
+        onchange="onPawTocSheetChange(${toc.id}, this.value)">
+        ${sizeOpts}
+      </select>
+    </span>
+    <span style="font-size:12px;color:#555">팀
+      <span style="display:inline-flex;gap:6px;flex-wrap:wrap;margin-left:4px">${catBoxes}</span>
+    </span>
+    <button onclick="removePawTocRow(${toc.id})"
+      style="background:#f5f5f5;border:1px solid #ddd;border-radius:4px;padding:2px 7px;font-size:12px;cursor:pointer;color:#777;line-height:1.4"
+      title="이 목차 삭제">✕</button>
+  </div>`
+}
+
+// 내부 목차 데이터 저장소 (renderPhotoAssignRows 이후 유지)
+let _pawTocList = []
+
+// 목차 UI 전체 렌더링
 function renderPhotoAssignRows() {
   const wrap = document.getElementById('photo-assign-rows')
   if (!wrap) return
@@ -194,109 +256,111 @@ function renderPhotoAssignRows() {
     return
   }
 
-  const rows = activeCats.map(c => {
-    const count = cache[c.key].length
-    // 감리원은 장표 크기 선택 없이 고정 안내
-    if (c.key === 'audit') {
-      return `<div class="photo-assign-row" data-cat="audit" style="display:flex;align-items:center;gap:10px;padding:8px 10px;background:#f9fafb;border-radius:6px;flex-wrap:wrap">
-        <span style="font-weight:700;font-size:13px;min-width:110px">${c.label} <span style="font-weight:400;color:#777">(${count}명)</span></span>
-        <span style="font-size:12px;color:#888">2인장표로 기본 포함됩니다</span>
-      </div>`
+  // 최초 렌더링 시 기본 목차 구성
+  // 감리원이 있으면 감리원 목차 1개, 전문가 계열은 팀별 각 1개 자동 생성
+  if (!_pawTocList.length) {
+    _pawTocIdSeq = 0
+    if (cache.audit && cache.audit.length) {
+      _pawTocList.push({ id: ++_pawTocIdSeq, title: '3.1 감리원 전문역량', sheetSize: 2, cats: ['audit'] })
     }
-    const otherCats = activeCats.filter(o => o.key !== c.key && o.key !== 'audit')
-    const includeBoxes = [
-      `<label style="display:flex;align-items:center;gap:3px;font-size:12px;cursor:pointer"><input type="checkbox" class="paw-solo" data-cat="${c.key}" checked onchange="onPawSoloChange('${c.key}')"> 단독</label>`,
-      ...otherCats.map(o => `<label style="display:flex;align-items:center;gap:3px;font-size:12px;cursor:pointer"><input type="checkbox" class="paw-include" data-cat="${c.key}" data-target="${o.key}" onchange="onPawIncludeChange('${c.key}')"> ${o.label.replace(/^\S+\s/, '')}</label>`)
-    ].join('')
-    return `<div class="photo-assign-row" data-cat="${c.key}" style="display:flex;align-items:center;gap:10px;padding:8px 10px;background:#f9fafb;border-radius:6px;flex-wrap:wrap">
-      <span style="font-weight:700;font-size:13px;min-width:110px">${c.label} <span style="font-weight:400;color:#777">(${count}명)</span></span>
-      <span style="font-size:12px;color:#555">장표
-        <select class="paw-sheet" data-cat="${c.key}" style="margin:0 4px;padding:2px 4px;border-radius:4px;border:1px solid #ccc;font-size:12px">
-          ${[2, 4, 6, 9].map(n => `<option value="${n}"${n === suggestSheetSize(count) ? ' selected' : ''}>${n}인</option>`).join('')}
-        </select>
-      </span>
-      <span style="font-size:12px;color:#555">포함 <span style="display:inline-flex;gap:6px;flex-wrap:wrap">${includeBoxes}</span></span>
-    </div>`
-  }).join('')
-  wrap.innerHTML = rows
-  // 렌더링 후 단독 체크 상태 반영 → 비활성화 동기화
-  syncAllSoloIncludeDisabled()
+    const expertCats = activeCats.filter(c => c.key !== 'audit')
+    if (expertCats.length) {
+      // 전문가 계열은 한 목차에 모두 합치는 것이 기본 (사용자가 분리 가능)
+      const allExpertKeys = expertCats.map(c => c.key)
+      const totalCount = allExpertKeys.reduce((s, k) => s + (cache[k] || []).length, 0)
+      _pawTocList.push({
+        id: ++_pawTocIdSeq,
+        title: expertCats.length === 1 ? expertCats[0].label.replace(/^\S+\s/, '') + ' 전문역량' : '전문역량',
+        sheetSize: suggestSheetSize(totalCount),
+        cats: allExpertKeys,
+      })
+    }
+  }
+
+  _renderPawTocDom(cache, activeCats)
 }
 
-// 단독 체크된 카테고리를 include 대상으로 가진 체크박스를 비활성화/활성화
-// soloCat이 단독 체크 ON → 다른 행에서 soloCat을 include 체크박스를 disabled
-// soloCat이 단독 체크 OFF → 다른 행에서 soloCat을 include 체크박스를 enabled
-function syncSoloIncludeDisabled(soloCat, isSolo) {
-  document.querySelectorAll(`.paw-include[data-target="${soloCat}"]`).forEach(cb => {
-    cb.disabled = isSolo
-    if (isSolo) cb.checked = false
-    const label = cb.closest('label')
-    if (label) label.style.opacity = isSolo ? '0.35' : ''
-  })
+// DOM만 다시 그리기 (데이터 보존)
+function _renderPawTocDom(cache, activeCats) {
+  const wrap = document.getElementById('photo-assign-rows')
+  if (!wrap) return
+
+  const rowsHtml = _pawTocList.map(toc => _pawTocRowHtml(toc, cache, activeCats)).join('')
+  wrap.innerHTML = `
+    <div style="font-size:11px;color:#888;margin-bottom:6px">
+      목차마다 제목·템플릿 크기·포함할 팀을 설정하세요. 각 목차는 독립적으로 생성됩니다.
+    </div>
+    ${rowsHtml}
+    <button onclick="addPawTocRow()"
+      style="margin-top:6px;padding:5px 14px;font-size:12px;background:#e8f0fe;color:#1a73e8;border:1px solid #c5d8fd;border-radius:5px;cursor:pointer;font-weight:600">
+      + 목차 추가
+    </button>
+  `
 }
 
-// "단독" 체크 시 같은 행의 포함 체크박스 모두 해제 + 다른 행의 이 cat include 비활성화
-function onPawSoloChange(cat) {
-  const row = document.querySelector(`.photo-assign-row[data-cat="${cat}"]`)
-  const solo = row.querySelector('.paw-solo')
-  if (solo.checked) row.querySelectorAll('.paw-include').forEach(cb => { cb.checked = false })
-  syncSoloIncludeDisabled(cat, solo.checked)
-}
-// 다른 분류 포함 체크 시 "단독" 자동 해제
-function onPawIncludeChange(cat) {
-  const row = document.querySelector(`.photo-assign-row[data-cat="${cat}"]`)
-  const anyChecked = Array.from(row.querySelectorAll('.paw-include')).some(cb => cb.checked)
-  if (anyChecked) row.querySelector('.paw-solo').checked = false
+// 목차 추가 버튼 핸들러
+function addPawTocRow() {
+  const cache = buildPhotoAssignCache()
+  if (!cache) return
+  const activeCats = PHOTO_CATS.filter(c => (cache[c.key] || []).length > 0)
+  _pawTocList.push(_pawNewToc(cache, activeCats))
+  _renderPawTocDom(cache, activeCats)
 }
 
-// 초기 렌더링 후 단독 체크 상태에 따라 include 체크박스 비활성화 동기화
-function syncAllSoloIncludeDisabled() {
-  document.querySelectorAll('.photo-assign-row').forEach(row => {
-    const cat = row.dataset.cat
-    const soloEl = row.querySelector('.paw-solo')
-    if (soloEl && soloEl.checked) syncSoloIncludeDisabled(cat, true)
-  })
+// 목차 삭제 버튼 핸들러
+function removePawTocRow(id) {
+  _pawTocList = _pawTocList.filter(t => t.id !== id)
+  const cache = buildPhotoAssignCache()
+  const activeCats = PHOTO_CATS.filter(c => (cache[c.key] || []).length > 0)
+  _renderPawTocDom(cache, activeCats)
 }
 
-// 각 분류 행의 설정(장표 크기, 포함 대상) 읽기
+// 목차 제목 변경 핸들러
+function onPawTocTitleChange(id, val) {
+  const toc = _pawTocList.find(t => t.id === id)
+  if (toc) toc.title = val
+}
+
+// 목차 템플릿 크기 변경 핸들러
+function onPawTocSheetChange(id, val) {
+  const toc = _pawTocList.find(t => t.id === id)
+  if (toc) toc.sheetSize = parseInt(val, 10)
+}
+
+// 목차 팀 체크박스 변경 핸들러 — 인원 합계에 맞게 템플릿 크기 자동 추천
+function onPawTocCatChange(id) {
+  const toc = _pawTocList.find(t => t.id === id)
+  if (!toc) return
+  const row = document.querySelector(`.paw-toc-row[data-toc="${id}"]`)
+  if (!row) return
+  // 체크된 팀 목록 갱신
+  toc.cats = Array.from(row.querySelectorAll('.paw-toc-cat:checked')).map(cb => cb.dataset.cat)
+  // 인원 합계 계산 → 템플릿 크기 자동 추천
+  const cache = buildPhotoAssignCache()
+  const total = toc.cats.reduce((s, k) => s + (cache && cache[k] ? cache[k].length : 0), 0)
+  const suggested = suggestSheetSize(Math.max(total, 1))
+  toc.sheetSize = suggested
+  const sheetSel = row.querySelector('.paw-toc-sheet')
+  if (sheetSel) sheetSel.value = String(suggested)
+}
+
+// 목차 설정 읽기 — 목차 배열 반환
+// 반환: [{ title, sheetSize, catKeys }, ...]
 function readPhotoAssignConfig() {
-  const cfg = {}
-  document.querySelectorAll('.photo-assign-row').forEach(row => {
-    const cat = row.dataset.cat
-    const sheetEl = row.querySelector('.paw-sheet')
-    if (!sheetEl) return // 감리원 행 (고정, 장표 크기 없음)
-    const sheet = parseInt(sheetEl.value, 10)
-    const soloEl = row.querySelector('.paw-solo')
-    const solo = soloEl ? soloEl.checked : true  // 단독 체크박스 상태 읽기
-    const include = new Set()
-    row.querySelectorAll('.paw-include:checked').forEach(cb => include.add(cb.dataset.target))
-    // solo=false + include 아무것도 없으면 "출력 제외" 의사 → cfg에서 누락
-    if (!solo && include.size === 0) return
-    cfg[cat] = { sheet, include, solo }
+  // DOM에서 최신 제목/템플릿 크기 동기화 (input은 oninput으로 실시간 반영되지만 안전하게 재확인)
+  document.querySelectorAll('.paw-toc-row').forEach(row => {
+    const id = parseInt(row.dataset.toc, 10)
+    const toc = _pawTocList.find(t => t.id === id)
+    if (!toc) return
+    const titleEl = row.querySelector('.paw-toc-title')
+    if (titleEl) toc.title = titleEl.value.trim()
+    const sheetEl = row.querySelector('.paw-toc-sheet')
+    if (sheetEl) toc.sheetSize = parseInt(sheetEl.value, 10)
+    toc.cats = Array.from(row.querySelectorAll('.paw-toc-cat:checked')).map(cb => cb.dataset.cat)
   })
-  return cfg
-}
-
-// 서로 "포함"으로 연결된 분류들을 하나의 그룹으로 묶음 (union-find)
-function groupPhotoCategories(cfg) {
-  const keys = Object.keys(cfg)
-  const parent = {}; keys.forEach(k => { parent[k] = k })
-  const find = k => (parent[k] === k ? k : (parent[k] = find(parent[k])))
-  const union = (a, b) => { const ra = find(a), rb = find(b); if (ra !== rb) parent[ra] = rb }
-  // solo=true인 카테고리는 독립 그룹 유지 — include 대상으로 지정돼도 union하지 않음
-  // (단독 슬라이드 + 타 그룹 중복 출력 의도)
-  keys.forEach(k => {
-    cfg[k].include.forEach(t => {
-      if (cfg[t] && !cfg[t].solo) union(k, t)
-    })
-  })
-  const groups = {}
-  PHOTO_CATS.forEach(({ key }) => {
-    if (!cfg[key]) return
-    const root = find(key)
-    ;(groups[root] = groups[root] || []).push(key)
-  })
-  return Object.values(groups)
+  return _pawTocList
+    .filter(toc => toc.cats.length > 0)          // 팀 미선택 목차 제외
+    .map(toc => ({ title: toc.title, sheetSize: toc.sheetSize, catKeys: toc.cats }))
 }
 
 function showAutoAlert(msg, ok) {
@@ -1103,11 +1167,9 @@ async function buildPhotoPptxFromTemplate(pages, templateZips) {
 
 // ── downloadPhotoAssignPptx ─────────────────────────────────────
 // 체크리스트 설정을 읽어 pages 배열을 구성한 뒤 buildPhotoPptxFromTemplate 호출
-// opts.groupFilter:
-//   'AUDITOR'      → 감리원(audit)만                     (AUDITOR_PROFILE, 3.1)
-//   'CORE_EXPERT'  → 핵심기술(core)만                    (CORE_EXPERT_PROFILE, 3.2)
-//   'EXPERT'       → 필수기술·보안·테스터(required+security+tester)만  (EXPERT_PROFILE, 3.3)
-//   undefined      → 전체 (기존 동작 그대로)
+// ── 목차 기반 사진장표 생성 ─────────────────────────────────────
+// 각 목차(toc)는 독립적으로 처리된다.
+// 흐름: readPhotoAssignConfig() → 목차별 인원 수집(portalOrder 순) → 슬롯 배치 → PPTX 생성
 async function downloadPhotoAssignPptx(btn, opts) {
   opts = opts || {}
   if (typeof JSZip === 'undefined') { alert('JSZip 라이브러리 로딩 중입니다. 잠시 후 다시 시도해주세요.'); return null }
@@ -1116,125 +1178,61 @@ async function downloadPhotoAssignPptx(btn, opts) {
     const cache = buildPhotoAssignCache()
     if (!cache) { showAutoAlert('❌ 인력 데이터가 없습니다.', false); return null }
 
-    // ── groupFilter에 따라 처리할 카테고리 키 결정 ──
-    const gf = opts.groupFilter
-    let targetAuditPeople = []
-    let targetCatKeys     = []   // 전문가 계열 처리 대상 key 목록
-    let slideTitle        = ''   // [제목] placeholder 치환값
+    // 목차 설정 읽기
+    let tocList = []
+    try { tocList = readPhotoAssignConfig() } catch (e) { tocList = [] }
 
-    if (!gf || gf === 'ALL') {
-      // 기존 동작: 감리원 + 전문가 전체
-      targetAuditPeople = cache.audit || []
-      targetCatKeys = ['core', 'required', 'security', 'tester']
-      slideTitle = '전문 역량'
-    } else if (gf === 'AUDITOR') {
-      // 3.1 단계 감리원의 전문 역량
-      targetAuditPeople = cache.audit || []
-      targetCatKeys = []
-      slideTitle = '3.1 단계 감리원의 전문 역량'
-    } else if (gf === 'CORE_EXPERT') {
-      // 3.2 핵심기술 점검팀의 전문 역량
-      targetAuditPeople = []
-      targetCatKeys = ['core']
-      slideTitle = '3.2 핵심기술 점검팀의 전문 역량'
-    } else if (gf === 'EXPERT') {
-      // 3.3 필수기술·보안·테스트팀 전문 역량
-      targetAuditPeople = []
-      targetCatKeys = ['required', 'security', 'tester']
-      slideTitle = '3.3 필수기술·보안·테스트팀 전문 역량'
+    // 목차 미설정 시 기본값: 팀별 각 1목차 자동 구성
+    if (!tocList.length) {
+      const activeCats = PHOTO_CATS.filter(c => (cache[c.key] || []).length > 0)
+      if (cache.audit && cache.audit.length) {
+        tocList.push({ title: '감리원 전문역량', sheetSize: 2, catKeys: ['audit'] })
+      }
+      const expertCats = activeCats.filter(c => c.key !== 'audit')
+      if (expertCats.length) {
+        const allKeys = expertCats.map(c => c.key)
+        const total = allKeys.reduce((s, k) => s + cache[k].length, 0)
+        tocList.push({ title: '전문역량', sheetSize: suggestSheetSize(total), catKeys: allKeys })
+      }
     }
 
-    // 체크리스트 설정 읽기 (모달 미열림 시 기본값 fallback)
-    let cfg = {}
-    try { cfg = readPhotoAssignConfig() } catch (e) { cfg = {} }
-    if (!Object.keys(cfg).length) {
-      // 모달 미열림 시 기본값: 모든 카테고리를 단독 포함으로 처리
-      PHOTO_CATS.forEach(c => {
-        if (c.key === 'audit') return
-        const cnt = (cache[c.key] || []).length
-        if (cnt > 0) cfg[c.key] = { sheet: suggestSheetSize(cnt), include: new Set(), solo: true }
-      })
-    }
+    if (!tocList.length) { showAutoAlert('❌ 생성할 목차가 없습니다.', false); return null }
 
-    // pages 배열 구성: { sheetSize, slotPeople: { slotNum: {name, field, grade, personnelId} } }
+    // ── pages 배열 구성 ──
+    // 각 목차 → 선택된 팀의 인원을 portalOrder 순서(tbl 기재 순)로 수집 → 슬롯 배치
     const pages = []
     const pidMap = parsedData.personnelIdMap || {}
+    const { portalOrder } = parsedData
 
-    // 감리원: 2인 장표 고정
-    const auditPeople = targetAuditPeople.map(p => ({
-      name: p.name,
-      field: (parsedData.personFieldMap || {})[p.name] || '감리원',
-      grade: getEffectiveGrade(p.name),
-      personnelId: pidMap[p.name] || 0,
-    }))
-    if (auditPeople.length) {
-      const sheetSize = 2
+    for (const toc of tocList) {
+      const { title: slideTitle, sheetSize, catKeys } = toc
       const meta = PHOTO_LAYOUT_META[sheetSize]
-      const fillOrder = computeFillOrder(meta.rows, meta.cols)
-      for (let start = 0; start < auditPeople.length; start += sheetSize) {
-        const pagePeople = auditPeople.slice(start, start + sheetSize)
-        const slotPeople = {}
-        pagePeople.forEach((p, i) => { slotPeople[fillOrder[i]] = p })
-        pages.push({ sheetSize, slotPeople, slideTitle })
-      }
-    }
-
-    // 전문가/테스터: union-find 그룹화
-    // targetCatKeys에 있는 카테고리 + 그 include 대상 카테고리도 함께 포함
-    // ※ include 대상 카테고리는 solo=false & include.size=0 → readPhotoAssignConfig에서
-    //   cfg에 포함되지 않을 수 있으므로, cfg 여부와 무관하게 include 타깃을 expandedKeys에 추가
-    const filteredCfg = {}
-    const expandedKeys = new Set(targetCatKeys)
-    targetCatKeys.forEach(k => {
-      if (cfg[k]) cfg[k].include.forEach(t => { expandedKeys.add(t) })
-    })
-    expandedKeys.forEach(k => {
-      if (cfg[k]) {
-        filteredCfg[k] = cfg[k]
-      } else if (targetCatKeys.some(tk => cfg[tk] && cfg[tk].include.has(k))) {
-        // cfg에 없지만 include 대상인 카테고리: 빈 include Set으로 등록 (인원만 포함)
-        filteredCfg[k] = { sheet: cfg[targetCatKeys.find(tk => cfg[tk] && cfg[tk].include.has(k))].sheet, include: new Set(), solo: false }
-      }
-    })
-
-    const catGroups = groupPhotoCategories(filteredCfg)
-
-    // targetCatKeys 밖에 있는 카테고리(solo=true로 include된 외부 카테고리)는
-    // 독립 슬라이드를 만들지 않고, include한 그룹의 people에만 합산
-    const externalSoloKeys = new Set(
-      Object.keys(filteredCfg).filter(k => !targetCatKeys.includes(k))
-    )
-
-    for (const catKeys of catGroups) {
-      // 이 그룹이 외부 solo 카테고리만으로 구성된 독립 그룹이면 슬라이드 생성 skip
-      // (해당 인원은 include한 그룹에서 people 합산으로 처리)
-      if (catKeys.every(k => externalSoloKeys.has(k))) continue
-
-      const firstCat = PHOTO_CATS.find(c => catKeys.includes(c.key))
-      // 그룹 내 solo=false(원본 카테고리)의 sheet 사용
-      const ownerCat = catKeys.find(k => filteredCfg[k] && !filteredCfg[k].solo) || firstCat.key
-      const sheetSize = (cfg[ownerCat] || cfg[firstCat.key] || {}).sheet || suggestSheetSize(1)
-      const meta = PHOTO_LAYOUT_META[sheetSize]
+      if (!meta) continue
       const fillOrder = computeFillOrder(meta.rows, meta.cols)
 
-      const people = []
-      // include된 외부 solo 카테고리(targetCatKeys 밖)를 앞에 배치, 나머지 순서대로
-      const externalSoloInGroup = catKeys.filter(k => externalSoloKeys.has(k))
-      const internalCatKeys = catKeys.filter(k => !externalSoloKeys.has(k))
-      const allPeopleKeys = [...externalSoloInGroup, ...internalCatKeys]
-      allPeopleKeys.forEach(catKey => {
-        const catLabel = PHOTO_CATS.find(c => c.key === catKey).label.replace(/^\S+\s/, '')
-        ;(cache[catKey] || []).forEach(p => {
-          people.push({
+      // portalOrder 전체를 순회하면서 선택된 팀에 속하는 인원만 필터 (원본 순서 유지)
+      const people = (portalOrder || [])
+        .filter(p => catKeys.some(k => {
+          const cat = PHOTO_CATS.find(c => c.key === k)
+          return cat && cat.grpFilter(p)
+        }))
+        .map(p => {
+          const catKey = catKeys.find(k => {
+            const cat = PHOTO_CATS.find(c => c.key === k)
+            return cat && cat.grpFilter(p)
+          })
+          const catLabel = catKey ? PHOTO_CATS.find(c => c.key === catKey).label.replace(/^\S+\s/, '') : ''
+          return {
             name: p.name,
             field: (parsedData.personFieldMap || {})[p.name] || catLabel,
             grade: getEffectiveGrade(p.name),
             personnelId: pidMap[p.name] || 0,
-          })
+          }
         })
-      })
+
       if (!people.length) continue
 
+      // 템플릿 크기 단위로 페이지 분할
       for (let start = 0; start < people.length; start += sheetSize) {
         const pagePeople = people.slice(start, start + sheetSize)
         const slotPeople = {}
@@ -1246,7 +1244,7 @@ async function downloadPhotoAssignPptx(btn, opts) {
     if (!pages.length) { showAutoAlert('❌ 생성할 인력이 없습니다.', false); return null }
 
     // ── slideTitle 기준 pageNum / totalPages 계산 ──
-    // 동일 slideTitle 끼리 묶어서 (현재번호/전체수) 계산
+    // 동일 목차 제목끼리 묶어서 (N/total) 넘버링
     // 1장짜리는 넘버링 없이 제목만, 2장 이상부터 (N/total) 추가
     const titleCountMap = {}
     pages.forEach(pg => { titleCountMap[pg.slideTitle] = (titleCountMap[pg.slideTitle] || 0) + 1 })
@@ -1260,7 +1258,9 @@ async function downloadPhotoAssignPptx(btn, opts) {
     // ── photo-profile API 호출: 등장하는 모든 인원의 profile 로드 ──
     const proposalId = parsedData.proposalId || 0
     const allPeople = []
-    pages.forEach(pg => Object.values(pg.slotPeople).forEach(p => { if (!allPeople.find(x => x.personnelId === p.personnelId)) allPeople.push(p) }))
+    pages.forEach(pg => Object.values(pg.slotPeople).forEach(p => {
+      if (!allPeople.find(x => x.personnelId === p.personnelId)) allPeople.push(p)
+    }))
     const profileMap = {}
     await Promise.all(
       allPeople
@@ -1282,18 +1282,21 @@ async function downloadPhotoAssignPptx(btn, opts) {
       })
     })
 
-    // ── templateZips 로드: AUDITOR_PROFILE(2인 고정) 또는 전체 4종 ──
-    // PptMenuRegistry에서 AUDITOR_PROFILE(또는 *_PROFILE) 메뉴의 templates 꺼내기
+    // ── templateZips 로드 ──
+    // PptMenuRegistry에서 AUDITOR_PROFILE 메뉴의 PERSON_2/4/6/9 템플릿 로드
     let templateZips = null
     try {
       const registry = await PptMenuRegistry.load()
-      // 사용할 메뉴 코드: groupFilter 별로 다를 수 있으나 템플릿은 공통으로 AUDITOR_PROFILE 메뉴에서 로드
-      const profileMenuCode = gf === 'CORE_EXPERT' ? 'CORE_EXPERT_PROFILE'
-                            : gf === 'EXPERT'       ? 'EXPERT_PROFILE'
-                            : 'AUDITOR_PROFILE'
-      const menu = registry.byCode[profileMenuCode]
-      const tpls = menu && Array.isArray(menu.templates) ? menu.templates : []
-      // variant_code에서 PERSON_2/4/6/9 구분 (DB 컬럼명: variant_code)
+      // 목차 기반에서는 모든 목차가 동일 템플릿 세트를 공유
+      // AUDITOR_PROFILE → CORE_EXPERT_PROFILE → EXPERT_PROFILE 순으로 fallback
+      const menuCodes = ['AUDITOR_PROFILE', 'CORE_EXPERT_PROFILE', 'EXPERT_PROFILE']
+      let tpls = []
+      for (const code of menuCodes) {
+        const menu = registry.byCode[code]
+        if (menu && Array.isArray(menu.templates) && menu.templates.length) {
+          tpls = menu.templates; break
+        }
+      }
       const VARIANT_RE = /PERSON[_-]?(\d+)/i
       const b64Map = {}
       tpls.forEach(t => {
@@ -1302,14 +1305,11 @@ async function downloadPhotoAssignPptx(btn, opts) {
         const m = vn.match(VARIANT_RE)
         if (m) b64Map[Number(m[1])] = t.pptx_b64_key
       })
-      // b64 → JSZip 변환
       const sizes = [2, 4, 6, 9]
-      // PERSON_2가 없으면 에러, 나머지는 없으면 PERSON_2로 fallback
       if (!b64Map[2]) {
         showAutoAlert('❌ PERSON_2 템플릿을 업로드해주세요.', false)
         return null
       }
-      // 없는 사이즈는 PERSON_2 b64로 fallback
       sizes.forEach(s => { if (!b64Map[s]) b64Map[s] = b64Map[2] })
       templateZips = {}
       await Promise.all(sizes.map(async s => {
