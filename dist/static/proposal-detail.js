@@ -580,12 +580,13 @@ async function buildPhotoPptxFromTemplate(pages, templateZips) {
     }
   }
 
-  // size → { xml, tplZip } マップ
+  // size → { xml, tplZip } 맵 (없는 사이즈는 PERSON_2 fallback)
   const templateData = {}
   for (const size of [2, 4, 6, 9]) {
-    if (!templateZips[size]) throw new Error(`PERSON_${size} 템플릿이 업로드되지 않았습니다.`)
-    const { xml, file } = await getFirstSlideXml(templateZips[size])
-    templateData[size] = { xml, file, zip: templateZips[size] }
+    const tplZip = templateZips[size] || templateZips[2]
+    if (!tplZip) throw new Error('PERSON_2 템플릿이 업로드되지 않았습니다.')
+    const { xml, file } = await getFirstSlideXml(tplZip)
+    templateData[size] = { xml, file, zip: tplZip }
   }
 
   // ── 합본용 베이스 ZIP: PERSON_2 ZIP을 기반으로 사용 ──────────
@@ -948,12 +949,13 @@ async function downloadPhotoAssignPptx(btn, opts) {
       })
       // b64 → JSZip 변환
       const sizes = [2, 4, 6, 9]
-      const missingSize = sizes.find(s => !b64Map[s])
-      if (missingSize) {
-        console.warn(`PERSON_${missingSize} 템플릿이 DB에 없습니다. 사진장표 생성을 건너뜁니다.`)
-        showAutoAlert(`❌ PERSON_${missingSize} 템플릿을 업로드해주세요.`, false)
+      // PERSON_2가 없으면 에러, 나머지는 없으면 PERSON_2로 fallback
+      if (!b64Map[2]) {
+        showAutoAlert('❌ PERSON_2 템플릿을 업로드해주세요.', false)
         return null
       }
+      // 없는 사이즈는 PERSON_2 b64로 fallback
+      sizes.forEach(s => { if (!b64Map[s]) b64Map[s] = b64Map[2] })
       templateZips = {}
       await Promise.all(sizes.map(async s => {
         const b64 = b64Map[s]
