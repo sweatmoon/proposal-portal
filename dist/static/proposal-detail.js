@@ -606,22 +606,32 @@ async function downloadAssignPptx(btn, opts) {
         })
 
       if (tplSlideFiles.length > 0) {
-        // 5. 템플릿 첫 슬라이드를 테이블 XML로 교체
-        //    단, 템플릿 슬라이드의 배경/레이아웃 관계는 유지해야 하므로
-        //    PptxGenJS가 생성한 XML 안의 <p:sp> (도형) 요소들을 교체 방식으로 처리:
-        //    템플릿 슬라이드 XML에서 <p:spTree> 내부를 테이블 슬라이드의 <p:spTree> 내부로 교체
+        // 5. 템플릿 첫 슬라이드에 테이블 XML 삽입
+        //    전략: <p:spTree> 내 기존 요소(배경·제목·고정 도형) 유지 +
+        //           PptxGenJS가 생성한 <p:graphicFrame>(테이블) 요소만 추출해서 append
         const tplFirstSlide = tplSlideFiles[0]
         let tplSlideXml = await tplZip.file(tplFirstSlide).async('string')
 
-        // PptxGenJS 테이블 XML에서 <p:spTree> 내용 추출
-        const treeMatch = tableSlideXml.match(/<p:spTree>([\s\S]*?)<\/p:spTree>/)
-        if (treeMatch) {
-          // 템플릿 슬라이드의 <p:spTree> 내용을 테이블로 교체
-          tplSlideXml = tplSlideXml.replace(/<p:spTree>[\s\S]*?<\/p:spTree>/, `<p:spTree>${treeMatch[1]}</p:spTree>`)
+        // PptxGenJS 테이블 XML에서 <p:graphicFrame> 요소 추출
+        // (PptxGenJS는 테이블을 <p:graphicFrame> 안의 <a:graphic>/<a:graphicData>/<a:tbl>로 생성)
+        const gfMatches = [...tableSlideXml.matchAll(/<p:graphicFrame\b[\s\S]*?<\/p:graphicFrame>/g)]
+        if (gfMatches.length > 0) {
+          // 테이블 graphicFrame 요소들을 </p:spTree> 직전에 삽입
+          const tableGfXml = gfMatches.map(m => m[0]).join('\n')
+          tplSlideXml = tplSlideXml.replace(/<\/p:spTree>/, tableGfXml + '</p:spTree>')
           tplZip.file(tplFirstSlide, tplSlideXml)
+          console.log('[AssignPptx] 테이블 graphicFrame', gfMatches.length, '개를 템플릿 슬라이드에 삽입')
         } else {
-          // spTree 교체 실패 시: 슬라이드 파일 전체를 교체
-          tplZip.file(tplFirstSlide, tableSlideXml)
+          // graphicFrame 추출 실패 시 fallback: spTree 전체 교체
+          const treeMatch = tableSlideXml.match(/<p:spTree>([\s\S]*)<\/p:spTree>/)
+          if (treeMatch) {
+            tplSlideXml = tplSlideXml.replace(/<p:spTree>[\s\S]*<\/p:spTree>/, `<p:spTree>${treeMatch[1]}</p:spTree>`)
+            tplZip.file(tplFirstSlide, tplSlideXml)
+            console.warn('[AssignPptx] graphicFrame 없음, spTree 전체 교체 fallback')
+          } else {
+            tplZip.file(tplFirstSlide, tableSlideXml)
+            console.warn('[AssignPptx] spTree도 없음, 슬라이드 전체 교체 fallback')
+          }
         }
 
         // 6. 템플릿에 슬라이드가 2개 이상이면 나머지 슬라이드 삭제
