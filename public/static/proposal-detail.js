@@ -2206,106 +2206,79 @@ async function buildPhotoPptxFromTemplate(pages, templateZips) {
         }
       }
 
-      // [IT경력] — 텍스트 치환 + 줄바꿈(<a:br>) 삽입 + 컬러런 적용
+      // [IT경력] — 단락 내용 전체 교체 방식
+      // 기존 런 구조 건드리지 않고, pPr(단락서식)만 보존한 뒤
+      // 줄마다 br+런을 통짜로 새로 만들어 삽입
       const itPara = labelMap['[IT경력]']
       if (itPara) {
         const itLines = (pr.IT경력 || '').split('\n').filter(l => l.trim())
-        if (!itLines.length) {
-          replaceLabelInParagraphNorm(itPara, '[IT경력]', '')
-        } else {
-          // ① baseRPr를 치환 전에 미리 클론 (치환 후 원본 런이 제거될 수 있으므로)
-          const preRun  = Array.from(itPara.getElementsByTagNameNS(A_NS, 'r'))[0]
-          const baseRPr = preRun
-            ? (preRun.getElementsByTagNameNS(A_NS, 'rPr')[0] || null)
-            : null
-          const baseRPrClone = baseRPr ? baseRPr.cloneNode(true) : null
+        const itDoc   = itPara.ownerDocument
 
-          // ② 첫 줄로 [IT경력] 치환
-          replaceLabelInParagraphNorm(itPara, '[IT경력]', itLines[0])
+        // 기존 rPr 클론 (서식 기준용) — 내용 제거 전에 먼저 수집
+        const baseRPr      = Array.from(itPara.getElementsByTagNameNS(A_NS, 'r'))[0]
+                              ?.getElementsByTagNameNS(A_NS, 'rPr')[0] ?? null
+        const baseRPrClone = baseRPr ? baseRPr.cloneNode(true) : null
 
-          // ③ 나머지 줄: <a:br> + 런 추가
-          const itDoc = itPara.ownerDocument
-          for (let li = 1; li < itLines.length; li++) {
-            const br   = itDoc.createElementNS(A_NS, 'a:br')
-            const brPr = itDoc.createElementNS(A_NS, 'a:rPr')
-            if (baseRPrClone) Array.from(baseRPrClone.attributes).forEach(a => brPr.setAttribute(a.name, a.value))
-            br.appendChild(brPr)
-            itPara.appendChild(br)
-            const r   = itDoc.createElementNS(A_NS, 'a:r')
-            const rPr = itDoc.createElementNS(A_NS, 'a:rPr')
-            if (baseRPrClone) {
-              Array.from(baseRPrClone.attributes).forEach(a => rPr.setAttribute(a.name, a.value))
-              Array.from(baseRPrClone.childNodes).forEach(c => rPr.appendChild(c.cloneNode(true)))
-            }
-            const t = itDoc.createElementNS(A_NS, 'a:t')
-            t.textContent = itLines[li]
-            r.appendChild(rPr)
-            r.appendChild(t)
-            itPara.appendChild(r)
-          }
+        // pPr(단락 서식) 보존 후 단락 자식 전부 제거
+        const pPr = itPara.getElementsByTagNameNS(A_NS, 'pPr')[0] ?? null
+        while (itPara.firstChild) itPara.removeChild(itPara.firstChild)
+        if (pPr) itPara.appendChild(pPr)
 
-          // ④ 컬러런 적용: childNodes 스냅샷 순회, a:br 기준 lineIdx 카운트
-          // 색상: [ xxx ] → #1655A2(파랑), 0행 나머지→#E60012, 1행→#1655A2, 2행~→#404040
-          ;(function applyItColors(pEl) {
-            const doc = pEl.ownerDocument
+        function makeItSolidFill(hex) {
+          const sf  = itDoc.createElementNS(A_NS, 'a:solidFill')
+          const clr = itDoc.createElementNS(A_NS, 'a:srgbClr')
+          clr.setAttribute('val', hex)
+          sf.appendChild(clr)
+          return sf
+        }
 
-            function makeSolidFill(hex) {
-              const sf  = doc.createElementNS(A_NS, 'a:solidFill')
-              const clr = doc.createElementNS(A_NS, 'a:srgbClr')
-              clr.setAttribute('val', hex)
-              sf.appendChild(clr)
-              return sf
-            }
-
-            function makeColorRun(text, hex, srcRPr) {
-              const r   = doc.createElementNS(A_NS, 'a:r')
-              const rPr = doc.createElementNS(A_NS, 'a:rPr')
-              if (srcRPr) {
-                Array.from(srcRPr.attributes).forEach(a => rPr.setAttribute(a.name, a.value))
-                Array.from(srcRPr.childNodes).forEach(c => {
-                  if (c.localName !== 'solidFill') rPr.appendChild(c.cloneNode(true))
-                })
-              }
-              rPr.appendChild(makeSolidFill(hex))
-              const t = doc.createElementNS(A_NS, 'a:t')
-              t.textContent = text
-              r.appendChild(rPr)
-              r.appendChild(t)
-              return r
-            }
-
-            let lineIdx = 0
-            const nodes = Array.from(pEl.childNodes)  // 스냅샷
-            nodes.forEach(node => {
-              if (node.localName === 'br') { lineIdx++; return }
-              if (node.localName !== 'r') return
-
-              const tEl = node.getElementsByTagNameNS(A_NS, 't')[0]
-              if (!tEl) return
-              const text = tEl.textContent || ''
-              const rPr  = node.getElementsByTagNameNS(A_NS, 'rPr')[0]
-
-              const KW_COLOR  = '1655A2'
-              const restColor = lineIdx === 0 ? 'E60012' : lineIdx === 1 ? '1655A2' : '404040'
-
-              const bracketEnd = text.indexOf(']')
-              if (bracketEnd !== -1 && text.trimStart().startsWith('[')) {
-                const kwText   = text.slice(0, bracketEnd + 1)
-                const restText = text.slice(bracketEnd + 1)
-                const anchor   = node.nextSibling
-                const parent   = node.parentNode
-                parent.removeChild(node)
-                if (kwText)   parent.insertBefore(makeColorRun(kwText,   KW_COLOR,  rPr), anchor)
-                if (restText) parent.insertBefore(makeColorRun(restText, restColor, rPr), anchor)
-              } else {
-                if (rPr) {
-                  const old = rPr.getElementsByTagNameNS(A_NS, 'solidFill')[0]
-                  if (old) rPr.removeChild(old)
-                  rPr.appendChild(makeSolidFill(restColor))
-                }
-              }
+        function makeItRun(text, hex) {
+          const r   = itDoc.createElementNS(A_NS, 'a:r')
+          const rPr = itDoc.createElementNS(A_NS, 'a:rPr')
+          if (baseRPrClone) {
+            Array.from(baseRPrClone.attributes).forEach(a => rPr.setAttribute(a.name, a.value))
+            Array.from(baseRPrClone.childNodes).forEach(c => {
+              if (c.localName !== 'solidFill') rPr.appendChild(c.cloneNode(true))
             })
-          })(itPara)
+          }
+          rPr.appendChild(makeItSolidFill(hex))
+          const t = itDoc.createElementNS(A_NS, 'a:t')
+          t.textContent = text
+          r.appendChild(rPr)
+          r.appendChild(t)
+          return r
+        }
+
+        function makeItBr() {
+          const br   = itDoc.createElementNS(A_NS, 'a:br')
+          const brPr = itDoc.createElementNS(A_NS, 'a:rPr')
+          if (baseRPrClone) Array.from(baseRPrClone.attributes).forEach(a => brPr.setAttribute(a.name, a.value))
+          br.appendChild(brPr)
+          return br
+        }
+
+        if (!itLines.length) {
+          // 빈 런 하나만
+          const r = itDoc.createElementNS(A_NS, 'a:r')
+          const t = itDoc.createElementNS(A_NS, 'a:t')
+          t.textContent = ''
+          r.appendChild(t)
+          itPara.appendChild(r)
+        } else {
+          // 줄마다: (br +) 키워드런 + 나머지런
+          itLines.forEach((line, li) => {
+            if (li > 0) itPara.appendChild(makeItBr())
+            const KW_COLOR  = '1655A2'
+            const restColor = li === 0 ? 'E60012' : li === 1 ? '1655A2' : '404040'
+            const bracketEnd = line.indexOf(']')
+            if (bracketEnd !== -1 && line.trimStart().startsWith('[')) {
+              itPara.appendChild(makeItRun(line.slice(0, bracketEnd + 1), KW_COLOR))
+              const rest = line.slice(bracketEnd + 1)
+              if (rest) itPara.appendChild(makeItRun(rest, restColor))
+            } else {
+              itPara.appendChild(makeItRun(line, restColor))
+            }
+          })
         }
       }
     }
