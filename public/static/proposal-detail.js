@@ -1045,27 +1045,11 @@ async function buildHistoryPptx(opts) {
     return name.split('').join(' ')
   }
 
-  // 실적 목록 텍스트
-  function buildJeok(profile) {
+  // 실적 N번째 항목 (1-based, 없으면 빈 문자열)
+  function getJeok(profile, n) {
     if (!profile) return ''
-    return (Array.isArray(profile.실적) ? profile.실적 : []).join('\r\n')
-  }
-
-  // 주요경력 텍스트
-  function buildCareer(profile) {
-    if (!profile) return ''
-    const parts = []
-    if (profile.주요이력) parts.push(profile.주요이력)
-    if (profile.자격요약) parts.push(profile.자격요약)
-    return parts.join('\r\n')
-  }
-
-  // 요약 텍스트: "유사 감리 실적 : N건 / 감리 이외의 경력 : N년 N개월"
-  function buildYoyak(profile) {
-    if (!profile) return ''
-    const cnt = profile.감리횟수 != null ? `${profile.감리횟수}건` : '-'
-    const dur = parseCareerDuration(profile.IT경력기간) || '-'
-    return `유사 감리 실적 : ${cnt} / 감리 이외의 경력 : ${dur}`
+    const arr = Array.isArray(profile.실적) ? profile.실적 : []
+    return arr[n - 1] || ''
   }
 
   // ── 4. 인원 데이터를 플레이스홀더 맵으로 변환 ──────────────────
@@ -1116,6 +1100,18 @@ async function buildHistoryPptx(opts) {
       .replace(/"/g, '&quot;')
   }
 
+  // 전체 플레이스홀더 키 목록 (인원 슬롯 n 기준)
+  function personPlaceholders(n) {
+    const list = [
+      `[P${n}_단계]`, `[P${n}_분야]`, `[P${n}_소속]`, `[P${n}_이름]`,
+      `[P${n}_번호]`, `[P${n}_구분]`, `[P${n}_투입]`,
+      `[P${n}_감리횟수]`, `[P${n}_IT경력]`,
+      `[P${n}_주요이력]`,
+    ]
+    for (let i = 1; i <= 10; i++) list.push(`[P${n}_감리이력${i}]`)
+    return list
+  }
+
   // 인원 N명의 데이터를 XML에서 [P1_xxx]~[PN_xxx] 치환
   function applyPersonData(xml, people) {
     let result = xml
@@ -1123,16 +1119,22 @@ async function buildHistoryPptx(opts) {
       const n = idx + 1
       const prof = profileMap[r.name] || {}
       const map = {
-        [`[P${n}_단계]`]: buildStage(r.stageLabel),
-        [`[P${n}_분야]`]: r.field || '',
-        [`[P${n}_소속]`]: buildSosok(r.affil),
-        [`[P${n}_이름]`]: spaceName(r.name),
-        [`[P${n}_번호]`]: r.certDisplay || '',
-        [`[P${n}_구분]`]: r.grade || '',
-        [`[P${n}_투입]`]: '100%',
-        [`[P${n}_요약]`]: buildYoyak(prof),
-        [`[P${n}_실적]`]: buildJeok(prof),
-        [`[P${n}_경력]`]: buildCareer(prof),
+        [`[P${n}_단계]`]:    buildStage(r.stageLabel),
+        [`[P${n}_분야]`]:    r.field || '',
+        [`[P${n}_소속]`]:    buildSosok(r.affil),
+        [`[P${n}_이름]`]:    spaceName(r.name),
+        [`[P${n}_번호]`]:    r.certDisplay || '',
+        [`[P${n}_구분]`]:    r.grade || '',
+        [`[P${n}_투입]`]:    '100%',
+        // 요약행: 템플릿에 "유사 감리 실적 : [P1_감리횟수]건 / 감리 이외의 경력 : [P1_IT경력]" 형태로 기재
+        [`[P${n}_감리횟수]`]: prof.감리횟수 != null ? String(prof.감리횟수) : '-',
+        [`[P${n}_IT경력]`]:   parseCareerDuration(prof.IT경력기간) || '-',
+        // 주요이력: photo-profile의 주요이력(career_expert) 그대로
+        [`[P${n}_주요이력]`]: prof.주요이력 || '',
+      }
+      // 감리이력 1~10 개별 치환
+      for (let i = 1; i <= 10; i++) {
+        map[`[P${n}_감리이력${i}]`] = getJeok(prof, i)
       }
       for (const [ph, val] of Object.entries(map)) {
         result = replaceInXml(result, ph, val)
@@ -1140,10 +1142,9 @@ async function buildHistoryPptx(opts) {
     })
     // 미할당 슬롯 플레이스홀더 제거 (인원이 perPage에 미달할 때)
     for (let n = people.length + 1; n <= perPage; n++) {
-      const empties = [`[P${n}_단계]`,`[P${n}_분야]`,`[P${n}_소속]`,`[P${n}_이름]`,
-                       `[P${n}_번호]`,`[P${n}_구분]`,`[P${n}_투입]`,`[P${n}_요약]`,
-                       `[P${n}_실적]`,`[P${n}_경력]`]
-      for (const ph of empties) result = replaceInXml(result, ph, '')
+      for (const ph of personPlaceholders(n)) {
+        result = replaceInXml(result, ph, '')
+      }
     }
     return result
   }
