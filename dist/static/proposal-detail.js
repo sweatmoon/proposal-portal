@@ -2206,23 +2206,22 @@ async function buildPhotoPptxFromTemplate(pages, templateZips) {
         }
       }
 
-      // [IT경력] — 단락 내용 전체 교체 방식
-      // 기존 런 구조 건드리지 않고, pPr(단락서식)만 보존한 뒤
-      // 줄마다 br+런을 통짜로 새로 만들어 삽입
+      // [IT경력] — 줄마다 새 <a:p> 단락으로 삽입 (ENTER 개행)
+      // itPara를 템플릿으로 복제 → 줄 수만큼 새 단락 생성 → 원본 단락 자리에 순서대로 삽입
       const itPara = labelMap['[IT경력]']
       if (itPara) {
         const itLines = (pr.IT경력 || '').split('\n').filter(l => l.trim())
         const itDoc   = itPara.ownerDocument
+        const txBody  = itPara.parentNode
 
         // 기존 rPr 클론 (서식 기준용) — 내용 제거 전에 먼저 수집
         const baseRPr      = Array.from(itPara.getElementsByTagNameNS(A_NS, 'r'))[0]
                               ?.getElementsByTagNameNS(A_NS, 'rPr')[0] ?? null
         const baseRPrClone = baseRPr ? baseRPr.cloneNode(true) : null
 
-        // pPr(단락 서식) 보존 후 단락 자식 전부 제거
-        const pPr = itPara.getElementsByTagNameNS(A_NS, 'pPr')[0] ?? null
-        while (itPara.firstChild) itPara.removeChild(itPara.firstChild)
-        if (pPr) itPara.appendChild(pPr)
+        // pPr 클론 (단락 서식)
+        const basePPr      = itPara.getElementsByTagNameNS(A_NS, 'pPr')[0] ?? null
+        const basePPrClone = basePPr ? basePPr.cloneNode(true) : null
 
         function makeItSolidFill(hex) {
           const sf  = itDoc.createElementNS(A_NS, 'a:solidFill')
@@ -2249,37 +2248,34 @@ async function buildPhotoPptxFromTemplate(pages, templateZips) {
           return r
         }
 
-        function makeItBr() {
-          const br   = itDoc.createElementNS(A_NS, 'a:br')
-          const brPr = itDoc.createElementNS(A_NS, 'a:rPr')
-          if (baseRPrClone) Array.from(baseRPrClone.attributes).forEach(a => brPr.setAttribute(a.name, a.value))
-          br.appendChild(brPr)
-          return br
+        function makeItPara(line, li) {
+          const p = itDoc.createElementNS(A_NS, 'a:p')
+          if (basePPrClone) p.appendChild(basePPrClone.cloneNode(true))
+          if (!line) return p  // 빈 단락
+          const KW_COLOR  = '1655A2'
+          const restColor = li === 0 ? 'E60012' : li === 1 ? '1655A2' : '404040'
+          const bracketEnd = line.indexOf(']')
+          if (bracketEnd !== -1 && line.trimStart().startsWith('[')) {
+            p.appendChild(makeItRun(line.slice(0, bracketEnd + 1), KW_COLOR))
+            const rest = line.slice(bracketEnd + 1)
+            if (rest) p.appendChild(makeItRun(rest, restColor))
+          } else {
+            p.appendChild(makeItRun(line, restColor))
+          }
+          return p
         }
 
+        // 원본 단락 위치 기준으로 새 단락들 삽입 후 원본 제거
+        const anchor = itPara.nextSibling
         if (!itLines.length) {
-          // 빈 런 하나만
-          const r = itDoc.createElementNS(A_NS, 'a:r')
-          const t = itDoc.createElementNS(A_NS, 'a:t')
-          t.textContent = ''
-          r.appendChild(t)
-          itPara.appendChild(r)
+          // 빈 단락 하나로 교체
+          txBody.insertBefore(makeItPara('', 0), anchor)
         } else {
-          // 줄마다: (br +) 키워드런 + 나머지런
           itLines.forEach((line, li) => {
-            if (li > 0) itPara.appendChild(makeItBr())
-            const KW_COLOR  = '1655A2'
-            const restColor = li === 0 ? 'E60012' : li === 1 ? '1655A2' : '404040'
-            const bracketEnd = line.indexOf(']')
-            if (bracketEnd !== -1 && line.trimStart().startsWith('[')) {
-              itPara.appendChild(makeItRun(line.slice(0, bracketEnd + 1), KW_COLOR))
-              const rest = line.slice(bracketEnd + 1)
-              if (rest) itPara.appendChild(makeItRun(rest, restColor))
-            } else {
-              itPara.appendChild(makeItRun(line, restColor))
-            }
+            txBody.insertBefore(makeItPara(line, li), anchor)
           })
         }
+        txBody.removeChild(itPara)
       }
     }
 
