@@ -2207,45 +2207,45 @@ async function buildPhotoPptxFromTemplate(pages, templateZips) {
       }
 
       // [IT경력] — 텍스트 치환 + 줄바꿈(<a:br>) 삽입 + 컬러런 적용
-      // 전략: 첫 줄로 replaceLabelInParagraphNorm 치환 → 나머지 줄은 <a:br>+런으로 뒤에 추가
-      //       → 치환 완료 후 단락 childNodes 순회, a:br 기준으로 lineIdx 카운트하며 색상 적용
-      // 색상 규칙: [ xxx ] 부분 → #1655A2(파랑), 나머지 0행→#E60012(빨강), 1행→#1655A2, 2행~→#404040
       const itPara = labelMap['[IT경력]']
       if (itPara) {
         const itLines = (pr.IT경력 || '').split('\n').filter(l => l.trim())
         if (!itLines.length) {
           replaceLabelInParagraphNorm(itPara, '[IT경력]', '')
         } else {
-          // ① 첫 줄로 [IT경력] 치환
+          // ① baseRPr를 치환 전에 미리 클론 (치환 후 원본 런이 제거될 수 있으므로)
+          const preRun  = Array.from(itPara.getElementsByTagNameNS(A_NS, 'r'))[0]
+          const baseRPr = preRun
+            ? (preRun.getElementsByTagNameNS(A_NS, 'rPr')[0] || null)
+            : null
+          const baseRPrClone = baseRPr ? baseRPr.cloneNode(true) : null
+
+          // ② 첫 줄로 [IT경력] 치환
           replaceLabelInParagraphNorm(itPara, '[IT경력]', itLines[0])
-          // ② 나머지 줄: <a:br> + 런 추가
-          if (itLines.length > 1) {
-            const itDoc   = itPara.ownerDocument
-            const baseRun = Array.from(itPara.getElementsByTagNameNS(A_NS, 'r'))[0]
-            const baseRPr = baseRun ? baseRun.getElementsByTagNameNS(A_NS, 'rPr')[0] : null
-            for (let li = 1; li < itLines.length; li++) {
-              const br   = itDoc.createElementNS(A_NS, 'a:br')
-              const brPr = itDoc.createElementNS(A_NS, 'a:rPr')
-              if (baseRPr) Array.from(baseRPr.attributes).forEach(a => brPr.setAttribute(a.name, a.value))
-              br.appendChild(brPr)
-              itPara.appendChild(br)
-              const r  = itDoc.createElementNS(A_NS, 'a:r')
-              const rPr = itDoc.createElementNS(A_NS, 'a:rPr')
-              if (baseRPr) {
-                Array.from(baseRPr.attributes).forEach(a => rPr.setAttribute(a.name, a.value))
-                Array.from(baseRPr.childNodes).forEach(c => rPr.appendChild(c.cloneNode(true)))
-              }
-              const t = itDoc.createElementNS(A_NS, 'a:t')
-              t.textContent = itLines[li]
-              r.appendChild(rPr)
-              r.appendChild(t)
-              itPara.appendChild(r)
+
+          // ③ 나머지 줄: <a:br> + 런 추가
+          const itDoc = itPara.ownerDocument
+          for (let li = 1; li < itLines.length; li++) {
+            const br   = itDoc.createElementNS(A_NS, 'a:br')
+            const brPr = itDoc.createElementNS(A_NS, 'a:rPr')
+            if (baseRPrClone) Array.from(baseRPrClone.attributes).forEach(a => brPr.setAttribute(a.name, a.value))
+            br.appendChild(brPr)
+            itPara.appendChild(br)
+            const r   = itDoc.createElementNS(A_NS, 'a:r')
+            const rPr = itDoc.createElementNS(A_NS, 'a:rPr')
+            if (baseRPrClone) {
+              Array.from(baseRPrClone.attributes).forEach(a => rPr.setAttribute(a.name, a.value))
+              Array.from(baseRPrClone.childNodes).forEach(c => rPr.appendChild(c.cloneNode(true)))
             }
+            const t = itDoc.createElementNS(A_NS, 'a:t')
+            t.textContent = itLines[li]
+            r.appendChild(rPr)
+            r.appendChild(t)
+            itPara.appendChild(r)
           }
 
-          // ③ 컬러런 적용
-          // 단락 childNodes를 순회하면서 a:br 만날 때마다 lineIdx++
-          // 각 a:r 의 텍스트를 [ xxx ] 기준으로 키워드/나머지 분리 후 런 교체
+          // ④ 컬러런 적용: childNodes 스냅샷 순회, a:br 기준 lineIdx 카운트
+          // 색상: [ xxx ] → #1655A2(파랑), 0행 나머지→#E60012, 1행→#1655A2, 2행~→#404040
           ;(function applyItColors(pEl) {
             const doc = pEl.ownerDocument
 
@@ -2257,7 +2257,6 @@ async function buildPhotoPptxFromTemplate(pages, templateZips) {
               return sf
             }
 
-            // rPr 복사 후 solidFill만 교체한 새 런 생성
             function makeColorRun(text, hex, srcRPr) {
               const r   = doc.createElementNS(A_NS, 'a:r')
               const rPr = doc.createElementNS(A_NS, 'a:rPr')
@@ -2276,8 +2275,7 @@ async function buildPhotoPptxFromTemplate(pages, templateZips) {
             }
 
             let lineIdx = 0
-            // childNodes 스냅샷 (처리 중 DOM 변경되므로)
-            const nodes = Array.from(pEl.childNodes)
+            const nodes = Array.from(pEl.childNodes)  // 스냅샷
             nodes.forEach(node => {
               if (node.localName === 'br') { lineIdx++; return }
               if (node.localName !== 'r') return
@@ -2287,12 +2285,11 @@ async function buildPhotoPptxFromTemplate(pages, templateZips) {
               const text = tEl.textContent || ''
               const rPr  = node.getElementsByTagNameNS(A_NS, 'rPr')[0]
 
-              const KW_COLOR   = '1655A2'
-              const restColor  = lineIdx === 0 ? 'E60012' : lineIdx === 1 ? '1655A2' : '404040'
+              const KW_COLOR  = '1655A2'
+              const restColor = lineIdx === 0 ? 'E60012' : lineIdx === 1 ? '1655A2' : '404040'
 
               const bracketEnd = text.indexOf(']')
               if (bracketEnd !== -1 && text.trimStart().startsWith('[')) {
-                // [ xxx ] 키워드 + 나머지 분리
                 const kwText   = text.slice(0, bracketEnd + 1)
                 const restText = text.slice(bracketEnd + 1)
                 const anchor   = node.nextSibling
@@ -2301,7 +2298,6 @@ async function buildPhotoPptxFromTemplate(pages, templateZips) {
                 if (kwText)   parent.insertBefore(makeColorRun(kwText,   KW_COLOR,  rPr), anchor)
                 if (restText) parent.insertBefore(makeColorRun(restText, restColor, rPr), anchor)
               } else {
-                // 키워드 없음 — rPr solidFill만 교체
                 if (rPr) {
                   const old = rPr.getElementsByTagNameNS(A_NS, 'solidFill')[0]
                   if (old) rPr.removeChild(old)
