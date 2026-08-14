@@ -1620,63 +1620,51 @@ async function buildPhotoPptxFromTemplate(pages, templateZips) {
   }
 
   // ── IT경력 컬러런 치환 ─────────────────────────────────────────
-  // [IT경력] 플레이스홀더 단락을 여러 행으로 분리하고 행별 색상 적용
-  // 행 구분자: '\n' 또는 데이터 내 줄바꿈
+  // 전략: replaceLabelInParagraphNorm으로 [IT경력] → 첫 줄 텍스트 치환 후
+  //       나머지 줄은 <a:br>+런으로 뒤에 추가, 각 런에 색상 서식 적용
   // 색상 규칙:
   //   1행: [ 키워드 ] → #1655A2, 나머지 → #E60012
   //   2행: [ 키워드 ] → #1655A2, 나머지 → #1655A2
-  //   3행~: [ 키워드 ] → #1655A2, 나머지 → #404040 + KoPub돋움체 Medium
+  //   3행~: [ 키워드 ] → #1655A2, 나머지 → #404040
   function replaceItCareerWithColorRuns(pEl, label, value) {
     if (!value) {
-      // 값 없으면 단락 비우기
       replaceLabelInParagraphNorm(pEl, label, '')
       return
     }
-    // 원본 단락에서 서식 참조용 런 하나 찾기
-    const runs = Array.from(pEl.getElementsByTagNameNS(A_NS, 'r'))
-    if (!runs.length) return
 
-    // 기준 런의 rPr 클론 (폰트 크기, 볼드 등 기본 서식 유지)
-    const baseRun = runs[0]
-    const baseRPr = baseRun.getElementsByTagNameNS(A_NS, 'rPr')[0]
-
-    // 기존 런 모두 제거
-    runs.forEach(r => { if (r.parentNode) r.parentNode.removeChild(r) })
-
-    // 줄 분리: \n 기준
     const lines = value.split('\n').filter(l => l.trim())
+    if (!lines.length) {
+      replaceLabelInParagraphNorm(pEl, label, '')
+      return
+    }
 
+    // ① [IT경력] → 첫 줄 텍스트로 치환 (기존 런 구조 보존)
+    replaceLabelInParagraphNorm(pEl, label, lines[0])
+
+    // ② 치환 후 단락의 모든 런 수집 (기준 서식용)
+    const allRuns = Array.from(pEl.getElementsByTagNameNS(A_NS, 'r'))
+    const baseRun = allRuns[0]
+    const baseRPr = baseRun ? baseRun.getElementsByTagNameNS(A_NS, 'rPr')[0] : null
     const doc = pEl.ownerDocument
 
     function makeSolidFill(hexColor) {
       const solidFill = doc.createElementNS(A_NS, 'a:solidFill')
-      const srgbClr = doc.createElementNS(A_NS, 'a:srgbClr')
+      const srgbClr   = doc.createElementNS(A_NS, 'a:srgbClr')
       srgbClr.setAttribute('val', hexColor)
       solidFill.appendChild(srgbClr)
       return solidFill
     }
 
-    function makeRun(text, hexColor, fontName) {
-      const r = doc.createElementNS(A_NS, 'a:r')
+    function makeRun(text, hexColor) {
+      const r   = doc.createElementNS(A_NS, 'a:r')
       const rPr = doc.createElementNS(A_NS, 'a:rPr')
-      // 기본 서식 복사
       if (baseRPr) {
         Array.from(baseRPr.attributes).forEach(attr => rPr.setAttribute(attr.name, attr.value))
-        // solidFill 제외한 자식 복사 (폰트 크기 등)
         Array.from(baseRPr.childNodes).forEach(child => {
-          if (child.localName !== 'solidFill' && child.localName !== 'latin') {
-            rPr.appendChild(child.cloneNode(true))
-          }
+          if (child.localName !== 'solidFill') rPr.appendChild(child.cloneNode(true))
         })
       }
-      // 색상 적용
       rPr.appendChild(makeSolidFill(hexColor))
-      // 폰트 적용 (3행~: KoPub돋움체 Medium)
-      if (fontName) {
-        const latin = doc.createElementNS(A_NS, 'a:latin')
-        latin.setAttribute('typeface', fontName)
-        rPr.appendChild(latin)
-      }
       const t = doc.createElementNS(A_NS, 'a:t')
       t.textContent = text
       r.appendChild(rPr)
@@ -1684,37 +1672,66 @@ async function buildPhotoPptxFromTemplate(pages, templateZips) {
       return r
     }
 
-    // 행별 런 생성 및 단락에 추가
-    // 키워드: [ xxx ] 패턴 — 첫 번째 ] 이전까지
-    // 나머지: ] 이후 텍스트
-    lines.forEach((line, lineIdx) => {
-      // 줄바꿈 런 (첫 행 제외)
-      if (lineIdx > 0) {
-        const brRun = doc.createElementNS(A_NS, 'a:br')
-        const brRPr = doc.createElementNS(A_NS, 'a:rPr')
-        if (baseRPr) Array.from(baseRPr.attributes).forEach(attr => brRPr.setAttribute(attr.name, attr.value))
-        brRun.appendChild(brRPr)
-        pEl.appendChild(brRun)
-      }
+    function makeBr() {
+      const br   = doc.createElementNS(A_NS, 'a:br')
+      const brPr = doc.createElementNS(A_NS, 'a:rPr')
+      if (baseRPr) Array.from(baseRPr.attributes).forEach(attr => brPr.setAttribute(attr.name, attr.value))
+      br.appendChild(brPr)
+      return br
+    }
 
-      // 키워드/나머지 분리
+    // ③ 첫 줄 런에 색상 적용
+    function applyColorToLine(lineRuns, lineIdx) {
+      // lineRuns: 해당 줄에 속하는 런 배열
+      // 첫 런의 텍스트가 [ xxx ] 시작이면 키워드 색, 나머지 런은 rest 색
+      const kwColor   = '1655A2'
+      const restColor = lineIdx === 0 ? 'E60012' : lineIdx === 1 ? '1655A2' : '404040'
+      // 전체 텍스트 concat으로 키워드 분리
+      const fullText = lineRuns.map(r => {
+        const t = r.getElementsByTagNameNS(A_NS, 't')[0]
+        return t ? t.textContent : ''
+      }).join('')
+      const bracketEnd = fullText.indexOf(']')
+      if (bracketEnd !== -1 && fullText.startsWith('[')) {
+        // 키워드 부분과 나머지 부분을 런 2개로 교체
+        const kwText   = fullText.slice(0, bracketEnd + 1)
+        const restText = fullText.slice(bracketEnd + 1)
+        // 기존 런 제거 후 새 런 삽입
+        const parent = lineRuns[0].parentNode
+        const anchor = lineRuns[lineRuns.length - 1].nextSibling
+        lineRuns.forEach(r => parent.removeChild(r))
+        if (kwText)   parent.insertBefore(makeRun(kwText,   kwColor),   anchor)
+        if (restText) parent.insertBefore(makeRun(restText, restColor), anchor)
+      } else {
+        // 키워드 없음 — 전체 rest 색
+        lineRuns.forEach(r => {
+          const rPr = r.getElementsByTagNameNS(A_NS, 'rPr')[0]
+          if (rPr) {
+            const existing = rPr.getElementsByTagNameNS(A_NS, 'solidFill')[0]
+            if (existing) rPr.removeChild(existing)
+            rPr.appendChild(makeSolidFill(restColor))
+          }
+        })
+      }
+    }
+
+    // 첫 줄: 치환 후 존재하는 모든 런이 첫 줄
+    applyColorToLine(Array.from(pEl.getElementsByTagNameNS(A_NS, 'r')), 0)
+
+    // ④ 나머지 줄: <a:br> + 런 추가
+    for (let i = 1; i < lines.length; i++) {
+      const line = lines[i]
       const bracketEnd = line.indexOf(']')
-      let kwText = '', restText = line
-      if (bracketEnd !== -1) {
-        kwText = line.slice(0, bracketEnd + 1)   // [ xxx ]
-        restText = line.slice(bracketEnd + 1)     // 나머지
+      const restColor  = i === 1 ? '1655A2' : '404040'
+      const kwColor    = '1655A2'
+      pEl.appendChild(makeBr())
+      if (bracketEnd !== -1 && line.startsWith('[')) {
+        pEl.appendChild(makeRun(line.slice(0, bracketEnd + 1), kwColor))
+        if (line.slice(bracketEnd + 1)) pEl.appendChild(makeRun(line.slice(bracketEnd + 1), restColor))
+      } else {
+        pEl.appendChild(makeRun(line, restColor))
       }
-
-      const rowIdx = lineIdx  // 0-based
-      const kwColor = '#1655A2'
-      let restColor, fontName
-      if (rowIdx === 0) { restColor = 'E60012'; }
-      else if (rowIdx === 1) { restColor = '1655A2'; }
-      else { restColor = '404040'; fontName = 'KoPub돋움체 Medium' }
-
-      if (kwText) pEl.appendChild(makeRun(kwText, kwColor, rowIdx >= 2 ? fontName : undefined))
-      if (restText) pEl.appendChild(makeRun(restText, restColor, fontName))
-    })
+    }
   }
 
   // ── 런(run) 분산 placeholder 치환 엔진 ──────────────────────────
@@ -2189,9 +2206,12 @@ async function buildPhotoPptxFromTemplate(pages, templateZips) {
         }
       }
 
-      // [IT경력] — 컬러런 적용 (행별 색상 규칙)
+      // [IT경력] — 텍스트 치환 (줄바꿈은 \n → 단일 런에 삽입, 색상 서식 제거)
       const itPara = labelMap['[IT경력]']
-      if (itPara) replaceItCareerWithColorRuns(itPara, '[IT경력]', pr.IT경력 || '')
+      if (itPara) {
+        const itValue = (pr.IT경력 || '').replace(/\n/g, ' / ')
+        replaceLabelInParagraphNorm(itPara, '[IT경력]', itValue)
+      }
     }
 
     // ── 슬라이드 XML 저장 ──
