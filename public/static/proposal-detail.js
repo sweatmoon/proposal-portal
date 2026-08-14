@@ -1476,8 +1476,10 @@ const SLOT_BOUNDARIES = {
   4: { colBounds: [5_000_000], rowBounds: [3_500_000] },
   // 6인: 2행 3열 — x 경계 2,700,000 / 5,400,000 / y 경계 3,060,000
   6: { colBounds: [2_700_000, 5_400_000], rowBounds: [3_060_000] },
-  // 9인: 3행 3열 — x 경계 2,500,000 / 5,500,000 / y 경계 2,200,000 / 4,000,000
-  9: { colBounds: [2_500_000, 5_500_000], rowBounds: [2_200_000, 4_000_000] },
+  // 9인: 3행 3열 — x 경계 2,500,000 / 5,500,000
+  //   y 경계: row0 [주요이력] bottom(2,127,624) ~ row1 [분야] top(2,983,452) 중간값 → 2,555,538
+  //            row1 [주요이력] bottom(3,842,662) ~ row2 [분야] top(4,689,625) 중간값 → 4,266,143
+  9: { colBounds: [2_500_000, 5_500_000], rowBounds: [2_555_538, 4_266_143] },
 }
 
 // sp 요소 하나를 받아 0-based 슬롯 인덱스 반환 (sp 자체 좌표 사용)
@@ -2012,7 +2014,10 @@ async function buildPhotoPptxFromTemplate(pages, templateZips) {
       if (xf) xfrmOf.set(el, xf)
     })
 
-    // ── 슬롯별 shape 귀속: xfrmOf 캐시의 중앙 좌표 → 슬롯 인덱스(0-based) ──
+    // ── 슬롯별 shape 귀속: sp 좌측 x / 상단 y 기준으로 슬롯 인덱스 결정 ──
+    // center_x 사용 시 [주요이력] sp(폭이 col 경계를 넘어감)가 인접 슬롯으로 오귀속됨
+    // center_y 사용 시 [키워드][사업명] sp(y 자체가 row 경계 아래)가 다음 row로 오귀속됨
+    // → x: sp 좌측 좌표, y: sp 상단 좌표로 판별하면 9인 장표 36개 shape 모두 정상 귀속
     const N = meta.rows * meta.cols
     const bounds = SLOT_BOUNDARIES[size]
     // slotShapes[slotIdx] = 해당 슬롯에 속하는 shape 요소 배열
@@ -2020,10 +2025,8 @@ async function buildPhotoPptxFromTemplate(pages, templateZips) {
     shapeEls.forEach(el => {
       const xf = xfrmOf.get(el)
       if (!xf || !bounds) return
-      const cx = xf.x + xf.w / 2  // 중앙 x
-      const cy = xf.y + xf.h / 2  // 중앙 y
-      const col = bounds.colBounds.filter(b => cx >= b).length
-      const row = bounds.rowBounds.filter(b => cy >= b).length
+      const col = bounds.colBounds.filter(b => xf.x >= b).length  // 좌측 x 기준
+      const row = bounds.rowBounds.filter(b => xf.y >= b).length  // 상단 y 기준
       const cols = bounds.colBounds.length + 1
       const si = row * cols + col
       if (si >= 0 && si < N) slotShapes[si].push(el)
