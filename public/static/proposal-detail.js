@@ -2054,18 +2054,11 @@ async function buildPhotoPptxFromTemplate(pages, templateZips) {
     // 슬롯 sp 스코프로 수집하므로 다른 슬롯 단락과 절대 섞이지 않음
     const preFetchedParasBySlot = Array.from({ length: N }, (_, si) => {
       const labelMap = {}
-      ALL_LABELS.forEach(label => {
-        for (const el of slotShapes[si]) {
-          if (el.localName !== 'sp') continue
-          const paras = Array.from(el.getElementsByTagNameNS(A_NS, 'p'))
-          const found = paras.find(p => paraMatchesLabel(p, label))
-          if (found) { labelMap[label] = found; break }
-        }
-        if (!labelMap[label]) labelMap[label] = null
-      })
-      // [키워드]/[사업명] 또는 [분야]/[사업명]: 같은 sp에 행별 단락이 모여있음
-      // → '_jeokRows'에 해당 sp의 단락 배열 전체를 저장
+
+      // ① _jeokRows / _jeokFormat 탐지를 먼저 수행
+      // → [분야] ALL_LABELS 탐색 시 이력 sp를 제외해야 하므로 순서 중요
       // → '_jeokFormat': 'keyword'([키워드] 형식) | 'domain'([분야] 형식)
+      let jeokSp = null  // 이력 sp 참조 (중복 탐색 방지용)
       for (const el of slotShapes[si]) {
         if (el.localName !== 'sp') continue
         const paras = Array.from(el.getElementsByTagNameNS(A_NS, 'p'))
@@ -2073,6 +2066,7 @@ async function buildPhotoPptxFromTemplate(pages, templateZips) {
         const hasDomainFormat = paras.some(p => paraMatchesLabel(p, '[분야]'))
                              && paras.some(p => paraMatchesLabel(p, '[사업명]'))
         if (hasKwFormat || hasDomainFormat) {
+          jeokSp = el
           labelMap['_jeokRows']   = paras
           labelMap['_jeokFormat'] = hasKwFormat ? 'keyword' : 'domain'
           break
@@ -2080,6 +2074,21 @@ async function buildPhotoPptxFromTemplate(pages, templateZips) {
       }
       if (!labelMap['_jeokRows'])   labelMap['_jeokRows']   = null
       if (!labelMap['_jeokFormat']) labelMap['_jeokFormat'] = 'keyword'
+
+      // ② ALL_LABELS 탐색 — domain 형식일 때 [분야]는 이력 sp(jeokSp) 제외하고 탐색
+      // → 헤더 sp의 [분야] 단락만 labelMap['[분야]']에 저장
+      ALL_LABELS.forEach(label => {
+        for (const el of slotShapes[si]) {
+          if (el.localName !== 'sp') continue
+          // domain 형식의 [분야] 라벨: 이력 sp는 건너뜀 (헤더 sp만 탐색)
+          if (label === '[분야]' && labelMap['_jeokFormat'] === 'domain' && el === jeokSp) continue
+          const paras = Array.from(el.getElementsByTagNameNS(A_NS, 'p'))
+          const found = paras.find(p => paraMatchesLabel(p, label))
+          if (found) { labelMap[label] = found; break }
+        }
+        if (!labelMap[label]) labelMap[label] = null
+      })
+
       return labelMap
     })
 
@@ -2108,12 +2117,8 @@ async function buildPhotoPptxFromTemplate(pages, templateZips) {
       const labelMap = preFetchedParasBySlot[si]
 
       // 단순 텍스트 치환 필드
-      // domain 형식([분야] [사업명])의 경우 [분야] 라벨이 이력 sp 안에 존재하므로
-      // directMap에서 헤더용 [분야] 단락과 이력 sp의 [분야] 단락이 충돌할 수 있음
-      // → domain 형식일 때 labelMap['[분야]']를 null로 처리해 직접 치환을 막음
-      //   (이력 sp의 [분야] 치환은 _jeokRows 루프에서 처리)
       const directMap = {
-        '[분야]':       (labelMap['_jeokFormat'] === 'domain') ? null : (person.field || ''),
+        '[분야]':       person.field || '',
         '[이름]':       person.name  || '',
         '[감리원등급]':  person.grade || '',
         '[자격구분]':   pr.자격구분   || '',
@@ -2125,7 +2130,6 @@ async function buildPhotoPptxFromTemplate(pages, templateZips) {
         '[주요이력]':   pr.주요이력   || '',
       }
       Object.entries(directMap).forEach(([label, value]) => {
-        if (value === null) return   // domain 형식 [분야] 헤더 충돌 방지 — skip
         const para = labelMap[label]
         if (para) replaceLabelInParagraphNorm(para, label, value)
       })

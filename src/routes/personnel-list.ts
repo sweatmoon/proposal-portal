@@ -405,11 +405,25 @@ app.get('/:id/photo-profile', async (c) => {
     return `${kwLabel}${org}${h.project_name}`
   })
 
+  // 분야: proposal_members.domain 우선, 없으면 이력 행 domain에서 최빈값 추출
+  const memberDomainRaw = String(member?.domain ?? '').trim()
+  let 분야 = memberDomainRaw
+  if (!분야) {
+    // 실적 상위 10건의 domain 값에서 최빈값 fallback
+    const domainFreq: Record<string, number> = {}
+    rawRows.slice(0, 10).forEach(h => {
+      const d = String(h.domain ?? '').trim()
+      if (d) domainFreq[d] = (domainFreq[d] || 0) + 1
+    })
+    const topDomain = Object.entries(domainFreq).sort((a, b) => b[1] - a[1])[0]
+    if (topDomain) 분야 = topDomain[0]
+  }
+
   return c.json({
     ok: true,
     data: {
       이름:      member?.person_name ?? person.name,
-      분야:      member?.domain      ?? '',
+      분야,
       등급:      member?.auditor_grade ?? '',
       자격구분,
       자격요약:  person.career_qualif  ?? '',
