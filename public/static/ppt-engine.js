@@ -617,24 +617,36 @@ async function generateMenuPpt(menu, vm) {
       result = await downloadPhotoAssignPptx(null, { returnZip: true, menuCode: 'EXPERT_PROFILE' });
       break;
 
-    // ── 표장표 2종 ─────────────────────────────────────────────────
-    // 3.4 감리원별 유사 감리 실적 및 경력·자격
+    // ── 감리원/전문가 실적·경력·자격 장표 (플레이스홀더 방식) ──────
+    // 3.4 감리원별 유사 감리 실적 및 경력·자격 (1장=2명)
     case 'AUDITOR_HISTORY': {
       const _tpls = Array.isArray(menu.templates) ? menu.templates : [];
       const _tpl  = _tpls.find(t => t.pptx_b64_key) || null;
       console.log('[PptEngine] AUDITOR_HISTORY templates:', _tpls.length, '개, 템플릿 b64:', _tpl ? '있음(길이:'+_tpl.pptx_b64_key.length+')' : 'null');
       const _title_AH = [menu.menu_number, menu.menu_name].filter(Boolean).join(' ');
-      result = await downloadAssignPptx(null, { returnZip: true, groupFilter: 'AUDITOR', templateB64: _tpl ? _tpl.pptx_b64_key : null, menuTitle: _title_AH });
+      result = await buildHistoryPptx({
+        returnZip: true,
+        groupFilter: 'AUDITOR',
+        perPage: 2,
+        templateB64: _tpl ? _tpl.pptx_b64_key : null,
+        menuTitle: _title_AH,
+      });
       break;
     }
 
-    // 3.5 전문가별 유사 감리 실적 및 경력·자격
+    // 3.5 전문가별 유사 감리 실적 및 경력·자격 (1장=4명)
     case 'EXPERT_HISTORY': {
       const _tpls = Array.isArray(menu.templates) ? menu.templates : [];
       const _tpl  = _tpls.find(t => t.pptx_b64_key) || null;
       console.log('[PptEngine] EXPERT_HISTORY templates:', _tpls.length, '개, 템플릿 b64:', _tpl ? '있음(길이:'+_tpl.pptx_b64_key.length+')' : 'null');
       const _title_EH = [menu.menu_number, menu.menu_name].filter(Boolean).join(' ');
-      result = await downloadAssignPptx(null, { returnZip: true, groupFilter: 'EXPERT', templateB64: _tpl ? _tpl.pptx_b64_key : null, menuTitle: _title_EH });
+      result = await buildHistoryPptx({
+        returnZip: true,
+        groupFilter: 'EXPERT',
+        perPage: 4,
+        templateB64: _tpl ? _tpl.pptx_b64_key : null,
+        menuTitle: _title_EH,
+      });
       break;
     }
 
