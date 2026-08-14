@@ -1105,7 +1105,7 @@ async function buildHistoryPptx(opts) {
     const list = [
       `[P${n}_단계]`, `[P${n}_분야]`, `[P${n}_소속]`, `[P${n}_이름]`,
       `[P${n}_번호]`, `[P${n}_구분]`, `[P${n}_투입]`,
-      `[P${n}_감리횟수]`, `[P${n}_IT경력]`,
+      `[P${n}_감리횟수]`, `[P${n}_IT경력기간]`,
       `[P${n}_주요이력]`,
     ]
     for (let i = 1; i <= 10; i++) list.push(`[P${n}_감리이력${i}]`)
@@ -1126,9 +1126,9 @@ async function buildHistoryPptx(opts) {
         [`[P${n}_번호]`]:    r.certDisplay || '',
         [`[P${n}_구분]`]:    r.grade || '',
         [`[P${n}_투입]`]:    '100%',
-        // 요약행: 템플릿에 "유사 감리 실적 : [P1_감리횟수]건 / 감리 이외의 경력 : [P1_IT경력]" 형태로 기재
+        // 요약행: 템플릿에 "유사 감리 실적 : [P1_감리횟수]건 / 감리 이외의 경력 : [P1_IT경력기간]" 형태로 기재
         [`[P${n}_감리횟수]`]: prof.감리횟수 != null ? String(prof.감리횟수) : '-',
-        [`[P${n}_IT경력]`]:   parseCareerDuration(prof.IT경력기간) || '-',
+        [`[P${n}_IT경력기간]`]:   parseCareerDuration(prof.IT경력기간) || '-',
         // 주요이력: photo-profile의 주요이력(career_expert) 그대로
         [`[P${n}_주요이력]`]: prof.주요이력 || '',
       }
