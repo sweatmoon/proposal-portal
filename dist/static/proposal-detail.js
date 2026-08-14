@@ -548,13 +548,11 @@ async function downloadAssignPptx(btn, opts) {
     } else if (opts.groupFilter === 'EXPERT') {
       rows = rows.filter(r => !r.isAudit)
     }
-    const pres = new PptxGenJS(); pres.layout = 'LAYOUT_WIDE'
     const FONT_BOLD = 'KoPub돋움체 Bold', FONT_MEDIUM = 'KoPub돋움체 Medium'
     const bd = { pt: 0.5, color: '969696' }, bd0 = { type: 'none' }
     const bMid = [bd, bd, bd, bd], bLeft = [bd, bd, bd, bd0], bRight = [bd, bd0, bd, bd]
     const base = e => Object.assign({ align: 'center', valign: 'middle', margin: [0.05, 0.05, 0.05, 0.05] }, e)
     const headFill = { color: '1A2E4A' }
-    const sld = pres.addSlide()
     const tRows = [[
       { text: '성명', options: base({ fontFace: FONT_BOLD, fontSize: 10, color: 'FFFFFF', fill: headFill, border: bLeft }) },
       { text: '구분', options: base({ fontFace: FONT_BOLD, fontSize: 10, color: 'FFFFFF', fill: headFill, border: bMid }) },
@@ -577,14 +575,127 @@ async function downloadAssignPptx(btn, opts) {
     })
     const rowH = new Array(tRows.length).fill(0.28); rowH[0] = 0.2
     const colW = [0.8, 0.8, 2.2, 1.2, 1.2, 0.9, 0.9]
-    sld.addTable(tRows, { x: 0.4, y: 0.5, w: colW.reduce((a, b) => a + b, 0), colW, rowH })
-    if (opts.returnZip) {
-      const ab = await pres.write({ outputType: 'arraybuffer' })
-      const z = new JSZip(); await z.loadAsync(ab); return { zip: z }
+
+    // ── 템플릿 오버레이 분기 ────────────────────────────────────────
+    if (opts.templateB64) {
+      // [A] 템플릿 PPTX가 있는 경우
+      // 1. PptxGenJS로 테이블만 있는 임시 PPTX 생성 (첫 슬라이드만 사용)
+      const presTemp = new PptxGenJS(); presTemp.layout = 'LAYOUT_WIDE'
+      const sldTemp = presTemp.addSlide()
+      sldTemp.addTable(tRows, { x: 0.4, y: 0.5, w: colW.reduce((a, b) => a + b, 0), colW, rowH })
+      const tempAb = await presTemp.write({ outputType: 'arraybuffer' })
+      const tempZip = new JSZip(); await tempZip.loadAsync(tempAb)
+
+      // 2. 테이블 슬라이드 XML 추출 (PptxGenJS가 생성한 slide1.xml)
+      const tableSlideXml = await tempZip.file('ppt/slides/slide1.xml').async('string')
+
+      // 3. 템플릿 PPTX 로드
+      const bin = atob(opts.templateB64)
+      const bytes = new Uint8Array(bin.length)
+      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i)
+      const tplZip = await JSZip.loadAsync(bytes)
+
+      // 4. 템플릿의 슬라이드 파일 목록 파악
+      const tplSlideFiles = Object.keys(tplZip.files)
+        .filter(f => /^ppt\/slides\/slide\d+\.xml$/.test(f))
+        .sort((a, b) => {
+          const na = parseInt(a.match(/slide(\d+)/)[1])
+          const nb = parseInt(b.match(/slide(\d+)/)[1])
+          return na - nb
+        })
+
+      if (tplSlideFiles.length > 0) {
+        // 5. 템플릿 첫 슬라이드를 테이블 XML로 교체
+        //    단, 템플릿 슬라이드의 배경/레이아웃 관계는 유지해야 하므로
+        //    PptxGenJS가 생성한 XML 안의 <p:sp> (도형) 요소들을 교체 방식으로 처리:
+        //    템플릿 슬라이드 XML에서 <p:spTree> 내부를 테이블 슬라이드의 <p:spTree> 내부로 교체
+        const tplFirstSlide = tplSlideFiles[0]
+        let tplSlideXml = await tplZip.file(tplFirstSlide).async('string')
+
+        // PptxGenJS 테이블 XML에서 <p:spTree> 내용 추출
+        const treeMatch = tableSlideXml.match(/<p:spTree>([\s\S]*?)<\/p:spTree>/)
+        if (treeMatch) {
+          // 템플릿 슬라이드의 <p:spTree> 내용을 테이블로 교체
+          tplSlideXml = tplSlideXml.replace(/<p:spTree>[\s\S]*?<\/p:spTree>/, `<p:spTree>${treeMatch[1]}</p:spTree>`)
+          tplZip.file(tplFirstSlide, tplSlideXml)
+        } else {
+          // spTree 교체 실패 시: 슬라이드 파일 전체를 교체
+          tplZip.file(tplFirstSlide, tableSlideXml)
+        }
+
+        // 6. 템플릿에 슬라이드가 2개 이상이면 나머지 슬라이드 삭제
+        //    (표장표는 1장만 필요)
+        for (let i = 1; i < tplSlideFiles.length; i++) {
+          tplZip.remove(tplSlideFiles[i])
+          // 관계 파일도 삭제
+          const relFile = tplSlideFiles[i].replace('ppt/slides/', 'ppt/slides/_rels/') + '.rels'
+          if (tplZip.file(relFile)) tplZip.remove(relFile)
+        }
+
+        // 7. [Content_Types].xml에서 삭제된 슬라이드 참조 제거
+        if (tplSlideFiles.length > 1) {
+          const ctXml = await tplZip.file('[Content_Types].xml').async('string')
+          let newCtXml = ctXml
+          for (let i = 1; i < tplSlideFiles.length; i++) {
+            const slideNum = tplSlideFiles[i].match(/slide(\d+)/)[1]
+            const re = new RegExp(`<Override[^>]*PartName="[^"]*slide${slideNum}\\.xml"[^>]*/?>`, 'g')
+            newCtXml = newCtXml.replace(re, '')
+          }
+          tplZip.file('[Content_Types].xml', newCtXml)
+        }
+
+        // 8. ppt/_rels/presentation.xml.rels 에서 삭제된 슬라이드 관계 제거
+        if (tplSlideFiles.length > 1) {
+          const presRelsFile = 'ppt/_rels/presentation.xml.rels'
+          if (tplZip.file(presRelsFile)) {
+            let presRelsXml = await tplZip.file(presRelsFile).async('string')
+            for (let i = 1; i < tplSlideFiles.length; i++) {
+              const slideNum = tplSlideFiles[i].match(/slide(\d+)/)[1]
+              const re = new RegExp(`<Relationship[^>]*Target="slides/slide${slideNum}\\.xml"[^>]*/?>`, 'g')
+              presRelsXml = presRelsXml.replace(re, '')
+            }
+            tplZip.file(presRelsFile, presRelsXml)
+          }
+          // ppt/presentation.xml 에서 sldIdLst 항목도 정리
+          if (tplZip.file('ppt/presentation.xml')) {
+            let presXml = await tplZip.file('ppt/presentation.xml').async('string')
+            // presentation.xml의 sldId 목록에서 남은 슬라이드 개수만큼만 유지
+            // (간단하게: 첫 번째 sldId만 남기고 나머지 제거)
+            presXml = presXml.replace(/(<p:sldIdLst>)([\s\S]*?)(<\/p:sldIdLst>)/, (full, open, inner, close) => {
+              const allIds = [...inner.matchAll(/<p:sldId[^/]*/g)]
+              if (allIds.length <= 1) return full
+              // 첫 번째만 남김
+              const firstMatch = inner.match(/<p:sldId[^/]*\/>/)
+              return open + (firstMatch ? firstMatch[0] : inner) + close
+            })
+            tplZip.file('ppt/presentation.xml', presXml)
+          }
+        }
+      }
+
+      if (opts.returnZip) return { zip: tplZip }
+      const finalAb = await tplZip.generateAsync({ type: 'arraybuffer', mimeType: 'application/vnd.openxmlformats-officedocument.presentationml.presentation' })
+      const blob = new Blob([finalAb], { type: 'application/vnd.openxmlformats-officedocument.presentationml.presentation' })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a'); a.href = url
+      a.download = '표장표_' + (parsedData.projectTitle || '').slice(0, 10) + '.pptx'
+      a.click(); URL.revokeObjectURL(url)
+      showAutoAlert('✅ 표장표 생성 완료', true)
+      return null
+
+    } else {
+      // [B] 템플릿 없는 경우 — 기존 PptxGenJS 빈 슬라이드 방식
+      const pres = new PptxGenJS(); pres.layout = 'LAYOUT_WIDE'
+      const sld = pres.addSlide()
+      sld.addTable(tRows, { x: 0.4, y: 0.5, w: colW.reduce((a, b) => a + b, 0), colW, rowH })
+      if (opts.returnZip) {
+        const ab = await pres.write({ outputType: 'arraybuffer' })
+        const z = new JSZip(); await z.loadAsync(ab); return { zip: z }
+      }
+      await pres.writeFile({ fileName: '표장표_' + (parsedData.projectTitle || '').slice(0, 10) + '.pptx' })
+      showAutoAlert('✅ 표장표 생성 완료', true)
+      return null
     }
-    await pres.writeFile({ fileName: '표장표_' + (parsedData.projectTitle || '').slice(0, 10) + '.pptx' })
-    showAutoAlert('✅ 표장표 생성 완료', true)
-    return null
   } catch (e) { showAutoAlert('❌ 생성 실패: ' + e.message, false); return null }
   finally { setBtnState(btn, false) }
 }
