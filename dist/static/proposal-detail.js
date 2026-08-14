@@ -2220,19 +2220,37 @@ async function buildPhotoPptxFromTemplate(pages, templateZips) {
         const baseRPrClone = baseRPr ? baseRPr.cloneNode(true) : null
 
         // pPr 클론 (단락 서식)
-        const basePPr      = itPara.getElementsByTagNameNS(A_NS, 'pPr')[0] ?? null
-        const basePPrClone = basePPr ? basePPr.cloneNode(true) : null
+        const basePPr        = itPara.getElementsByTagNameNS(A_NS, 'pPr')[0] ?? null
+        const basePPrClone   = basePPr ? basePPr.cloneNode(true) : null
+        // endParaRPr 클론 — schemeClr 기반 기본색이 런 색을 override하므로 첫 런 rPr로 교체
+        const baseEndRPr     = itPara.getElementsByTagNameNS(A_NS, 'endParaRPr')[0] ?? null
+        const baseEndRPrClone = baseEndRPr ? baseEndRPr.cloneNode(true) : null
 
         function makeItPara(line) {
           const p = itDoc.createElementNS(A_NS, 'a:p')
           if (basePPrClone) p.appendChild(basePPrClone.cloneNode(true))
-          if (!line) return p
-          const r   = itDoc.createElementNS(A_NS, 'a:r')
-          if (baseRPrClone) r.appendChild(baseRPrClone.cloneNode(true))
-          const t = itDoc.createElementNS(A_NS, 'a:t')
-          t.textContent = line
-          r.appendChild(t)
-          p.appendChild(r)
+          if (line) {
+            const r = itDoc.createElementNS(A_NS, 'a:r')
+            if (baseRPrClone) r.appendChild(baseRPrClone.cloneNode(true))
+            const t = itDoc.createElementNS(A_NS, 'a:t')
+            t.textContent = line
+            r.appendChild(t)
+            p.appendChild(r)
+          }
+          // endParaRPr: schemeClr 제거하고 첫 런과 동일한 solidFill(1655A2) 적용
+          if (baseEndRPrClone) {
+            const epr = baseEndRPrClone.cloneNode(true)
+            // schemeClr 기반 solidFill 제거
+            Array.from(epr.getElementsByTagNameNS(A_NS, 'solidFill')).forEach(sf => {
+              if (sf.parentNode === epr) epr.removeChild(sf)
+            })
+            // 첫 런 rPr의 solidFill 복사
+            if (baseRPrClone) {
+              const sf = baseRPrClone.getElementsByTagNameNS(A_NS, 'solidFill')[0]
+              if (sf) epr.appendChild(sf.cloneNode(true))
+            }
+            p.appendChild(epr)
+          }
           return p
         }
 
