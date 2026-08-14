@@ -660,29 +660,81 @@ async function generateMenuPpt(menu, vm) {
         // ── [제목] 플레이스홀더 → 목차명 치환 ──────────────────────
         // 목차명: menu_number + menu_name (예: "1.1 감리 수행 소식")
         const menuTitle = [menu.menu_number, menu.menu_name].filter(Boolean).join(' ');
-        const A_NS = 'http://schemas.openxmlformats.org/drawingml/2006/main';
-        const slideFiles = Object.keys(zip.files).filter(f => /^ppt\/slides\/slide\d+\.xml$/.test(f));
-        for (const slideFile of slideFiles) {
+        const slideFiles2 = Object.keys(zip.files).filter(f => /^ppt\/slides\/slide\d+\.xml$/.test(f));
+        for (const slideFile of slideFiles2) {
           let xml = await zip.file(slideFile).async('string');
-          if (!xml.includes('[제목]')) continue;
-          // DOMParser로 [제목] 런 치환
-          const doc = new DOMParser().parseFromString(xml, 'application/xml');
-          const paras = Array.from(doc.getElementsByTagNameNS(A_NS, 'p'));
-          for (const pEl of paras) {
-            const runs = Array.from(pEl.getElementsByTagNameNS(A_NS, 'r'));
-            const concat = runs.map(r => { const t = r.getElementsByTagNameNS(A_NS, 't')[0]; return t ? t.textContent : ''; }).join('');
-            if (!concat.includes('[제목]')) continue;
-            // 첫 번째 런에 목차명 넣고 나머지 런 제거
-            let remaining = concat.replace('[제목]', menuTitle);
-            let first = true;
-            for (const r of runs) {
-              const tEl = r.getElementsByTagNameNS(A_NS, 't')[0];
-              if (!tEl) continue;
-              if (first) { tEl.textContent = remaining; first = false; }
-              else { r.parentNode && r.parentNode.removeChild(r); }
+
+          // ── 디버그: 제목 관련 텍스트가 XML에 어떻게 저장됐는지 확인 ──
+          const tMatches = [...xml.matchAll(/<a:t[^>]*>([^<]*제[^<]*목[^<]*)<\/a:t>/g)];
+          const bracketMatches = [...xml.matchAll(/<a:t[^>]*>([^<]*[\[［\[제목\]]\[]\]]?[^<]*)<\/a:t>/g)].slice(0, 5);
+          if (tMatches.length || xml.includes('제목') || xml.includes('&#91;')) {
+            console.log('[PptEngine][DEBUG] slideFile:', slideFile);
+            console.log('[PptEngine][DEBUG] xml contains [제목]?', xml.includes('[제목]'));
+            console.log('[PptEngine][DEBUG] xml contains &#91;?', xml.includes('&#91;'));
+            console.log('[PptEngine][DEBUG] xml contains 제목?', xml.includes('제목'));
+            // 제목 주변 200자 덤프
+            const idx = xml.indexOf('제목');
+            if (idx >= 0) {
+              console.log('[PptEngine][DEBUG] 제목 주변 XML:', JSON.stringify(xml.substring(Math.max(0, idx-100), idx+100)));
             }
           }
-          zip.file(slideFile, new XMLSerializer().serializeToString(doc));
+
+          // Case 1: 단일 <a:t>에 [제목] 그대로 있는 경우
+          if (xml.includes('[제목]')) {
+            xml = xml.replace(/\[제목\]/g, menuTitle);
+            zip.file(slideFile, xml);
+            console.log('[PptEngine] [제목] 단순 치환 완료:', slideFile);
+            continue;
+          }
+
+          // Case 2: XML 이스케이프 — &#91;제목&#93; 형태
+          if (xml.includes('&#91;제목&#93;')) {
+            xml = xml.replace(/&#91;제목&#93;/g, menuTitle);
+            zip.file(slideFile, xml);
+            console.log('[PptEngine] [제목] XML이스케이프 치환 완료:', slideFile);
+            continue;
+          }
+
+          // Case 3: 전각 대괄호 ［제목］
+          if (xml.includes('［제목］')) {
+            xml = xml.replace(/［제목］/g, menuTitle);
+            zip.file(slideFile, xml);
+            console.log('[PptEngine] [제목] 전각괄호 치환 완료:', slideFile);
+            continue;
+          }
+
+          // Case 4: 분산 런 — <a:p> 블록 단위로 런 텍스트 이어붙여 처리
+          // 예: <a:r><a:t>[</a:t></a:r><a:r><a:t>제목</a:t></a:r><a:r><a:t>]</a:t></a:r>
+          if (xml.includes('제목')) {
+            const paraReg = /(<a:p\b[^>]*>)([\s\S]*?)(<\/a:p>)/g;
+            let paraChanged = false;
+            xml = xml.replace(paraReg, (full, open, inner, close) => {
+              // 런 텍스트 이어붙이기 (XML이스케이프 포함)
+              const runs = [];
+              inner.replace(/<a:r\b[\s\S]*?<\/a:r>/g, run => {
+                const t = run.match(/<a:t[^>]*>([\s\S]*?)<\/a:t>/);
+                runs.push({ run, text: t ? t[1] : '' });
+              });
+              const concat = runs.map(r => r.text).join('');
+              // 이스케이프된 형태도 함께 확인
+              const concatUnesc = concat.replace(/&#91;/g, '[').replace(/&#93;/g, ']');
+              if (!concatUnesc.includes('[제목]')) return full;
+
+              // 첫 번째 런에 전체 치환 텍스트 넣고 나머지 런 제거
+              let first = true;
+              const newInner = inner.replace(/<a:r\b[\s\S]*?<\/a:r>/g, run => {
+                if (first) {
+                  first = false;
+                  return run.replace(/(<a:t[^>]*>)[\s\S]*?(<\/a:t>)/, `$1${menuTitle}$2`);
+                }
+                return '';
+              });
+              paraChanged = true;
+              console.log('[PptEngine] [제목] 분산런 치환 완료:', slideFile, '| concat:', concat);
+              return open + newInner + close;
+            });
+            if (paraChanged) zip.file(slideFile, xml);
+          }
         }
 
         console.log('[PptEngine] 템플릿 삽입:', menu.menu_code, '-', tpl.pptx_file_path || tpl.template_name);
