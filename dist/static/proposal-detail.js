@@ -2231,16 +2231,24 @@ async function buildPhotoPptxFromTemplate(pages, templateZips) {
           return sf
         }
 
-        function makeItRun(text, hex) {
+        // hex: 색상, useBodyFont: true이면 KoPub돋움체 Medium 폰트 적용
+        function makeItRun(text, hex, useBodyFont) {
           const r   = itDoc.createElementNS(A_NS, 'a:r')
           const rPr = itDoc.createElementNS(A_NS, 'a:rPr')
           if (baseRPrClone) {
             Array.from(baseRPrClone.attributes).forEach(a => rPr.setAttribute(a.name, a.value))
             Array.from(baseRPrClone.childNodes).forEach(c => {
-              if (c.localName !== 'solidFill') rPr.appendChild(c.cloneNode(true))
+              // solidFill, latin 폰트는 새로 세팅하므로 복사 제외
+              if (c.localName !== 'solidFill' && c.localName !== 'latin') rPr.appendChild(c.cloneNode(true))
             })
           }
           rPr.appendChild(makeItSolidFill(hex))
+          if (useBodyFont) {
+            // KoPub돋움체 Medium 폰트 지정
+            const latin = itDoc.createElementNS(A_NS, 'a:latin')
+            latin.setAttribute('typeface', 'KoPub돋움체 Medium')
+            rPr.appendChild(latin)
+          }
           const t = itDoc.createElementNS(A_NS, 'a:t')
           t.textContent = text
           r.appendChild(rPr)
@@ -2252,15 +2260,19 @@ async function buildPhotoPptxFromTemplate(pages, templateZips) {
           const p = itDoc.createElementNS(A_NS, 'a:p')
           if (basePPrClone) p.appendChild(basePPrClone.cloneNode(true))
           if (!line) return p  // 빈 단락
-          const KW_COLOR  = '1655A2'
-          const restColor = li === 0 ? 'E60012' : li === 1 ? '1655A2' : '404040'
+          const KW_COLOR   = '1655A2'
+          // 1줄: ] 이전 #1655A2 / 나머지 #E60012
+          // 2줄~: ] 이전 #1655A2 / 나머지 #404040 + KoPub돋움체 Medium
+          const restColor  = li === 0 ? 'E60012' : '404040'
+          const useBodyFont = li > 0
           const bracketEnd = line.indexOf(']')
-          if (bracketEnd !== -1 && line.trimStart().startsWith('[')) {
-            p.appendChild(makeItRun(line.slice(0, bracketEnd + 1), KW_COLOR))
+          if (bracketEnd !== -1) {
+            // ] 포함 앞부분 → KW_COLOR, ] 이후 나머지 → restColor
+            p.appendChild(makeItRun(line.slice(0, bracketEnd + 1), KW_COLOR, false))
             const rest = line.slice(bracketEnd + 1)
-            if (rest) p.appendChild(makeItRun(rest, restColor))
+            if (rest) p.appendChild(makeItRun(rest, restColor, useBodyFont))
           } else {
-            p.appendChild(makeItRun(line, restColor))
+            p.appendChild(makeItRun(line, restColor, useBodyFont))
           }
           return p
         }
