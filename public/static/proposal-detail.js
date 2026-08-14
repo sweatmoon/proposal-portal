@@ -1100,6 +1100,74 @@ async function buildHistoryPptx(opts) {
       .replace(/"/g, '&quot;')
   }
 
+  // ── 감리이력 컬러런 치환 ──────────────────────────────────────
+  // "[P1_감리이력N]" 플레이스홀더 단락 전체를
+  // "[ 키워드 ]" 부분은 빨간색(#E60012), 나머지는 검정(#464646)인
+  // 두 개의 <a:r>로 교체한다.
+  //
+  // 실적 텍스트 형식: "[ 통합관제 ] 울산정보산업진흥원, ..."
+  //   → 키워드런: "[ 통합관제 ] "  색: E60012
+  //   → 사업명런: "울산정보산업진흥원, ..."  색: 464646
+  //
+  // 키워드가 없는 경우(빈 문자열 포함) → 빈 단락으로 교체
+  function replaceJeokInXml(xml, placeholder, jeokText) {
+    // 단락 단위로 순회
+    const paraReg = /(<a:p\b[^>]*>)([\s\S]*?)(<\/a:p>)/g
+    let changed = false
+    const result = xml.replace(paraReg, (full, open, inner, close) => {
+      // 분산런 조합 후 플레이스홀더 포함 여부 확인
+      const runs = []
+      inner.replace(/<a:r\b[\s\S]*?<\/a:r>/g, run => {
+        const t = run.match(/<a:t[^>]*>([^<]*)<\/a:t>/)
+        runs.push({ run, text: t ? t[1] : '' })
+      })
+      const concat = runs.map(r => r.text).join('')
+      if (!concat.includes(placeholder)) return full
+
+      changed = true
+
+      // pPr(단락 속성) 추출 — 그대로 유지
+      const pPrMatch = inner.match(/<a:pPr\b[\s\S]*?<\/a:pPr>/)
+      const pPr = pPrMatch ? pPrMatch[0] : ''
+
+      // 원본 rPr 추출 (폰트·크기·외곽선 등 서식 기반)
+      const rPrMatch = inner.match(/<a:rPr\b[\s\S]*?<\/a:rPr>/)
+      // rPr에서 solidFill만 교체하는 헬퍼
+      function makeRPr(color) {
+        if (!rPrMatch) {
+          return `<a:rPr lang="ko-KR" sz="900" dirty="0"><a:solidFill><a:srgbClr val="${color}"/></a:solidFill></a:rPr>`
+        }
+        // 기존 solidFill 색 교체
+        return rPrMatch[0].replace(
+          /<a:solidFill>[\s\S]*?<\/a:solidFill>/,
+          `<a:solidFill><a:srgbClr val="${color}"/></a:solidFill>`
+        )
+      }
+
+      // 빈 텍스트 → 빈 단락 (행 자체는 유지해서 레이아웃 깨지지 않게)
+      if (!jeokText) {
+        return `${open}${pPr}<a:r>${makeRPr('464646')}<a:t></a:t></a:r>${close}`
+      }
+
+      // "[ 키워드 ] 사업명" 분리
+      // 패턴: 텍스트가 "[" 로 시작하고 "]" 가 있으면 키워드 존재
+      const kwMatch = jeokText.match(/^(\[.*?\]\s*)(.*)$/)
+      if (kwMatch) {
+        const kwPart   = escapeXml(kwMatch[1])  // "[ 통합관제 ] "
+        const bodyPart = escapeXml(kwMatch[2])  // "울산정보산업진흥원, ..."
+        const kwRun   = `<a:r>${makeRPr('E60012')}<a:t>${kwPart}</a:t></a:r>`
+        const bodyRun = bodyPart
+          ? `<a:r>${makeRPr('464646')}<a:t>${bodyPart}</a:t></a:r>`
+          : ''
+        return `${open}${pPr}${kwRun}${bodyRun}${close}`
+      }
+
+      // 키워드 없는 경우 → 단색(검정) 단일 런
+      return `${open}${pPr}<a:r>${makeRPr('464646')}<a:t>${escapeXml(jeokText)}</a:t></a:r>${close}`
+    })
+    return changed ? result : xml
+  }
+
   // 전체 플레이스홀더 키 목록 (인원 슬롯 n 기준)
   function personPlaceholders(n) {
     const list = [
@@ -1132,9 +1200,9 @@ async function buildHistoryPptx(opts) {
         // 주요이력: photo-profile의 주요이력(career_expert) 그대로
         [`[P${n}_주요이력]`]: prof.주요이력 || '',
       }
-      // 감리이력 1~10 개별 치환
+      // 감리이력 1~10 — 컬러런 분리 치환 ([ 키워드 ]=빨강, 사업명=검정)
       for (let i = 1; i <= 10; i++) {
-        map[`[P${n}_감리이력${i}]`] = getJeok(prof, i)
+        result = replaceJeokInXml(result, `[P${n}_감리이력${i}]`, getJeok(prof, i))
       }
       for (const [ph, val] of Object.entries(map)) {
         result = replaceInXml(result, ph, val)
@@ -1144,6 +1212,10 @@ async function buildHistoryPptx(opts) {
     for (let n = people.length + 1; n <= perPage; n++) {
       for (const ph of personPlaceholders(n)) {
         result = replaceInXml(result, ph, '')
+      }
+      // 감리이력 미할당 슬롯 → 빈 단락으로 교체
+      for (let i = 1; i <= 10; i++) {
+        result = replaceJeokInXml(result, `[P${n}_감리이력${i}]`, '')
       }
     }
     return result
