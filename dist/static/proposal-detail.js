@@ -2223,68 +2223,26 @@ async function buildPhotoPptxFromTemplate(pages, templateZips) {
         const basePPr      = itPara.getElementsByTagNameNS(A_NS, 'pPr')[0] ?? null
         const basePPrClone = basePPr ? basePPr.cloneNode(true) : null
 
-        function makeItSolidFill(hex) {
-          const sf  = itDoc.createElementNS(A_NS, 'a:solidFill')
-          const clr = itDoc.createElementNS(A_NS, 'a:srgbClr')
-          clr.setAttribute('val', hex)
-          sf.appendChild(clr)
-          return sf
-        }
-
-        // hex: 색상, useBodyFont: true이면 KoPub돋움체 Medium 폰트 적용
-        function makeItRun(text, hex, useBodyFont) {
-          const r   = itDoc.createElementNS(A_NS, 'a:r')
-          const rPr = itDoc.createElementNS(A_NS, 'a:rPr')
-          if (baseRPrClone) {
-            Array.from(baseRPrClone.attributes).forEach(a => rPr.setAttribute(a.name, a.value))
-            Array.from(baseRPrClone.childNodes).forEach(c => {
-              // solidFill, latin 폰트는 새로 세팅하므로 복사 제외
-              if (c.localName !== 'solidFill' && c.localName !== 'latin') rPr.appendChild(c.cloneNode(true))
-            })
-          }
-          rPr.appendChild(makeItSolidFill(hex))
-          if (useBodyFont) {
-            // KoPub돋움체 Medium 폰트 지정
-            const latin = itDoc.createElementNS(A_NS, 'a:latin')
-            latin.setAttribute('typeface', 'KoPub돋움체 Medium')
-            rPr.appendChild(latin)
-          }
-          const t = itDoc.createElementNS(A_NS, 'a:t')
-          t.textContent = text
-          r.appendChild(rPr)
-          r.appendChild(t)
-          return r
-        }
-
-        function makeItPara(line, li) {
+        function makeItPara(line) {
           const p = itDoc.createElementNS(A_NS, 'a:p')
           if (basePPrClone) p.appendChild(basePPrClone.cloneNode(true))
-          if (!line) return p  // 빈 단락
-          const KW_COLOR   = '1655A2'
-          // 1줄: ] 이전 #1655A2 / 나머지 #E60012
-          // 2줄~: ] 이전 #1655A2 / 나머지 #404040 + KoPub돋움체 Medium
-          const restColor  = li === 0 ? 'E60012' : '404040'
-          const useBodyFont = li > 0
-          const bracketEnd = line.indexOf(']')
-          if (bracketEnd !== -1) {
-            // ] 포함 앞부분 → KW_COLOR, ] 이후 나머지 → restColor
-            p.appendChild(makeItRun(line.slice(0, bracketEnd + 1), KW_COLOR, false))
-            const rest = line.slice(bracketEnd + 1)
-            if (rest) p.appendChild(makeItRun(rest, restColor, useBodyFont))
-          } else {
-            p.appendChild(makeItRun(line, restColor, useBodyFont))
-          }
+          if (!line) return p
+          const r   = itDoc.createElementNS(A_NS, 'a:r')
+          if (baseRPrClone) r.appendChild(baseRPrClone.cloneNode(true))
+          const t = itDoc.createElementNS(A_NS, 'a:t')
+          t.textContent = line
+          r.appendChild(t)
+          p.appendChild(r)
           return p
         }
 
         // 원본 단락 위치 기준으로 새 단락들 삽입 후 원본 제거
         const anchor = itPara.nextSibling
         if (!itLines.length) {
-          // 빈 단락 하나로 교체
-          txBody.insertBefore(makeItPara('', 0), anchor)
+          txBody.insertBefore(makeItPara(''), anchor)
         } else {
-          itLines.forEach((line, li) => {
-            txBody.insertBefore(makeItPara(line, li), anchor)
+          itLines.forEach(line => {
+            txBody.insertBefore(makeItPara(line), anchor)
           })
         }
         txBody.removeChild(itPara)
