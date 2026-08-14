@@ -2039,12 +2039,13 @@ async function buildPhotoPptxFromTemplate(pages, templateZips) {
     for (let ri = 1; ri <= 10; ri++) ALL_LABELS.push('[감리이력' + ri + ']')
 
     // ── 슬롯별 라벨→단락 맵 사전 수집 ──
-    // preFetchedParasBySlot[slotIdx][label] = 해당 슬롯 sp 안의 단락 (없으면 null)
+    // preFetchedParasBySlot[slotIdx][label] = 단락 (단일) 또는 null
+    // 단, [키워드]/[사업명]은 sp 하나에 행별 단락이 모여있으므로
+    //   → '_jeokRows': 해당 sp의 모든 단락 배열 (행 인덱스로 접근)
     // 슬롯 sp 스코프로 수집하므로 다른 슬롯 단락과 절대 섞이지 않음
     const preFetchedParasBySlot = Array.from({ length: N }, (_, si) => {
       const labelMap = {}
       ALL_LABELS.forEach(label => {
-        // 이 슬롯의 sp들 안에서만 단락 탐색
         for (const el of slotShapes[si]) {
           if (el.localName !== 'sp') continue
           const paras = Array.from(el.getElementsByTagNameNS(A_NS, 'p'))
@@ -2053,6 +2054,17 @@ async function buildPhotoPptxFromTemplate(pages, templateZips) {
         }
         if (!labelMap[label]) labelMap[label] = null
       })
+      // [키워드]/[사업명]: 같은 sp에 행별 단락이 모여있음
+      // → '_jeokRows'에 해당 sp의 단락 배열 전체를 저장
+      for (const el of slotShapes[si]) {
+        if (el.localName !== 'sp') continue
+        const paras = Array.from(el.getElementsByTagNameNS(A_NS, 'p'))
+        if (paras.some(p => paraMatchesLabel(p, '[키워드]'))) {
+          labelMap['_jeokRows'] = paras  // 행별 단락 배열
+          break
+        }
+      }
+      if (!labelMap['_jeokRows']) labelMap['_jeokRows'] = null
       return labelMap
     })
 
@@ -2104,6 +2116,34 @@ async function buildPhotoPptxFromTemplate(pages, templateZips) {
         const label = '[감리이력' + ri + ']'
         const para = labelMap[label]
         if (para) replaceLabelInParagraphNorm(para, label, 실적List[ri - 1] || '')
+      }
+
+      // [키워드] [사업명] — sp 안 행별 단락에 실적 데이터 치환
+      // 데이터: "[ 주관기관 ] 한국산업인력공단, ..." → [키워드]=[ 주관기관 ], [사업명]=한국산업인력공단, ...
+      // 단락 p[i]: [키워드]와 [사업명]이 같은 단락 안에 있으므로 순서대로 치환
+      const jeokRows = labelMap['_jeokRows']
+      if (jeokRows) {
+        jeokRows.forEach((para, rowIdx) => {
+          const rawLine = 실적List[rowIdx] || ''
+          if (!rawLine) {
+            // 실적 없는 행: 단락 내용 비우기 (빈 런으로 교체)
+            replaceLabelInParagraphNorm(para, '[키워드]', '')
+            replaceLabelInParagraphNorm(para, '[사업명]', '')
+            return
+          }
+          // "[ 주관기관 ] 사업명" 형태로 분리
+          const bracketEnd = rawLine.indexOf(']')
+          if (bracketEnd !== -1) {
+            const kw = rawLine.slice(0, bracketEnd + 1).trim()   // [ 주관기관 ]
+            const nm = rawLine.slice(bracketEnd + 1).trim()      // 한국산업인력공단, ...
+            replaceLabelInParagraphNorm(para, '[키워드]', kw)
+            replaceLabelInParagraphNorm(para, '[사업명]', nm)
+          } else {
+            // ] 없으면 전체를 [사업명] 자리에 넣고 [키워드]는 비움
+            replaceLabelInParagraphNorm(para, '[키워드]', '')
+            replaceLabelInParagraphNorm(para, '[사업명]', rawLine)
+          }
+        })
       }
 
       // [IT경력] — 컬러런 적용 (행별 색상 규칙)
