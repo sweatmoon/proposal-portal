@@ -1150,7 +1150,8 @@ async function buildHistoryPptx(opts) {
   //   → 사업명런: "울산정보산업진흥원, ..."  색: 464646
   //
   // 키워드가 없는 경우(빈 문자열 포함) → 빈 단락으로 교체
-  function replaceJeokInXml(xml, placeholder, jeokText) {
+  // overrideKeyword: 지정 시 [ 키워드 ] 부분을 이 값으로 덮어씀 (EXPERT_HISTORY용)
+  function replaceJeokInXml(xml, placeholder, jeokText, overrideKeyword) {
     // 단락 단위로 순회
     const paraReg = /(<a:p\b[^>]*>)([\s\S]*?)(<\/a:p>)/g
     let changed = false
@@ -1211,7 +1212,9 @@ async function buildHistoryPptx(opts) {
       // 패턴: 텍스트가 "[" 로 시작하고 "]" 가 있으면 키워드 존재
       const kwMatch = jeokText.match(/^(\[.*?\]\s*)(.*)$/)
       if (kwMatch) {
-        const kwPart   = escapeXml(kwMatch[1])  // "[ 통합관제 ] "
+        // overrideKeyword 지정 시 키워드 부분을 해당 값으로 교체 (EXPERT: [PN_분야] 값 사용)
+        const kwStr    = overrideKeyword ? `[ ${overrideKeyword.trim()} ] ` : kwMatch[1]
+        const kwPart   = escapeXml(kwStr)       // "[ 데이터품질 ] "
         const bodyPart = escapeXml(kwMatch[2])  // "울산정보산업진흥원, ..."
         const kwRun   = `<a:r>${makeRPr('E60012')}<a:t>${kwPart}</a:t></a:r>`
         const bodyRun = bodyPart
@@ -1259,8 +1262,10 @@ async function buildHistoryPptx(opts) {
         [`[P${n}_주요이력]`]: prof.주요이력 || '',
       }
       // 감리이력 1~10 — 컬러런 분리 치환 ([ 키워드 ]=빨강, 사업명=검정)
+      // EXPERT_HISTORY: [ 키워드 ] 부분을 [PN_분야] 값으로 덮어씀
+      const jeokKeyword = (opts.groupFilter === 'EXPERT') ? (r.field || '').trim() : null
       for (let i = 1; i <= 10; i++) {
-        result = replaceJeokInXml(result, `[P${n}_감리이력${i}]`, getJeok(prof, i))
+        result = replaceJeokInXml(result, `[P${n}_감리이력${i}]`, getJeok(prof, i), jeokKeyword)
       }
       for (const [ph, val] of Object.entries(map)) {
         result = replaceInXml(result, ph, val)
