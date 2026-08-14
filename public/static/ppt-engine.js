@@ -619,20 +619,29 @@ async function generateMenuPpt(menu, vm) {
 
     // ── 표장표 2종 ─────────────────────────────────────────────────
     // 3.4 감리원별 유사 감리 실적 및 경력·자격
-    case 'AUDITOR_HISTORY':
-      result = await downloadAssignPptx(null, { returnZip: true, groupFilter: 'AUDITOR' });
+    case 'AUDITOR_HISTORY': {
+      const _tpls = Array.isArray(menu.templates) ? menu.templates : [];
+      const _tpl  = _tpls.find(t => t.pptx_b64_key) || null;
+      result = await downloadAssignPptx(null, { returnZip: true, groupFilter: 'AUDITOR', templateB64: _tpl ? _tpl.pptx_b64_key : null });
       break;
+    }
 
     // 3.5 전문가별 유사 감리 실적 및 경력·자격
-    case 'EXPERT_HISTORY':
-      result = await downloadAssignPptx(null, { returnZip: true, groupFilter: 'EXPERT' });
+    case 'EXPERT_HISTORY': {
+      const _tpls = Array.isArray(menu.templates) ? menu.templates : [];
+      const _tpl  = _tpls.find(t => t.pptx_b64_key) || null;
+      result = await downloadAssignPptx(null, { returnZip: true, groupFilter: 'EXPERT', templateB64: _tpl ? _tpl.pptx_b64_key : null });
       break;
+    }
 
     // ── 기존 표장표 (감리원/전문가 통합 표) ───────────────────────
     case 'ASSIGN_TABLE':          // 구버전 alias
-    case 'MANPOWER_MD':
-      result = await downloadAssignPptx(null, { returnZip: true });
+    case 'MANPOWER_MD': {
+      const _tpls = Array.isArray(menu.templates) ? menu.templates : [];
+      const _tpl  = _tpls.find(t => t.pptx_b64_key) || null;
+      result = await downloadAssignPptx(null, { returnZip: true, templateB64: _tpl ? _tpl.pptx_b64_key : null });
       break;
+    }
 
     // ── 주관기관 요청사항 준수 여부 (요약표) ──────────────────────
     case 'SUMMARY_TABLE':         // 구버전 alias
