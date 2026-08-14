@@ -2143,33 +2143,50 @@ async function buildPhotoPptxFromTemplate(pages, templateZips) {
       }
 
       // [키워드] [사업명] 또는 [분야] [사업명] — sp 안 행별 단락에 실적 데이터 치환
-      // 데이터: "[ 주관기관 ] 한국산업인력공단, ..." → kwLabel=[ 주관기관 ], [사업명]=한국산업인력공단, ...
-      // 단락 p[i]: kwLabel과 [사업명]이 같은 단락 안에 있으므로 순서대로 치환
       const jeokRows   = labelMap['_jeokRows']
       const jeokFormat = labelMap['_jeokFormat'] || 'keyword'
-      const kwLabel    = jeokFormat === 'domain' ? '[분야]' : '[키워드]'
       if (jeokRows) {
-        jeokRows.forEach((para, rowIdx) => {
-          const rawLine = 실적List[rowIdx] || ''
-          if (!rawLine) {
-            // 실적 없는 행: 단락 내용 비우기 (빈 런으로 교체)
-            replaceLabelInParagraphNorm(para, kwLabel, '')
-            replaceLabelInParagraphNorm(para, '[사업명]', '')
-            return
-          }
-          // "[ 주관기관 ] 사업명" 형태로 분리
-          const bracketEnd = rawLine.indexOf(']')
-          if (bracketEnd !== -1) {
-            const kw = rawLine.slice(0, bracketEnd + 1).trim()   // [ 주관기관 ]
-            const nm = rawLine.slice(bracketEnd + 1).trim()      // 한국산업인력공단, ...
-            replaceLabelInParagraphNorm(para, kwLabel, kw)
+        if (jeokFormat === 'domain') {
+          // domain 형식: [분야] = person.field (슬롯 인원의 분야, 모든 행 동일)
+          //              [사업명] = rawLine에서 ] 이후 텍스트 (기관명, 사업명)
+          const fieldValue = person.field || ''
+          jeokRows.forEach((para, rowIdx) => {
+            const rawLine = 실적List[rowIdx] || ''
+            if (!rawLine) {
+              replaceLabelInParagraphNorm(para, '[분야]', '')
+              replaceLabelInParagraphNorm(para, '[사업명]', '')
+              return
+            }
+            // rawLine: "[ 기능점수 ] 한국지능정보사회진흥원, 혜택알리미..."
+            // → [분야] = person.field("기능점수"), [사업명] = "] 이후 텍스트"
+            const bracketEnd = rawLine.indexOf(']')
+            const nm = bracketEnd !== -1
+              ? rawLine.slice(bracketEnd + 1).trim()   // "한국지능정보사회진흥원, 혜택알리미..."
+              : rawLine
+            replaceLabelInParagraphNorm(para, '[분야]',  fieldValue)
             replaceLabelInParagraphNorm(para, '[사업명]', nm)
-          } else {
-            // ] 없으면 전체를 [사업명] 자리에 넣고 kwLabel은 비움
-            replaceLabelInParagraphNorm(para, kwLabel, '')
-            replaceLabelInParagraphNorm(para, '[사업명]', rawLine)
-          }
-        })
+          })
+        } else {
+          // keyword 형식: [키워드] = rawLine의 [ ] 부분, [사업명] = ] 이후 텍스트
+          jeokRows.forEach((para, rowIdx) => {
+            const rawLine = 실적List[rowIdx] || ''
+            if (!rawLine) {
+              replaceLabelInParagraphNorm(para, '[키워드]', '')
+              replaceLabelInParagraphNorm(para, '[사업명]', '')
+              return
+            }
+            const bracketEnd = rawLine.indexOf(']')
+            if (bracketEnd !== -1) {
+              const kw = rawLine.slice(0, bracketEnd + 1).trim()
+              const nm = rawLine.slice(bracketEnd + 1).trim()
+              replaceLabelInParagraphNorm(para, '[키워드]', kw)
+              replaceLabelInParagraphNorm(para, '[사업명]', nm)
+            } else {
+              replaceLabelInParagraphNorm(para, '[키워드]', '')
+              replaceLabelInParagraphNorm(para, '[사업명]', rawLine)
+            }
+          })
+        }
       }
 
       // [IT경력] — 컬러런 적용 (행별 색상 규칙)
