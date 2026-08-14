@@ -664,70 +664,63 @@ async function generateMenuPpt(menu, vm) {
         for (const slideFile of slideFiles2) {
           let xml = await zip.file(slideFile).async('string');
 
-          // ── 디버그: slide1.xml 한정, 전체 <a:t> 목록 덤프 ──
-          if (slideFile.endsWith('slide1.xml') && xml.includes('제목')) {
-            const allAt = [...xml.matchAll(/<a:t[^>]*>([\s\S]*?)<\/a:t>/g)];
-            console.log('[PptEngine][DEBUG]', slideFile, '— 전체 <a:t> 목록:');
-            allAt.forEach((m, i) => {
-              console.log('  [' + i + ']', JSON.stringify(m[1]));
-            });
-          }
-
-          // Case 1: 단일 <a:t>에 [제목] 그대로 있는 경우
+          // Case 1: 단일 런에 [제목] 그대로 있는 경우 (가장 빠른 경로)
           if (xml.includes('[제목]')) {
             xml = xml.replace(/\[제목\]/g, menuTitle);
             zip.file(slideFile, xml);
-            console.log('[PptEngine] [제목] 단순 치환 완료:', slideFile);
+            console.log('[PptEngine] [제목] 단순치환:', slideFile);
             continue;
           }
 
-          // Case 2: XML 이스케이프 — &#91;제목&#93; 형태
-          if (xml.includes('&#91;제목&#93;')) {
-            xml = xml.replace(/&#91;제목&#93;/g, menuTitle);
-            zip.file(slideFile, xml);
-            console.log('[PptEngine] [제목] XML이스케이프 치환 완료:', slideFile);
-            continue;
-          }
-
-          // Case 3: 전각 대괄호 ［제목］
-          if (xml.includes('［제목］')) {
-            xml = xml.replace(/［제목］/g, menuTitle);
-            zip.file(slideFile, xml);
-            console.log('[PptEngine] [제목] 전각괄호 치환 완료:', slideFile);
-            continue;
-          }
-
-          // Case 4: 분산 런 — <a:p> 블록 단위로 런 텍스트 이어붙여 처리
-          // 예: <a:r><a:t>[</a:t></a:r><a:r><a:t>제목</a:t></a:r><a:r><a:t>]</a:t></a:r>
+          // Case 2: 분산 런 — [, 제목, ] 가 각각 별개 <a:r>에 분리된 경우
+          // 핵심: <a:r> 먼저 분리 → <a:t>([^<]*)</a:t> 로 순수 텍스트 추출
+          // ※ [\s\S]*? 쓰면 <a:rPr> 내부 태그 텍스트까지 포함해 오동작함
           if (xml.includes('제목')) {
             const paraReg = /(<a:p\b[^>]*>)([\s\S]*?)(<\/a:p>)/g;
-            let paraChanged = false;
+            let changed = false;
             xml = xml.replace(paraReg, (full, open, inner, close) => {
-              // 런 텍스트 이어붙이기 (XML이스케이프 포함)
+              // ① <a:r> 단위 분리 + [^<]* 로 순수 텍스트만 추출
               const runs = [];
               inner.replace(/<a:r\b[\s\S]*?<\/a:r>/g, run => {
-                const t = run.match(/<a:t[^>]*>([\s\S]*?)<\/a:t>/);
+                const t = run.match(/<a:t[^>]*>([^<]*)<\/a:t>/);
                 runs.push({ run, text: t ? t[1] : '' });
               });
               const concat = runs.map(r => r.text).join('');
-              // 이스케이프된 형태도 함께 확인
-              const concatUnesc = concat.replace(/&#91;/g, '[').replace(/&#93;/g, ']');
-              if (!concatUnesc.includes('[제목]')) return full;
+              if (!concat.includes('[제목]')) return full;
 
-              // 첫 번째 런에 전체 치환 텍스트 넣고 나머지 런 제거
-              let first = true;
+              // ② 포지션 기반으로 [제목] 구간에 걸치는 런 식별
+              const jStart = concat.indexOf('[제목]');   // inclusive
+              const jEnd   = jStart + 4;                 // '[제목]'.length = 4 (chars: [,제,목,])
+
+              let pos = 0;
+              let firstJRun = true; // [제목] 구간 첫 런 여부
               const newInner = inner.replace(/<a:r\b[\s\S]*?<\/a:r>/g, run => {
-                if (first) {
-                  first = false;
-                  return run.replace(/(<a:t[^>]*>)[\s\S]*?(<\/a:t>)/, `$1${menuTitle}$2`);
+                const t = run.match(/<a:t[^>]*>([^<]*)<\/a:t>/);
+                const txt = t ? t[1] : '';
+                const rStart = pos;
+                const rEnd   = pos + txt.length;
+                pos = rEnd;
+
+                // 텍스트 없는 런 → 그대로 유지
+                if (txt === '') return run;
+
+                const overlap = rEnd > jStart && rStart < jEnd;  // [제목] 구간과 겹치는가
+                if (!overlap) return run;                         // 무관 런 → 그대로
+
+                if (firstJRun) {
+                  // [제목] 구간의 첫 번째 런 → menuTitle 로 교체
+                  firstJRun = false;
+                  return run.replace(/<a:t([^>]*)>[^<]*<\/a:t>/, `<a:t$1>${menuTitle}</a:t>`);
                 }
+                // [제목] 구간의 나머지 런 → 제거
                 return '';
               });
-              paraChanged = true;
-              console.log('[PptEngine] [제목] 분산런 치환 완료:', slideFile, '| concat:', concat);
+
+              changed = true;
+              console.log('[PptEngine] [제목] 분산런 치환:', slideFile, '→', menuTitle);
               return open + newInner + close;
             });
-            if (paraChanged) zip.file(slideFile, xml);
+            if (changed) zip.file(slideFile, xml);
           }
         }
 
