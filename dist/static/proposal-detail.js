@@ -2147,9 +2147,9 @@ async function buildPhotoPptxFromTemplate(pages, templateZips) {
       const jeokFormat = labelMap['_jeokFormat'] || 'keyword'
       if (jeokRows) {
         if (jeokFormat === 'domain') {
-          // domain 형식: [분야] = person.field (슬롯 인원의 분야, 모든 행 동일)
+          // domain 형식: [분야] = "[ person.field ]" 형태로 삽입 (괄호 포함)
           //              [사업명] = rawLine에서 ] 이후 텍스트 (기관명, 사업명)
-          const fieldValue = person.field || ''
+          const fieldValue = person.field ? '[ ' + person.field + ' ]' : ''
           jeokRows.forEach((para, rowIdx) => {
             const rawLine = 실적List[rowIdx] || ''
             if (!rawLine) {
