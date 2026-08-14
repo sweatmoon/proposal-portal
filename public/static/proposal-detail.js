@@ -534,83 +534,297 @@ function computeAssignRows() {
   })
 }
 
+// ── downloadAssignPptx ──────────────────────────────────────────
+// 8열 + 1인당3행 구조 (예시 PPTX 분석 기반)
+//
+// 열 구성 (총 8열):
+//   col0: 감리단계  col1: 감리분야  col2: 소속·상근  col3: 성명
+//   col4: 감리원번호  col5: 구분(등급)  col6: 투입율  col7: 유사감리실적(넓은열)
+//
+// 행 구성 (1인당 3행):
+//   행A: 기본정보 — col0~6 각 값, col7 = "유사 감리 실적 : N건 / 감리 이외의 경력 : N년 N개월" (bg #AAE6FF)
+//   행B: 실적목록  — col0~6 빈셀(rowspan 효과), col7 = 실적 목록 (h=1.851")
+//   행C: 주요경력  — col0~6 빈셀(rowspan 효과), col7 = 주요경력·자격 (h=0.459")
+//
+// 예시 PPTX 실측값(EMU→인치):
+//   테이블 pos: (0.57", 1.38"), 크기: (9.69" × 6.05")
+//   열 너비: [0.603", 0.718", 0.718", 0.718", 0.718", 0.718", 0.718", 4.762"]
+//   헤더 높이: 0.458", 기본정보: 0.268", 실적목록: 1.851", 주요경력: 0.459"
+//   헤더 bg: #D2F0FF, 상단 border: #4BA6DD
+//   기본정보 col7 bg: #AAE6FF, 텍스트 색: #1655A2
+//   폰트: KoPub돋움체 Bold, sz=11pt(헤더)/10pt(데이터)
+// ────────────────────────────────────────────────────────────────
+
 async function downloadAssignPptx(btn, opts) {
   opts = opts || {}
   if (typeof PptxGenJS === 'undefined') { alert('PPT 라이브러리 로딩 중입니다.'); return null }
   setBtnState(btn, true)
   console.log('[AssignPptx] opts.templateB64:', opts.templateB64 ? '있음(길이:'+opts.templateB64.length+')' : 'null/없음', '| groupFilter:', opts.groupFilter || '없음')
+
   try {
-    let rows = computeAssignRows()
-    if (!rows.length) { alert('인력 데이터가 없습니다.'); return null }
+    // ── 1. 인원 기본 데이터 수집 ────────────────────────────────
+    let baseRows = computeAssignRows()
+    if (!baseRows.length) { alert('인력 데이터가 없습니다.'); return null }
 
-    // groupFilter: 'AUDITOR' → 감리원만, 'EXPERT' → 전문가(핵심+필수+보안+테스터)만
     if (opts.groupFilter === 'AUDITOR') {
-      rows = rows.filter(r => r.isAudit)
+      baseRows = baseRows.filter(r => r.isAudit)
     } else if (opts.groupFilter === 'EXPERT') {
-      rows = rows.filter(r => !r.isAudit)
+      baseRows = baseRows.filter(r => !r.isAudit)
     }
-    const FONT_BOLD = 'KoPub돋움체 Bold', FONT_MEDIUM = 'KoPub돋움체 Medium'
-    const bd = { pt: 0.5, color: '969696' }, bd0 = { type: 'none' }
-    const bMid = [bd, bd, bd, bd], bLeft = [bd, bd, bd, bd0], bRight = [bd, bd0, bd, bd]
-    const base = e => Object.assign({ align: 'center', valign: 'middle', margin: [0.05, 0.05, 0.05, 0.05] }, e)
-    const headFill = { color: '1A2E4A' }
-    const tRows = [[
-      { text: '성명', options: base({ fontFace: FONT_BOLD, fontSize: 10, color: 'FFFFFF', fill: headFill, border: bLeft }) },
-      { text: '구분', options: base({ fontFace: FONT_BOLD, fontSize: 10, color: 'FFFFFF', fill: headFill, border: bMid }) },
-      { text: '담당 분야', options: base({ fontFace: FONT_BOLD, fontSize: 10, color: 'FFFFFF', fill: headFill, border: bMid }) },
-      { text: '감리 단계', options: base({ fontFace: FONT_BOLD, fontSize: 10, color: 'FFFFFF', fill: headFill, border: bMid }) },
-      { text: '소속 및 상근여부', options: base({ fontFace: FONT_BOLD, fontSize: 10, color: 'FFFFFF', fill: headFill, border: bMid }) },
-      { text: '감리원증', options: base({ fontFace: FONT_BOLD, fontSize: 10, color: 'FFFFFF', fill: headFill, border: bMid }) },
-      { text: '현장감리 투입율', options: base({ fontFace: FONT_BOLD, fontSize: 10, color: 'FFFFFF', fill: headFill, border: bRight }) },
-    ]]
-    rows.forEach(r => {
-      tRows.push([
-        { text: r.name, options: base({ fontFace: FONT_MEDIUM, fontSize: 10, color: '222222', border: bLeft }) },
-        { text: r.grade, options: base({ fontFace: FONT_MEDIUM, fontSize: 10, color: '222222', border: bMid }) },
-        { text: r.field, options: base({ fontFace: FONT_MEDIUM, fontSize: 10, color: '222222', align: 'l', border: bMid }) },
-        { text: r.stageLabel, options: base({ fontFace: FONT_MEDIUM, fontSize: 10, color: '222222', border: bMid }) },
-        { text: r.affil, options: base({ fontFace: FONT_MEDIUM, fontSize: 10, color: '222222', border: bMid }) },
-        { text: r.certDisplay, options: base({ fontFace: FONT_MEDIUM, fontSize: 10, color: '222222', border: bMid }) },
-        { text: '100%', options: base({ fontFace: FONT_BOLD, fontSize: 10, color: '222222', border: bRight }) },
-      ])
+    if (!baseRows.length) { alert('해당 그룹의 인력 데이터가 없습니다.'); return null }
+
+    // ── 2. photo-profile API 병렬 호출 ─────────────────────────
+    const pidMap     = parsedData.personnelIdMap || {}
+    const proposalId = parsedData.proposalId || 0
+
+    const profileMap = {}
+    await Promise.all(
+      baseRows.map(async r => {
+        const pid = pidMap[r.name] || 0
+        if (!pid) return
+        try {
+          const res = await fetch(`/api/personnel/${pid}/photo-profile?projectId=${proposalId}`)
+          if (res.ok) {
+            const json = await res.json()
+            if (json.ok) profileMap[r.name] = json.data
+          }
+        } catch (e) { console.warn('[AssignPptx] photo-profile 로드 실패:', r.name, e) }
+      })
+    )
+
+    // ── 3. IT경력기간 파싱 헬퍼 ────────────────────────────────
+    // "YYYY.MM ~ YYYY.MM" 또는 "YYYY.MM ~ 현재" 형식 → "N년 N개월"
+    function parseItCareerDuration(itCareerStr) {
+      if (!itCareerStr) return ''
+      try {
+        const m = itCareerStr.match(/(\d{4})\.(\d{2})\s*~\s*(?:(\d{4})\.(\d{2})|현재)/)
+        if (!m) return itCareerStr
+        const startY = parseInt(m[1]), startM = parseInt(m[2])
+        const now = new Date()
+        const endY = m[3] ? parseInt(m[3]) : now.getFullYear()
+        const endM = m[4] ? parseInt(m[4]) : now.getMonth() + 1
+        let months = (endY - startY) * 12 + (endM - startM)
+        if (months < 0) months = 0
+        const y = Math.floor(months / 12), mo = months % 12
+        if (y === 0) return `${mo}개월`
+        if (mo === 0) return `${y}년`
+        return `${y}년 ${mo}개월`
+      } catch (e) { return itCareerStr }
+    }
+
+    // ── 4. 실적 목록 문자열 생성 ────────────────────────────────
+    function buildJeokText(profile) {
+      if (!profile) return ''
+      const jeok = Array.isArray(profile.실적) ? profile.실적 : []
+      return jeok.join('\n')
+    }
+
+    // ── 5. 주요경력 + 자격 문자열 생성 ─────────────────────────
+    function buildCareerText(profile) {
+      if (!profile) return ''
+      const parts = []
+      if (profile.주요이력) parts.push(profile.주요이력)
+      if (profile.자격요약) parts.push(profile.자격요약)
+      return parts.join('\n')
+    }
+
+    // ── 6. 상단 border 색(#4BA6DD) 0.75pt 헬퍼 ─────────────────
+    const bdNone  = { type: 'none' }
+    const bdGray  = { pt: 0.5, color: 'AAAAAA' }
+    const bdBlue  = { pt: 0.75, color: '4BA6DD' }
+    const bdDark  = { pt: 0.75, color: '1655A2' }
+
+    // border 배열: [top, right, bottom, left]
+    function bdr(top, right, bottom, left) { return [top, right, bottom, left] }
+
+    const FONT = 'KoPub돋움체 Bold'
+    const FONT_DATA = 'KoPub돋움체 Medium'
+    const C_HEAD_BG  = 'D2F0FF'   // 헤더 배경
+    const C_INFO_BG  = 'AAE6FF'   // 기본정보 col7 배경
+    const C_BLUE_TXT = '1655A2'   // 파란 텍스트
+    const C_DARK     = '1A2E4A'   // 헤더 텍스트
+    const C_BLACK    = '222222'
+
+    // 열 너비 (인치): [0.603, 0.718, 0.718, 0.718, 0.718, 0.718, 0.718, 4.762]
+    const COL_W = [0.603, 0.718, 0.718, 0.718, 0.718, 0.718, 0.718, 4.762]
+
+    // 헤더 높이 / 행 높이
+    const H_HEADER = 0.458
+    const H_INFO   = 0.268
+    const H_JEOK   = 1.851
+    const H_CAREER = 0.459
+
+    const baseOpt = (extra) => Object.assign({
+      fontFace: FONT_DATA, fontSize: 10,
+      valign: 'middle', align: 'center',
+      margin: [0.03, 0.05, 0.03, 0.05],
+      color: C_BLACK,
+    }, extra)
+
+    // ── 7. 헤더 행 ──────────────────────────────────────────────
+    const HEADERS = ['감리단계', '감리분야', '소속·상근', '성명', '감리원번호', '구분', '투입율', '유사감리실적']
+    const headerRow = HEADERS.map((h, ci) => {
+      const isFirst = ci === 0, isLast = ci === 7
+      return {
+        text: h,
+        options: {
+          fontFace: FONT, fontSize: 11,
+          bold: true, color: C_DARK,
+          fill: { color: C_HEAD_BG },
+          valign: 'middle', align: 'center',
+          margin: [0.03, 0.05, 0.03, 0.05],
+          border: bdr(
+            bdBlue,
+            isLast  ? bdGray : bdGray,
+            bdGray,
+            isFirst ? bdNone : bdGray
+          ),
+        }
+      }
     })
-    const rowH = new Array(tRows.length).fill(0.28); rowH[0] = 0.2
-    const colW = [0.8, 0.8, 2.2, 1.2, 1.2, 0.9, 0.9]
 
-    // ── 템플릿 오버레이 분기 ────────────────────────────────────────
+    // ── 8. 인원별 3행 생성 ──────────────────────────────────────
+    const tRows = [headerRow]
+    const rowH  = [H_HEADER]
+
+    for (const r of baseRows) {
+      const prof = profileMap[r.name] || {}
+      const auditCnt   = prof.감리횟수   != null ? prof.감리횟수   : ''
+      const itDuration = parseItCareerDuration(prof.IT경력기간 || '')
+      const jeokText   = buildJeokText(prof)
+      const careerText = buildCareerText(prof)
+
+      // col7 기본정보 텍스트: "유사 감리 실적 : N건 / 감리 이외의 경력 : N년 N개월"
+      const col7InfoText = [
+        auditCnt !== '' ? `유사 감리 실적 : ${auditCnt}건` : '유사 감리 실적 : -',
+        itDuration      ? `감리 이외의 경력 : ${itDuration}` : '감리 이외의 경력 : -',
+      ].join(' / ')
+
+      // ── 행A: 기본정보 ──────────────────────────────────────────
+      const cellBase = (text, extra) => ({
+        text,
+        options: baseOpt(Object.assign({
+          border: bdr(bdGray, bdGray, bdGray, bdGray)
+        }, extra))
+      })
+
+      const rowA = [
+        cellBase(r.stageLabel,  { align: 'center' }),   // col0: 감리단계
+        cellBase(r.field,       { align: 'center' }),   // col1: 감리분야
+        cellBase(r.affil,       { align: 'center', fontSize: 9 }), // col2: 소속·상근
+        cellBase(r.name,        { align: 'center', fontFace: FONT, bold: true }), // col3: 성명
+        cellBase(r.certDisplay, { align: 'center', fontSize: 9 }), // col4: 감리원번호
+        cellBase(r.grade,       { align: 'center' }),   // col5: 구분
+        cellBase('100%',        { align: 'center', fontFace: FONT, bold: true }), // col6: 투입율
+        // col7: 유사감리실적 요약 (bg #AAE6FF, 파란 bold 텍스트)
+        {
+          text: col7InfoText,
+          options: baseOpt({
+            fontFace: FONT, bold: true, color: C_BLUE_TXT,
+            fill: { color: C_INFO_BG },
+            align: 'left',
+            margin: [0.05, 0.1, 0.05, 0.1],
+            border: bdr(bdDark, bdGray, bdGray, bdGray),
+          })
+        },
+      ]
+
+      // ── 행B: 실적목록 ──────────────────────────────────────────
+      const emptyCell = (isLast) => ({
+        text: '',
+        options: baseOpt({
+          border: bdr(bdGray, isLast ? bdGray : bdGray, bdGray, bdGray)
+        })
+      })
+
+      const rowB = [
+        emptyCell(false),  // col0
+        emptyCell(false),  // col1
+        emptyCell(false),  // col2
+        emptyCell(false),  // col3
+        emptyCell(false),  // col4
+        emptyCell(false),  // col5
+        emptyCell(false),  // col6
+        // col7: 실적 목록
+        {
+          text: jeokText,
+          options: baseOpt({
+            align: 'left', valign: 'top',
+            fontSize: 9,
+            margin: [0.05, 0.1, 0.05, 0.1],
+            border: bdr(bdGray, bdGray, bdGray, bdGray),
+          })
+        },
+      ]
+
+      // ── 행C: 주요경력 ──────────────────────────────────────────
+      const rowC = [
+        emptyCell(false),
+        emptyCell(false),
+        emptyCell(false),
+        emptyCell(false),
+        emptyCell(false),
+        emptyCell(false),
+        emptyCell(false),
+        // col7: 주요경력·자격
+        {
+          text: careerText,
+          options: baseOpt({
+            align: 'left', valign: 'middle',
+            fontSize: 9,
+            margin: [0.03, 0.1, 0.03, 0.1],
+            border: bdr(bdGray, bdGray, bdGray, bdGray),
+          })
+        },
+      ]
+
+      tRows.push(rowA); rowH.push(H_INFO)
+      tRows.push(rowB); rowH.push(H_JEOK)
+      tRows.push(rowC); rowH.push(H_CAREER)
+    }
+
+    // ── 9. PptxGenJS로 테이블 임시 PPTX 생성 ────────────────────
+    const TBL_X = 0.57
+    const TBL_Y = 1.38
+    const TBL_W = COL_W.reduce((a, b) => a + b, 0)  // ≈ 9.69"
+
+    const presTemp = new PptxGenJS()
+    presTemp.defineLayout({ name: 'CUSTOM_10x7', width: 10.83, height: 7.5 })
+    presTemp.layout = 'CUSTOM_10x7'
+    const sldTemp = presTemp.addSlide()
+    sldTemp.addTable(tRows, {
+      x: TBL_X, y: TBL_Y,
+      w: TBL_W,
+      colW: COL_W,
+      rowH: rowH,
+    })
+    const tempAb = await presTemp.write({ outputType: 'arraybuffer' })
+    const tempZip = new JSZip()
+    await tempZip.loadAsync(tempAb)
+    const tableSlideXml = await tempZip.file('ppt/slides/slide1.xml').async('string')
+
+    console.log('[AssignPptx] 테이블 생성 완료 — 인원:', baseRows.length, '명 / 행수:', tRows.length)
+
+    // ── 10. 템플릿 오버레이 or 빈 슬라이드 출력 ─────────────────
     if (opts.templateB64) {
-      // [A] 템플릿 PPTX가 있는 경우
-      // 1. PptxGenJS로 테이블만 있는 임시 PPTX 생성 (첫 슬라이드만 사용)
-      const presTemp = new PptxGenJS(); presTemp.layout = 'LAYOUT_WIDE'
-      const sldTemp = presTemp.addSlide()
-      sldTemp.addTable(tRows, { x: 0.4, y: 0.5, w: colW.reduce((a, b) => a + b, 0), colW, rowH })
-      const tempAb = await presTemp.write({ outputType: 'arraybuffer' })
-      const tempZip = new JSZip(); await tempZip.loadAsync(tempAb)
-
-      // 2. 테이블 슬라이드 XML 추출 (PptxGenJS가 생성한 slide1.xml)
-      const tableSlideXml = await tempZip.file('ppt/slides/slide1.xml').async('string')
-
-      // 3. 템플릿 PPTX 로드
+      // [A] 템플릿 PPTX 로드
       const bin = atob(opts.templateB64)
       const bytes = new Uint8Array(bin.length)
       for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i)
       const tplZip = await JSZip.loadAsync(bytes)
 
-      // 3-1. [제목] 플레이스홀더 → 목차명 치환 (ppt-engine.js default case와 동일 로직)
+      // [A-1] [제목] 플레이스홀더 치환
       if (opts.menuTitle) {
         const menuTitle = opts.menuTitle
         const slideFilesT = Object.keys(tplZip.files).filter(f => /^ppt\/slides\/slide\d+\.xml$/.test(f))
         for (const sf of slideFilesT) {
           let xml = await tplZip.file(sf).async('string')
-
           // Case 1: 단일 런
           if (xml.includes('[제목]')) {
             xml = xml.replace(/\[제목\]/g, menuTitle)
-            tplZip.file(sf, xml)
-            continue
+            tplZip.file(sf, xml); continue
           }
-
-          // Case 2: 분산 런 ([, 제목, ] 각각 별개 <a:r>)
+          // Case 2: 분산 런
           if (xml.includes('제목')) {
             const paraReg = /(<a:p\b[^>]*>)([\s\S]*?)(<\/a:p>)/g
             let changed = false
@@ -622,115 +836,83 @@ async function downloadAssignPptx(btn, opts) {
               })
               const concat = runs.map(r => r.text).join('')
               if (!concat.includes('[제목]')) return full
-
-              const jStart = concat.indexOf('[제목]')
-              const jEnd   = jStart + 4
-
-              let pos = 0
-              let firstJRun = true
+              const jStart = concat.indexOf('[제목]'), jEnd = jStart + 4
+              let pos = 0, firstJRun = true
               const newInner = inner.replace(/<a:r\b[\s\S]*?<\/a:r>/g, run => {
                 const t = run.match(/<a:t[^>]*>([^<]*)<\/a:t>/)
                 const txt = t ? t[1] : ''
-                const rStart = pos
-                const rEnd   = pos + txt.length
-                pos = rEnd
+                const rStart = pos, rEnd = pos + txt.length; pos = rEnd
                 if (txt === '') return run
                 const overlap = rEnd > jStart && rStart < jEnd
                 if (!overlap) return run
-                if (firstJRun) {
-                  firstJRun = false
-                  return run.replace(/<a:t([^>]*)>[^<]*<\/a:t>/, `<a:t$1>${menuTitle}</a:t>`)
-                }
+                if (firstJRun) { firstJRun = false; return run.replace(/<a:t([^>]*)>[^<]*<\/a:t>/, `<a:t$1>${menuTitle}</a:t>`) }
                 return ''
               })
-              changed = true
-              return open + newInner + close
+              changed = true; return open + newInner + close
             })
             if (changed) tplZip.file(sf, xml)
           }
         }
       }
 
-      // 4. 템플릿의 슬라이드 파일 목록 파악
+      // [A-2] 템플릿 슬라이드 파일 목록 (정렬)
       const tplSlideFiles = Object.keys(tplZip.files)
         .filter(f => /^ppt\/slides\/slide\d+\.xml$/.test(f))
-        .sort((a, b) => {
-          const na = parseInt(a.match(/slide(\d+)/)[1])
-          const nb = parseInt(b.match(/slide(\d+)/)[1])
-          return na - nb
-        })
+        .sort((a, b) => parseInt(a.match(/slide(\d+)/)[1]) - parseInt(b.match(/slide(\d+)/)[1]))
 
       if (tplSlideFiles.length > 0) {
-        // 5. 템플릿 첫 슬라이드에 테이블 XML 삽입
-        //    전략: <p:spTree> 내 기존 요소(배경·제목·고정 도형) 유지 +
-        //           PptxGenJS가 생성한 <p:graphicFrame>(테이블) 요소만 추출해서 append
+        // [A-3] 기존 테이블(<p:graphicFrame>) 제거 후 새 테이블 삽입
         const tplFirstSlide = tplSlideFiles[0]
         let tplSlideXml = await tplZip.file(tplFirstSlide).async('string')
 
-        // PptxGenJS 테이블 XML에서 <p:graphicFrame> 요소 추출
-        // (PptxGenJS는 테이블을 <p:graphicFrame> 안의 <a:graphic>/<a:graphicData>/<a:tbl>로 생성)
+        // 기존 graphicFrame(테이블) 모두 제거
+        tplSlideXml = tplSlideXml.replace(/<p:graphicFrame\b[\s\S]*?<\/p:graphicFrame>/g, '')
+        console.log('[AssignPptx] 기존 graphicFrame 제거 완료')
+
+        // 새 테이블 graphicFrame 추출 → 삽입
         const gfMatches = [...tableSlideXml.matchAll(/<p:graphicFrame\b[\s\S]*?<\/p:graphicFrame>/g)]
         if (gfMatches.length > 0) {
-          // 테이블 graphicFrame 요소들을 </p:spTree> 직전에 삽입
           const tableGfXml = gfMatches.map(m => m[0]).join('\n')
           tplSlideXml = tplSlideXml.replace(/<\/p:spTree>/, tableGfXml + '</p:spTree>')
-          tplZip.file(tplFirstSlide, tplSlideXml)
-          console.log('[AssignPptx] 테이블 graphicFrame', gfMatches.length, '개를 템플릿 슬라이드에 삽입')
+          console.log('[AssignPptx] 새 테이블 graphicFrame', gfMatches.length, '개 삽입 완료')
         } else {
-          // graphicFrame 추출 실패 시 fallback: spTree 전체 교체
-          const treeMatch = tableSlideXml.match(/<p:spTree>([\s\S]*)<\/p:spTree>/)
-          if (treeMatch) {
-            tplSlideXml = tplSlideXml.replace(/<p:spTree>[\s\S]*<\/p:spTree>/, `<p:spTree>${treeMatch[1]}</p:spTree>`)
-            tplZip.file(tplFirstSlide, tplSlideXml)
-            console.warn('[AssignPptx] graphicFrame 없음, spTree 전체 교체 fallback')
-          } else {
-            tplZip.file(tplFirstSlide, tableSlideXml)
-            console.warn('[AssignPptx] spTree도 없음, 슬라이드 전체 교체 fallback')
-          }
+          console.warn('[AssignPptx] 새 테이블 graphicFrame 추출 실패 — 슬라이드 전체 교체 fallback')
+          tplZip.file(tplFirstSlide, tableSlideXml)
         }
+        tplZip.file(tplFirstSlide, tplSlideXml)
 
-        // 6. 템플릿에 슬라이드가 2개 이상이면 나머지 슬라이드 삭제
-        //    (표장표는 1장만 필요)
+        // [A-4] 나머지 슬라이드 제거
         for (let i = 1; i < tplSlideFiles.length; i++) {
           tplZip.remove(tplSlideFiles[i])
-          // 관계 파일도 삭제
           const relFile = tplSlideFiles[i].replace('ppt/slides/', 'ppt/slides/_rels/') + '.rels'
           if (tplZip.file(relFile)) tplZip.remove(relFile)
         }
 
-        // 7. [Content_Types].xml에서 삭제된 슬라이드 참조 제거
+        // [A-5] [Content_Types].xml 정리
         if (tplSlideFiles.length > 1) {
           const ctXml = await tplZip.file('[Content_Types].xml').async('string')
           let newCtXml = ctXml
           for (let i = 1; i < tplSlideFiles.length; i++) {
-            const slideNum = tplSlideFiles[i].match(/slide(\d+)/)[1]
-            const re = new RegExp(`<Override[^>]*PartName="[^"]*slide${slideNum}\\.xml"[^>]*/?>`, 'g')
-            newCtXml = newCtXml.replace(re, '')
+            const n = tplSlideFiles[i].match(/slide(\d+)/)[1]
+            newCtXml = newCtXml.replace(new RegExp(`<Override[^>]*PartName="[^"]*slide${n}\\.xml"[^>]*/?>`, 'g'), '')
           }
           tplZip.file('[Content_Types].xml', newCtXml)
         }
 
-        // 8. ppt/_rels/presentation.xml.rels 에서 삭제된 슬라이드 관계 제거
+        // [A-6] presentation.xml.rels / presentation.xml 정리
         if (tplSlideFiles.length > 1) {
           const presRelsFile = 'ppt/_rels/presentation.xml.rels'
           if (tplZip.file(presRelsFile)) {
             let presRelsXml = await tplZip.file(presRelsFile).async('string')
             for (let i = 1; i < tplSlideFiles.length; i++) {
-              const slideNum = tplSlideFiles[i].match(/slide(\d+)/)[1]
-              const re = new RegExp(`<Relationship[^>]*Target="slides/slide${slideNum}\\.xml"[^>]*/?>`, 'g')
-              presRelsXml = presRelsXml.replace(re, '')
+              const n = tplSlideFiles[i].match(/slide(\d+)/)[1]
+              presRelsXml = presRelsXml.replace(new RegExp(`<Relationship[^>]*Target="slides/slide${n}\\.xml"[^>]*/?>`, 'g'), '')
             }
             tplZip.file(presRelsFile, presRelsXml)
           }
-          // ppt/presentation.xml 에서 sldIdLst 항목도 정리
           if (tplZip.file('ppt/presentation.xml')) {
             let presXml = await tplZip.file('ppt/presentation.xml').async('string')
-            // presentation.xml의 sldId 목록에서 남은 슬라이드 개수만큼만 유지
-            // (간단하게: 첫 번째 sldId만 남기고 나머지 제거)
             presXml = presXml.replace(/(<p:sldIdLst>)([\s\S]*?)(<\/p:sldIdLst>)/, (full, open, inner, close) => {
-              const allIds = [...inner.matchAll(/<p:sldId[^/]*/g)]
-              if (allIds.length <= 1) return full
-              // 첫 번째만 남김
               const firstMatch = inner.match(/<p:sldId[^/]*\/>/)
               return open + (firstMatch ? firstMatch[0] : inner) + close
             })
@@ -742,28 +924,31 @@ async function downloadAssignPptx(btn, opts) {
       if (opts.returnZip) return { zip: tplZip }
       const finalAb = await tplZip.generateAsync({ type: 'arraybuffer', mimeType: 'application/vnd.openxmlformats-officedocument.presentationml.presentation' })
       const blob = new Blob([finalAb], { type: 'application/vnd.openxmlformats-officedocument.presentationml.presentation' })
-      const url = URL.createObjectURL(blob)
-      const a = document.createElement('a'); a.href = url
+      const url  = URL.createObjectURL(blob)
+      const a    = document.createElement('a'); a.href = url
       a.download = '표장표_' + (parsedData.projectTitle || '').slice(0, 10) + '.pptx'
       a.click(); URL.revokeObjectURL(url)
       showAutoAlert('✅ 표장표 생성 완료', true)
       return null
 
     } else {
-      // [B] 템플릿 없는 경우 — 기존 PptxGenJS 빈 슬라이드 방식
-      const pres = new PptxGenJS(); pres.layout = 'LAYOUT_WIDE'
-      const sld = pres.addSlide()
-      sld.addTable(tRows, { x: 0.4, y: 0.5, w: colW.reduce((a, b) => a + b, 0), colW, rowH })
+      // [B] 템플릿 없는 경우 — 빈 슬라이드에 테이블만
       if (opts.returnZip) {
-        const ab = await pres.write({ outputType: 'arraybuffer' })
-        const z = new JSZip(); await z.loadAsync(ab); return { zip: z }
+        const ab = await presTemp.write({ outputType: 'arraybuffer' })
+        const z  = new JSZip(); await z.loadAsync(ab); return { zip: z }
       }
-      await pres.writeFile({ fileName: '표장표_' + (parsedData.projectTitle || '').slice(0, 10) + '.pptx' })
+      await presTemp.writeFile({ fileName: '표장표_' + (parsedData.projectTitle || '').slice(0, 10) + '.pptx' })
       showAutoAlert('✅ 표장표 생성 완료', true)
       return null
     }
-  } catch (e) { showAutoAlert('❌ 생성 실패: ' + e.message, false); return null }
-  finally { setBtnState(btn, false) }
+
+  } catch (e) {
+    console.error('[AssignPptx] 오류:', e)
+    showAutoAlert('❌ 생성 실패: ' + e.message, false)
+    return null
+  } finally {
+    setBtnState(btn, false)
+  }
 }
 
 // ── 사진장표 PPT (템플릿 기반) ─────────────────────────────────
