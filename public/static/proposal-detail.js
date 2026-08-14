@@ -2063,17 +2063,23 @@ async function buildPhotoPptxFromTemplate(pages, templateZips) {
         }
         if (!labelMap[label]) labelMap[label] = null
       })
-      // [키워드]/[사업명]: 같은 sp에 행별 단락이 모여있음
+      // [키워드]/[사업명] 또는 [분야]/[사업명]: 같은 sp에 행별 단락이 모여있음
       // → '_jeokRows'에 해당 sp의 단락 배열 전체를 저장
+      // → '_jeokFormat': 'keyword'([키워드] 형식) | 'domain'([분야] 형식)
       for (const el of slotShapes[si]) {
         if (el.localName !== 'sp') continue
         const paras = Array.from(el.getElementsByTagNameNS(A_NS, 'p'))
-        if (paras.some(p => paraMatchesLabel(p, '[키워드]'))) {
-          labelMap['_jeokRows'] = paras  // 행별 단락 배열
+        const hasKwFormat = paras.some(p => paraMatchesLabel(p, '[키워드]'))
+        const hasDomainFormat = paras.some(p => paraMatchesLabel(p, '[분야]'))
+                             && paras.some(p => paraMatchesLabel(p, '[사업명]'))
+        if (hasKwFormat || hasDomainFormat) {
+          labelMap['_jeokRows']   = paras
+          labelMap['_jeokFormat'] = hasKwFormat ? 'keyword' : 'domain'
           break
         }
       }
-      if (!labelMap['_jeokRows']) labelMap['_jeokRows'] = null
+      if (!labelMap['_jeokRows'])   labelMap['_jeokRows']   = null
+      if (!labelMap['_jeokFormat']) labelMap['_jeokFormat'] = 'keyword'
       return labelMap
     })
 
@@ -2102,8 +2108,12 @@ async function buildPhotoPptxFromTemplate(pages, templateZips) {
       const labelMap = preFetchedParasBySlot[si]
 
       // 단순 텍스트 치환 필드
+      // domain 형식([분야] [사업명])의 경우 [분야] 라벨이 이력 sp 안에 존재하므로
+      // directMap에서 헤더용 [분야] 단락과 이력 sp의 [분야] 단락이 충돌할 수 있음
+      // → domain 형식일 때 labelMap['[분야]']를 null로 처리해 직접 치환을 막음
+      //   (이력 sp의 [분야] 치환은 _jeokRows 루프에서 처리)
       const directMap = {
-        '[분야]':       person.field || '',
+        '[분야]':       (labelMap['_jeokFormat'] === 'domain') ? null : (person.field || ''),
         '[이름]':       person.name  || '',
         '[감리원등급]':  person.grade || '',
         '[자격구분]':   pr.자격구분   || '',
@@ -2115,6 +2125,7 @@ async function buildPhotoPptxFromTemplate(pages, templateZips) {
         '[주요이력]':   pr.주요이력   || '',
       }
       Object.entries(directMap).forEach(([label, value]) => {
+        if (value === null) return   // domain 형식 [분야] 헤더 충돌 방지 — skip
         const para = labelMap[label]
         if (para) replaceLabelInParagraphNorm(para, label, value)
       })
@@ -2127,16 +2138,18 @@ async function buildPhotoPptxFromTemplate(pages, templateZips) {
         if (para) replaceLabelInParagraphNorm(para, label, 실적List[ri - 1] || '')
       }
 
-      // [키워드] [사업명] — sp 안 행별 단락에 실적 데이터 치환
-      // 데이터: "[ 주관기관 ] 한국산업인력공단, ..." → [키워드]=[ 주관기관 ], [사업명]=한국산업인력공단, ...
-      // 단락 p[i]: [키워드]와 [사업명]이 같은 단락 안에 있으므로 순서대로 치환
-      const jeokRows = labelMap['_jeokRows']
+      // [키워드] [사업명] 또는 [분야] [사업명] — sp 안 행별 단락에 실적 데이터 치환
+      // 데이터: "[ 주관기관 ] 한국산업인력공단, ..." → kwLabel=[ 주관기관 ], [사업명]=한국산업인력공단, ...
+      // 단락 p[i]: kwLabel과 [사업명]이 같은 단락 안에 있으므로 순서대로 치환
+      const jeokRows   = labelMap['_jeokRows']
+      const jeokFormat = labelMap['_jeokFormat'] || 'keyword'
+      const kwLabel    = jeokFormat === 'domain' ? '[분야]' : '[키워드]'
       if (jeokRows) {
         jeokRows.forEach((para, rowIdx) => {
           const rawLine = 실적List[rowIdx] || ''
           if (!rawLine) {
             // 실적 없는 행: 단락 내용 비우기 (빈 런으로 교체)
-            replaceLabelInParagraphNorm(para, '[키워드]', '')
+            replaceLabelInParagraphNorm(para, kwLabel, '')
             replaceLabelInParagraphNorm(para, '[사업명]', '')
             return
           }
@@ -2145,11 +2158,11 @@ async function buildPhotoPptxFromTemplate(pages, templateZips) {
           if (bracketEnd !== -1) {
             const kw = rawLine.slice(0, bracketEnd + 1).trim()   // [ 주관기관 ]
             const nm = rawLine.slice(bracketEnd + 1).trim()      // 한국산업인력공단, ...
-            replaceLabelInParagraphNorm(para, '[키워드]', kw)
+            replaceLabelInParagraphNorm(para, kwLabel, kw)
             replaceLabelInParagraphNorm(para, '[사업명]', nm)
           } else {
-            // ] 없으면 전체를 [사업명] 자리에 넣고 [키워드]는 비움
-            replaceLabelInParagraphNorm(para, '[키워드]', '')
+            // ] 없으면 전체를 [사업명] 자리에 넣고 kwLabel은 비움
+            replaceLabelInParagraphNorm(para, kwLabel, '')
             replaceLabelInParagraphNorm(para, '[사업명]', rawLine)
           }
         })
@@ -2331,10 +2344,13 @@ async function downloadPhotoAssignPptx(btn, opts) {
           } catch (e) { console.warn('photo-profile 로드 실패:', p.name, e) }
         })
     )
-    // slotPeople에 profile 주입
+    // slotPeople에 profile 주입 + photo-profile의 분야(domain)로 field 보완
     pages.forEach(pg => {
       Object.values(pg.slotPeople).forEach(p => {
-        p.profile = profileMap[p.personnelId] || {}
+        const prof = profileMap[p.personnelId] || {}
+        p.profile = prof
+        // photo-profile API가 반환한 분야가 있으면 우선 사용
+        if (!p.field && prof['분야']) p.field = prof['분야']
       })
     })
 
