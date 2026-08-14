@@ -665,17 +665,21 @@ async function generateMenuPpt(menu, vm) {
           let xml = await zip.file(slideFile).async('string');
 
           // ── 디버그: 제목 관련 텍스트가 XML에 어떻게 저장됐는지 확인 ──
-          const tMatches = [...xml.matchAll(/<a:t[^>]*>([^<]*제[^<]*목[^<]*)<\/a:t>/g)];
-          const bracketMatches = [...xml.matchAll(/<a:t[^>]*>([^<]*[\[［\[제목\]]\[]\]]?[^<]*)<\/a:t>/g)].slice(0, 5);
-          if (tMatches.length || xml.includes('제목') || xml.includes('&#91;')) {
+          if (xml.includes('제목') || xml.includes('&#91;')) {
             console.log('[PptEngine][DEBUG] slideFile:', slideFile);
             console.log('[PptEngine][DEBUG] xml contains [제목]?', xml.includes('[제목]'));
             console.log('[PptEngine][DEBUG] xml contains &#91;?', xml.includes('&#91;'));
-            console.log('[PptEngine][DEBUG] xml contains 제목?', xml.includes('제목'));
-            // 제목 주변 200자 덤프
+            // 제목 주변 500자 덤프 (괄호 포함 여부 확인)
             const idx = xml.indexOf('제목');
             if (idx >= 0) {
-              console.log('[PptEngine][DEBUG] 제목 주변 XML:', JSON.stringify(xml.substring(Math.max(0, idx-100), idx+100)));
+              const snippet = xml.substring(Math.max(0, idx-300), idx+200);
+              console.log('[PptEngine][DEBUG] 제목 주변 XML(500자):', JSON.stringify(snippet));
+              // <a:t> 값만 추출해서 코드포인트 확인
+              const atMatches = [...snippet.matchAll(/<a:t[^>]*>([\s\S]*?)<\/a:t>/g)];
+              atMatches.forEach((m, i) => {
+                const cps = [...m[1]].map(c => 'U+' + c.codePointAt(0).toString(16).toUpperCase().padStart(4,'0') + '(' + c + ')').join(' ');
+                console.log('[PptEngine][DEBUG] <a:t>[' + i + ']:', JSON.stringify(m[1]), '→', cps);
+              });
             }
           }
 
