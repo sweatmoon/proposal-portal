@@ -1226,7 +1226,6 @@ async function downloadPhotoAssignPptx(btn, opts) {
       const { title: slideTitle, sheetSize, catKeys } = toc
       const meta = PHOTO_LAYOUT_META[sheetSize]
       if (!meta) continue
-      const fillOrder = computeFillOrder(meta.rows, meta.cols)
 
       // portalOrder 전체를 순회하면서 선택된 팀에 속하는 인원만 필터 (원본 순서 유지)
       const people = (portalOrder || [])
@@ -1251,10 +1250,13 @@ async function downloadPhotoAssignPptx(btn, opts) {
       if (!people.length) continue
 
       // 템플릿 크기 단위로 페이지 분할
+      // slotPeople: i번째 인원 → orderIndexToSlot[i] 슬롯에 배치
+      // (행 우선 fillOrder 기준이 아니라 템플릿 XML 슬롯 순서 기준으로 채워야
+      //  빈 슬롯이 뒤쪽에 몰리고 앞 슬롯부터 순서대로 채워짐)
       for (let start = 0; start < people.length; start += sheetSize) {
         const pagePeople = people.slice(start, start + sheetSize)
         const slotPeople = {}
-        pagePeople.forEach((p, i) => { slotPeople[fillOrder[i]] = p })
+        pagePeople.forEach((p, i) => { slotPeople[meta.orderIndexToSlot[i]] = p })
         pages.push({ sheetSize, slotPeople, slideTitle })
       }
     }
