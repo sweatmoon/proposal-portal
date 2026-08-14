@@ -2012,14 +2012,20 @@ async function buildPhotoPptxFromTemplate(pages, templateZips) {
       if (xf) xfrmOf.set(el, xf)
     })
 
-    // ── 슬롯별 shape 귀속: sp 중앙 좌표 → 슬롯 인덱스(0-based) ──
+    // ── 슬롯별 shape 귀속: xfrmOf 캐시의 중앙 좌표 → 슬롯 인덱스(0-based) ──
     const N = meta.rows * meta.cols
+    const bounds = SLOT_BOUNDARIES[size]
     // slotShapes[slotIdx] = 해당 슬롯에 속하는 shape 요소 배열
     const slotShapes = Array.from({ length: N }, () => [])
     shapeEls.forEach(el => {
       const xf = xfrmOf.get(el)
-      if (!xf) return
-      const si = getSpSlotIndex(el, size)
+      if (!xf || !bounds) return
+      const cx = xf.x + xf.w / 2  // 중앙 x
+      const cy = xf.y + xf.h / 2  // 중앙 y
+      const col = bounds.colBounds.filter(b => cx >= b).length
+      const row = bounds.rowBounds.filter(b => cy >= b).length
+      const cols = bounds.colBounds.length + 1
+      const si = row * cols + col
       if (si >= 0 && si < N) slotShapes[si].push(el)
     })
 
