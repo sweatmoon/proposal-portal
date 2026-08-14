@@ -656,6 +656,35 @@ async function generateMenuPpt(menu, vm) {
         const bytes = new Uint8Array(bin.length);
         for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
         const zip = await JSZip.loadAsync(bytes);
+
+        // ── [제목] 플레이스홀더 → 목차명 치환 ──────────────────────
+        // 목차명: menu_number + menu_name (예: "1.1 감리 수행 소식")
+        const menuTitle = [menu.menu_number, menu.menu_name].filter(Boolean).join(' ');
+        const A_NS = 'http://schemas.openxmlformats.org/drawingml/2006/main';
+        const slideFiles = Object.keys(zip.files).filter(f => /^ppt\/slides\/slide\d+\.xml$/.test(f));
+        for (const slideFile of slideFiles) {
+          let xml = await zip.file(slideFile).async('string');
+          if (!xml.includes('[제목]')) continue;
+          // DOMParser로 [제목] 런 치환
+          const doc = new DOMParser().parseFromString(xml, 'application/xml');
+          const paras = Array.from(doc.getElementsByTagNameNS(A_NS, 'p'));
+          for (const pEl of paras) {
+            const runs = Array.from(pEl.getElementsByTagNameNS(A_NS, 'r'));
+            const concat = runs.map(r => { const t = r.getElementsByTagNameNS(A_NS, 't')[0]; return t ? t.textContent : ''; }).join('');
+            if (!concat.includes('[제목]')) continue;
+            // 첫 번째 런에 목차명 넣고 나머지 런 제거
+            let remaining = concat.replace('[제목]', menuTitle);
+            let first = true;
+            for (const r of runs) {
+              const tEl = r.getElementsByTagNameNS(A_NS, 't')[0];
+              if (!tEl) continue;
+              if (first) { tEl.textContent = remaining; first = false; }
+              else { r.parentNode && r.parentNode.removeChild(r); }
+            }
+          }
+          zip.file(slideFile, new XMLSerializer().serializeToString(doc));
+        }
+
         console.log('[PptEngine] 템플릿 삽입:', menu.menu_code, '-', tpl.pptx_file_path || tpl.template_name);
         result = { zip, mergeStrategy: 'FOREIGN_TEMPLATE' };
       } catch (e) {
