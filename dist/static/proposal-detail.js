@@ -1132,16 +1132,34 @@ async function buildHistoryPptx(opts) {
 
       // 원본 rPr 추출 (폰트·크기·외곽선 등 서식 기반)
       const rPrMatch = inner.match(/<a:rPr\b[\s\S]*?<\/a:rPr>/)
-      // rPr에서 solidFill만 교체하는 헬퍼
+      // rPr에서 글자색(solidFill)만 교체하는 헬퍼
+      // ※ <a:ln> 안의 solidFill(테두리색)은 건드리지 않음
       function makeRPr(color) {
         if (!rPrMatch) {
           return `<a:rPr lang="ko-KR" sz="900" dirty="0"><a:solidFill><a:srgbClr val="${color}"/></a:solidFill></a:rPr>`
         }
-        // 기존 solidFill 색 교체
-        return rPrMatch[0].replace(
-          /<a:solidFill>[\s\S]*?<\/a:solidFill>/,
-          `<a:solidFill><a:srgbClr val="${color}"/></a:solidFill>`
-        )
+        const rpr = rPrMatch[0]
+        // <a:ln>...</a:ln> 블록을 임시 토큰으로 보호 → solidFill 교체 → 복원
+        const lnBlocks = []
+        const protected_ = rpr.replace(/<a:ln\b[\s\S]*?<\/a:ln>/g, m => {
+          lnBlocks.push(m)
+          return `\x00LN${lnBlocks.length - 1}\x00`
+        })
+        // <a:ln> 바깥의 solidFill만 교체 (없으면 </a:rPr> 앞에 삽입)
+        let replaced
+        if (/<a:solidFill>/.test(protected_)) {
+          replaced = protected_.replace(
+            /<a:solidFill>[\s\S]*?<\/a:solidFill>/,
+            `<a:solidFill><a:srgbClr val="${color}"/></a:solidFill>`
+          )
+        } else {
+          replaced = protected_.replace(
+            '</a:rPr>',
+            `<a:solidFill><a:srgbClr val="${color}"/></a:solidFill></a:rPr>`
+          )
+        }
+        // 보호된 <a:ln> 블록 복원
+        return replaced.replace(/\x00LN(\d+)\x00/g, (_, i) => lnBlocks[+i])
       }
 
       // 빈 텍스트 → 빈 단락 (행 자체는 유지해서 레이아웃 깨지지 않게)
