@@ -2206,11 +2206,41 @@ async function buildPhotoPptxFromTemplate(pages, templateZips) {
         }
       }
 
-      // [IT경력] — 텍스트 치환 (줄바꿈은 \n → 단일 런에 삽입, 색상 서식 제거)
+      // [IT경력] — 텍스트 치환 + 줄바꿈(<a:br>) 삽입
+      // 전략: 첫 줄로 replaceLabelInParagraphNorm 치환 → 나머지 줄은 <a:br>+런으로 뒤에 추가
       const itPara = labelMap['[IT경력]']
       if (itPara) {
-        const itValue = (pr.IT경력 || '').replace(/\n/g, ' / ')
-        replaceLabelInParagraphNorm(itPara, '[IT경력]', itValue)
+        const itLines = (pr.IT경력 || '').split('\n').filter(l => l.trim())
+        if (!itLines.length) {
+          replaceLabelInParagraphNorm(itPara, '[IT경력]', '')
+        } else {
+          // ① 첫 줄로 [IT경력] 치환
+          replaceLabelInParagraphNorm(itPara, '[IT경력]', itLines[0])
+          // ② 나머지 줄: <a:br> + 런 추가
+          if (itLines.length > 1) {
+            const itDoc   = itPara.ownerDocument
+            const baseRun = Array.from(itPara.getElementsByTagNameNS(A_NS, 'r'))[0]
+            const baseRPr = baseRun ? baseRun.getElementsByTagNameNS(A_NS, 'rPr')[0] : null
+            for (let li = 1; li < itLines.length; li++) {
+              const br   = itDoc.createElementNS(A_NS, 'a:br')
+              const brPr = itDoc.createElementNS(A_NS, 'a:rPr')
+              if (baseRPr) Array.from(baseRPr.attributes).forEach(a => brPr.setAttribute(a.name, a.value))
+              br.appendChild(brPr)
+              itPara.appendChild(br)
+              const r  = itDoc.createElementNS(A_NS, 'a:r')
+              const rPr = itDoc.createElementNS(A_NS, 'a:rPr')
+              if (baseRPr) {
+                Array.from(baseRPr.attributes).forEach(a => rPr.setAttribute(a.name, a.value))
+                Array.from(baseRPr.childNodes).forEach(c => rPr.appendChild(c.cloneNode(true)))
+              }
+              const t = itDoc.createElementNS(A_NS, 'a:t')
+              t.textContent = itLines[li]
+              r.appendChild(rPr)
+              r.appendChild(t)
+              itPara.appendChild(r)
+            }
+          }
+        }
       }
     }
 
