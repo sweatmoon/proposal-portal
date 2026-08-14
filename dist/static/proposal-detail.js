@@ -1055,10 +1055,45 @@ async function buildHistoryPptx(opts) {
   // ── 4. 인원 데이터를 플레이스홀더 맵으로 변환 ──────────────────
   // 분산런 치환 함수 — 파라미터 단위 (pptx-engine과 동일 로직)
   function replaceInXml(xml, placeholder, value) {
-    // Case 1: 단일 런 — 그대로 치환
-    if (xml.includes(placeholder)) {
-      return xml.split(placeholder).join(value)
+    // value에 <br>이 포함된 경우: PPTX <a:br> 태그로 분리 치환
+    const hasBr = typeof value === 'string' && value.includes('<br>')
+
+    // <br> 포함 시 단락 내 해당 런을 찾아 <a:r>파트1</a:r><a:br><a:rPr/></a:br><a:r>파트2</a:r> 형태로 교체
+    function replaceBrInPara(inner, parts) {
+      const rPrMatch = inner.match(/<a:rPr\b[\s\S]*?<\/a:rPr>/)
+      const rPr = rPrMatch ? rPrMatch[0] : ''
+      // <a:br> 태그: rPr를 그대로 포함 (서식 유지)
+      const brTag = rPr ? `<a:br>${rPr}</a:br>` : `<a:br/>`
+      // 원본 런에서 <a:t> 속성 추출 (xml:space 등)
+      const tAttrMatch = inner.match(/<a:t([^>]*)>/)
+      const tAttr = tAttrMatch ? tAttrMatch[1] : ''
+      // 각 파트를 <a:r>로 감싸고 사이에 <a:br> 삽입
+      // 첫 런에는 원본 rPr 재사용, 이후 런도 동일 rPr 적용
+      const runOpen = rPr ? `<a:r>${rPr}` : `<a:r>`
+      return parts.map(p => `${runOpen}<a:t${tAttr}>${escapeXml(p)}</a:t></a:r>`).join(brTag)
     }
+
+    // Case 1: 단일 런 — 그대로 치환 (또는 <br> 포함 시 분리 치환)
+    if (xml.includes(placeholder)) {
+      if (!hasBr) return xml.split(placeholder).join(value)
+      // <br> 분리: 단락 단위로 처리
+      const parts = value.split('<br>')
+      const paraReg = /(<a:p\b[^>]*>)([\s\S]*?)(<\/a:p>)/g
+      return xml.replace(paraReg, (full, open, inner, close) => {
+        if (!inner.includes(placeholder)) return full
+        // 해당 플레이스홀더를 포함하는 런 찾기
+        let done = false
+        const newInner = inner.replace(/<a:r\b[\s\S]*?<\/a:r>/g, run => {
+          if (done) return run
+          const t = run.match(/<a:t[^>]*>([^<]*)<\/a:t>/)
+          if (!t || !t[1].includes(placeholder)) return run
+          done = true
+          return replaceBrInPara(run, parts)
+        })
+        return open + newInner + close
+      })
+    }
+
     // Case 2: 분산 런 — 단락 단위로 재조합
     // placeholder를 구성하는 문자가 여러 <a:r>에 나뉘어 있을 수 있음
     const paraReg = /(<a:p\b[^>]*>)([\s\S]*?)(<\/a:p>)/g
@@ -1082,6 +1117,11 @@ async function buildHistoryPptx(opts) {
         if (!overlap) return run
         if (!firstDone) {
           firstDone = true
+          if (hasBr) {
+            // <br> 포함: 이 런을 기점으로 분리 런 삽입
+            const parts = value.split('<br>')
+            return replaceBrInPara(run, parts)
+          }
           return run.replace(/<a:t([^>]*)>[^<]*<\/a:t>/, `<a:t$1>${escapeXml(value)}</a:t>`)
         }
         return ''
