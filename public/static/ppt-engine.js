@@ -664,23 +664,13 @@ async function generateMenuPpt(menu, vm) {
         for (const slideFile of slideFiles2) {
           let xml = await zip.file(slideFile).async('string');
 
-          // ── 디버그: 제목 관련 텍스트가 XML에 어떻게 저장됐는지 확인 ──
-          if (xml.includes('제목') || xml.includes('&#91;')) {
-            console.log('[PptEngine][DEBUG] slideFile:', slideFile);
-            console.log('[PptEngine][DEBUG] xml contains [제목]?', xml.includes('[제목]'));
-            console.log('[PptEngine][DEBUG] xml contains &#91;?', xml.includes('&#91;'));
-            // 제목 주변 500자 덤프 (괄호 포함 여부 확인)
-            const idx = xml.indexOf('제목');
-            if (idx >= 0) {
-              const snippet = xml.substring(Math.max(0, idx-300), idx+200);
-              console.log('[PptEngine][DEBUG] 제목 주변 XML(500자):', JSON.stringify(snippet));
-              // <a:t> 값만 추출해서 코드포인트 확인
-              const atMatches = [...snippet.matchAll(/<a:t[^>]*>([\s\S]*?)<\/a:t>/g)];
-              atMatches.forEach((m, i) => {
-                const cps = [...m[1]].map(c => 'U+' + c.codePointAt(0).toString(16).toUpperCase().padStart(4,'0') + '(' + c + ')').join(' ');
-                console.log('[PptEngine][DEBUG] <a:t>[' + i + ']:', JSON.stringify(m[1]), '→', cps);
-              });
-            }
+          // ── 디버그: slide1.xml 한정, 전체 <a:t> 목록 덤프 ──
+          if (slideFile.endsWith('slide1.xml') && xml.includes('제목')) {
+            const allAt = [...xml.matchAll(/<a:t[^>]*>([\s\S]*?)<\/a:t>/g)];
+            console.log('[PptEngine][DEBUG]', slideFile, '— 전체 <a:t> 목록:');
+            allAt.forEach((m, i) => {
+              console.log('  [' + i + ']', JSON.stringify(m[1]));
+            });
           }
 
           // Case 1: 단일 <a:t>에 [제목] 그대로 있는 경우
