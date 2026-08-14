@@ -596,6 +596,61 @@ async function downloadAssignPptx(btn, opts) {
       for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i)
       const tplZip = await JSZip.loadAsync(bytes)
 
+      // 3-1. [제목] 플레이스홀더 → 목차명 치환 (ppt-engine.js default case와 동일 로직)
+      if (opts.menuTitle) {
+        const menuTitle = opts.menuTitle
+        const slideFilesT = Object.keys(tplZip.files).filter(f => /^ppt\/slides\/slide\d+\.xml$/.test(f))
+        for (const sf of slideFilesT) {
+          let xml = await tplZip.file(sf).async('string')
+
+          // Case 1: 단일 런
+          if (xml.includes('[제목]')) {
+            xml = xml.replace(/\[제목\]/g, menuTitle)
+            tplZip.file(sf, xml)
+            continue
+          }
+
+          // Case 2: 분산 런 ([, 제목, ] 각각 별개 <a:r>)
+          if (xml.includes('제목')) {
+            const paraReg = /(<a:p\b[^>]*>)([\s\S]*?)(<\/a:p>)/g
+            let changed = false
+            xml = xml.replace(paraReg, (full, open, inner, close) => {
+              const runs = []
+              inner.replace(/<a:r\b[\s\S]*?<\/a:r>/g, run => {
+                const t = run.match(/<a:t[^>]*>([^<]*)<\/a:t>/)
+                runs.push({ run, text: t ? t[1] : '' })
+              })
+              const concat = runs.map(r => r.text).join('')
+              if (!concat.includes('[제목]')) return full
+
+              const jStart = concat.indexOf('[제목]')
+              const jEnd   = jStart + 4
+
+              let pos = 0
+              let firstJRun = true
+              const newInner = inner.replace(/<a:r\b[\s\S]*?<\/a:r>/g, run => {
+                const t = run.match(/<a:t[^>]*>([^<]*)<\/a:t>/)
+                const txt = t ? t[1] : ''
+                const rStart = pos
+                const rEnd   = pos + txt.length
+                pos = rEnd
+                if (txt === '') return run
+                const overlap = rEnd > jStart && rStart < jEnd
+                if (!overlap) return run
+                if (firstJRun) {
+                  firstJRun = false
+                  return run.replace(/<a:t([^>]*)>[^<]*<\/a:t>/, `<a:t$1>${menuTitle}</a:t>`)
+                }
+                return ''
+              })
+              changed = true
+              return open + newInner + close
+            })
+            if (changed) tplZip.file(sf, xml)
+          }
+        }
+      }
+
       // 4. 템플릿의 슬라이드 파일 목록 파악
       const tplSlideFiles = Object.keys(tplZip.files)
         .filter(f => /^ppt\/slides\/slide\d+\.xml$/.test(f))
