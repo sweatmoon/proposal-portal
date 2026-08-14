@@ -2231,6 +2231,9 @@ async function buildPhotoPptxFromTemplate(pages, templateZips) {
           return sf
         }
 
+        // 색상 관련 요소 태그 목록 (이것들은 모두 제거 후 solidFill로 교체)
+        const COLOR_TAGS = new Set(['solidFill','gradFill','pattFill','blipFill','grpFill','noFill','schemeClr','sysClr','hslClr','prstClr'])
+
         // hex: 색상, useBodyFont: true이면 KoPub돋움체 Medium 폰트 적용
         function makeItRun(text, hex, useBodyFont) {
           const r   = itDoc.createElementNS(A_NS, 'a:r')
@@ -2238,13 +2241,12 @@ async function buildPhotoPptxFromTemplate(pages, templateZips) {
           if (baseRPrClone) {
             Array.from(baseRPrClone.attributes).forEach(a => rPr.setAttribute(a.name, a.value))
             Array.from(baseRPrClone.childNodes).forEach(c => {
-              // solidFill, latin 폰트는 새로 세팅하므로 복사 제외
-              if (c.localName !== 'solidFill' && c.localName !== 'latin') rPr.appendChild(c.cloneNode(true))
+              // 색상 관련 요소 및 latin 폰트는 새로 세팅하므로 복사 제외
+              if (!COLOR_TAGS.has(c.localName) && c.localName !== 'latin') rPr.appendChild(c.cloneNode(true))
             })
           }
           rPr.appendChild(makeItSolidFill(hex))
           if (useBodyFont) {
-            // KoPub돋움체 Medium 폰트 지정
             const latin = itDoc.createElementNS(A_NS, 'a:latin')
             latin.setAttribute('typeface', 'KoPub돋움체 Medium')
             rPr.appendChild(latin)
