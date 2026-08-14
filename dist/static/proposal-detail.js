@@ -951,6 +951,334 @@ async function downloadAssignPptx(btn, opts) {
   }
 }
 
+// ── buildHistoryPptx ────────────────────────────────────────────
+// 감리원/전문가 유사 감리 실적 및 경력·자격 장표 생성 (플레이스홀더 방식)
+//
+// 동작 방식:
+//   1. 템플릿 PPTX(opts.templateB64)를 JSZip으로 로드
+//   2. 템플릿 첫 슬라이드에서 [P1_xxx] ~ [PN_xxx] 플레이스홀더를 인원 데이터로 치환
+//   3. 인원수가 슬라이드당 capacity(감리원=2, 전문가=4)를 초과하면 슬라이드 복제
+//   4. [제목] 치환 (분산런 포함)
+//   5. 합본 ZIP 반환 또는 다운로드
+//
+// 템플릿 PPTX 제작 가이드 — 각 인원 자리에 아래 플레이스홀더를 정확히 입력:
+//
+//   1번 인원:
+//     [P1_단계]   감리단계 (줄바꿈 필요 시 셀 내 줄바꿈으로 표현됨, 코드가 \r\n/\r\n으로 채움)
+//     [P1_분야]   감리분야
+//     [P1_소속]   소속 및 상근여부
+//     [P1_이름]   성명
+//     [P1_번호]   감리원번호
+//     [P1_구분]   구분(등급)
+//     [P1_투입]   현장감리 투입율
+//     [P1_요약]   유사 감리 실적 : N건 / 감리 이외의 경력 : N년 N개월
+//     [P1_실적]   유사 감리 실적 목록 (여러 줄)
+//     [P1_경력]   주요 경력 및 자격 요약
+//
+//   2번 인원: [P2_단계] [P2_분야] ... [P2_경력]
+//   3번 인원: [P3_xxx] (전문가 템플릿용)
+//   4번 인원: [P4_xxx] (전문가 템플릿용)
+// ────────────────────────────────────────────────────────────────
+
+async function buildHistoryPptx(opts) {
+  // opts: { templateB64, groupFilter:'AUDITOR'|'EXPERT', perPage:2|4, menuTitle, returnZip }
+  opts = opts || {}
+  const perPage = opts.perPage || 2
+
+  if (!opts.templateB64) {
+    throw new Error('템플릿 PPTX가 업로드되지 않았습니다. 관리자 메뉴에서 템플릿을 업로드해 주세요.')
+  }
+
+  // ── 1. 인원 데이터 수집 ────────────────────────────────────────
+  let baseRows = computeAssignRows()
+  if (opts.groupFilter === 'AUDITOR') baseRows = baseRows.filter(r => r.isAudit)
+  else if (opts.groupFilter === 'EXPERT') baseRows = baseRows.filter(r => !r.isAudit)
+  if (!baseRows.length) throw new Error('해당 그룹의 인력 데이터가 없습니다.')
+
+  // ── 2. photo-profile API 병렬 호출 ────────────────────────────
+  const pidMap     = parsedData.personnelIdMap || {}
+  const proposalId = parsedData.proposalId || 0
+  const profileMap = {}
+  await Promise.all(baseRows.map(async r => {
+    const pid = pidMap[r.name] || 0
+    if (!pid) return
+    try {
+      const res = await fetch(`/api/personnel/${pid}/photo-profile?projectId=${proposalId}`)
+      if (res.ok) { const j = await res.json(); if (j.ok) profileMap[r.name] = j.data }
+    } catch (e) { console.warn('[HistoryPptx] photo-profile 실패:', r.name, e) }
+  }))
+
+  // ── 3. 헬퍼 함수들 ─────────────────────────────────────────────
+
+  // IT경력기간 파싱: "YYYY.MM ~ YYYY.MM" → "N년 N개월"
+  function parseCareerDuration(s) {
+    if (!s) return ''
+    const m = s.match(/(\d{4})\.(\d{2})\s*~\s*(?:(\d{4})\.(\d{2})|현재)/)
+    if (!m) return s
+    const sy = +m[1], sm = +m[2], now = new Date()
+    const ey = m[3] ? +m[3] : now.getFullYear()
+    const em = m[4] ? +m[4] : now.getMonth() + 1
+    let mo = (ey - sy) * 12 + (em - sm)
+    if (mo < 0) mo = 0
+    const y = Math.floor(mo / 12), rm = mo % 12
+    if (y === 0) return `${rm}개월`
+    if (rm === 0) return `${y}년`
+    return `${y}년 ${rm}개월`
+  }
+
+  // 소속·상근 텍스트 생성: "제안사\r\n/\r\n상근" 형식
+  function buildSosok(affil) {
+    // affil은 "제안사 / 상근" 또는 "제안사" 형태
+    return (affil || '').replace(' / ', '\r\n/\r\n')
+  }
+
+  // 감리단계 텍스트: "설계 / 구현 / 종료" → "설계\r\n/\r\n구현\r\n/\r\n종료"
+  function buildStage(stageLabel) {
+    return (stageLabel || '').replace(/ \/ /g, '\r\n/\r\n')
+  }
+
+  // 이름 공백 처리: "이승학" → "이 승 학" (이미 computeAssignRows에서 처리됐을 수도)
+  function spaceName(name) {
+    if (!name) return ''
+    // 이미 공백이 있으면 그대로, 없으면 한 글자씩 띄움
+    if (name.includes(' ')) return name
+    return name.split('').join(' ')
+  }
+
+  // 실적 목록 텍스트
+  function buildJeok(profile) {
+    if (!profile) return ''
+    return (Array.isArray(profile.실적) ? profile.실적 : []).join('\r\n')
+  }
+
+  // 주요경력 텍스트
+  function buildCareer(profile) {
+    if (!profile) return ''
+    const parts = []
+    if (profile.주요이력) parts.push(profile.주요이력)
+    if (profile.자격요약) parts.push(profile.자격요약)
+    return parts.join('\r\n')
+  }
+
+  // 요약 텍스트: "유사 감리 실적 : N건 / 감리 이외의 경력 : N년 N개월"
+  function buildYoyak(profile) {
+    if (!profile) return ''
+    const cnt = profile.감리횟수 != null ? `${profile.감리횟수}건` : '-'
+    const dur = parseCareerDuration(profile.IT경력기간) || '-'
+    return `유사 감리 실적 : ${cnt} / 감리 이외의 경력 : ${dur}`
+  }
+
+  // ── 4. 인원 데이터를 플레이스홀더 맵으로 변환 ──────────────────
+  // 분산런 치환 함수 — 파라미터 단위 (pptx-engine과 동일 로직)
+  function replaceInXml(xml, placeholder, value) {
+    // Case 1: 단일 런 — 그대로 치환
+    if (xml.includes(placeholder)) {
+      return xml.split(placeholder).join(value)
+    }
+    // Case 2: 분산 런 — 단락 단위로 재조합
+    // placeholder를 구성하는 문자가 여러 <a:r>에 나뉘어 있을 수 있음
+    const paraReg = /(<a:p\b[^>]*>)([\s\S]*?)(<\/a:p>)/g
+    let changed = false
+    const result = xml.replace(paraReg, (full, open, inner, close) => {
+      const runs = []
+      inner.replace(/<a:r\b[\s\S]*?<\/a:r>/g, run => {
+        const t = run.match(/<a:t[^>]*>([^<]*)<\/a:t>/)
+        runs.push({ run, text: t ? t[1] : '' })
+      })
+      const concat = runs.map(r => r.text).join('')
+      if (!concat.includes(placeholder)) return full
+      const pStart = concat.indexOf(placeholder), pEnd = pStart + placeholder.length
+      let pos = 0, firstDone = false
+      const newInner = inner.replace(/<a:r\b[\s\S]*?<\/a:r>/g, run => {
+        const t = run.match(/<a:t[^>]*>([^<]*)<\/a:t>/)
+        const txt = t ? t[1] : ''
+        const rStart = pos, rEnd = pos + txt.length; pos = rEnd
+        if (txt === '') return run
+        const overlap = rEnd > pStart && rStart < pEnd
+        if (!overlap) return run
+        if (!firstDone) {
+          firstDone = true
+          return run.replace(/<a:t([^>]*)>[^<]*<\/a:t>/, `<a:t$1>${escapeXml(value)}</a:t>`)
+        }
+        return ''
+      })
+      changed = true
+      return open + newInner + close
+    })
+    return changed ? result : xml
+  }
+
+  function escapeXml(s) {
+    return String(s)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+  }
+
+  // 인원 N명의 데이터를 XML에서 [P1_xxx]~[PN_xxx] 치환
+  function applyPersonData(xml, people) {
+    let result = xml
+    people.forEach((r, idx) => {
+      const n = idx + 1
+      const prof = profileMap[r.name] || {}
+      const map = {
+        [`[P${n}_단계]`]: buildStage(r.stageLabel),
+        [`[P${n}_분야]`]: r.field || '',
+        [`[P${n}_소속]`]: buildSosok(r.affil),
+        [`[P${n}_이름]`]: spaceName(r.name),
+        [`[P${n}_번호]`]: r.certDisplay || '',
+        [`[P${n}_구분]`]: r.grade || '',
+        [`[P${n}_투입]`]: '100%',
+        [`[P${n}_요약]`]: buildYoyak(prof),
+        [`[P${n}_실적]`]: buildJeok(prof),
+        [`[P${n}_경력]`]: buildCareer(prof),
+      }
+      for (const [ph, val] of Object.entries(map)) {
+        result = replaceInXml(result, ph, val)
+      }
+    })
+    // 미할당 슬롯 플레이스홀더 제거 (인원이 perPage에 미달할 때)
+    for (let n = people.length + 1; n <= perPage; n++) {
+      const empties = [`[P${n}_단계]`,`[P${n}_분야]`,`[P${n}_소속]`,`[P${n}_이름]`,
+                       `[P${n}_번호]`,`[P${n}_구분]`,`[P${n}_투입]`,`[P${n}_요약]`,
+                       `[P${n}_실적]`,`[P${n}_경력]`]
+      for (const ph of empties) result = replaceInXml(result, ph, '')
+    }
+    return result
+  }
+
+  // ── 5. [제목] 치환 함수 ────────────────────────────────────────
+  function applyMenuTitle(xml, menuTitle) {
+    if (!menuTitle) return xml
+    if (xml.includes('[제목]')) return xml.split('[제목]').join(menuTitle)
+    if (!xml.includes('제목')) return xml
+    const paraReg = /(<a:p\b[^>]*>)([\s\S]*?)(<\/a:p>)/g
+    let changed = false
+    const result = xml.replace(paraReg, (full, open, inner, close) => {
+      const runs = []
+      inner.replace(/<a:r\b[\s\S]*?<\/a:r>/g, run => {
+        const t = run.match(/<a:t[^>]*>([^<]*)<\/a:t>/)
+        runs.push({ run, text: t ? t[1] : '' })
+      })
+      const concat = runs.map(r => r.text).join('')
+      if (!concat.includes('[제목]')) return full
+      const jS = concat.indexOf('[제목]'), jE = jS + 4
+      let pos = 0, firstDone = false
+      const newInner = inner.replace(/<a:r\b[\s\S]*?<\/a:r>/g, run => {
+        const t = run.match(/<a:t[^>]*>([^<]*)<\/a:t>/)
+        const txt = t ? t[1] : ''
+        const rS = pos, rE = pos + txt.length; pos = rE
+        if (txt === '') return run
+        if (!(rE > jS && rS < jE)) return run
+        if (!firstDone) { firstDone = true; return run.replace(/<a:t([^>]*)>[^<]*<\/a:t>/, `<a:t$1>${menuTitle}</a:t>`) }
+        return ''
+      })
+      changed = true; return open + newInner + close
+    })
+    return changed ? result : xml
+  }
+
+  // ── 6. 템플릿 PPTX 로드 ───────────────────────────────────────
+  const bin = atob(opts.templateB64)
+  const bytes = new Uint8Array(bin.length)
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i)
+  const tplZip = await JSZip.loadAsync(bytes)
+
+  // 슬라이드 파일 목록 (정렬)
+  const allSlideFiles = Object.keys(tplZip.files)
+    .filter(f => /^ppt\/slides\/slide\d+\.xml$/.test(f))
+    .sort((a, b) => parseInt(a.match(/slide(\d+)/)[1]) - parseInt(b.match(/slide(\d+)/)[1]))
+
+  if (!allSlideFiles.length) throw new Error('템플릿에 슬라이드가 없습니다.')
+  const tplSlideFile = allSlideFiles[0]
+  const tplSlideXml  = await tplZip.file(tplSlideFile).async('string')
+
+  // ── 7. 인원을 perPage 단위로 청크 분할 ────────────────────────
+  const chunks = []
+  for (let i = 0; i < baseRows.length; i += perPage) {
+    chunks.push(baseRows.slice(i, i + perPage))
+  }
+
+  // ── 8. 슬라이드 복제 + 치환 ───────────────────────────────────
+  // 기존 슬라이드 모두 제거 후 새로 생성
+  // presentation.xml, presentation.xml.rels, [Content_Types].xml 관리
+
+  let presXml     = await tplZip.file('ppt/presentation.xml').async('string')
+  let presRelsXml = await tplZip.file('ppt/_rels/presentation.xml.rels').async('string')
+  let ctXml       = await tplZip.file('[Content_Types].xml').async('string')
+
+  // 기존 슬라이드 관계 모두 제거
+  presXml     = presXml.replace(/<p:sldIdLst>[\s\S]*?<\/p:sldIdLst>/, '<p:sldIdLst></p:sldIdLst>')
+  presRelsXml = presRelsXml.replace(/<Relationship\b[^/]*Type="[^"]*\/slide"[^/]*\/>/g, '')
+  ctXml       = ctXml.replace(/<Override[^>]*presentationml\.slide\+xml[^>]*\/>/g, '')
+
+  // 기존 슬라이드 파일들 삭제
+  for (const sf of allSlideFiles) {
+    tplZip.remove(sf)
+    const rf = sf.replace('ppt/slides/', 'ppt/slides/_rels/') + '.rels'
+    if (tplZip.file(rf)) tplZip.remove(rf)
+  }
+
+  // 현재 최대 rId, sldId 파악
+  let maxRid = 0; presRelsXml.replace(/Id="rId(\d+)"/g, (_, n) => { maxRid = Math.max(maxRid, +n) })
+  let maxSldId = 255; presXml.replace(/<p:sldId\b[^>]*\bid="(\d+)"/g, (_, n) => { maxSldId = Math.max(maxSldId, +n) })
+
+  // 기존 슬라이드 .rels 파일 (slideLayout 참조 등)
+  const tplRelsFile = tplSlideFile.replace('ppt/slides/', 'ppt/slides/_rels/') + '.rels'
+  const tplRelsXml  = tplZip.file(tplRelsFile)
+    ? await tplZip.file(tplRelsFile).async('string')
+    : '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\r\n'
+      + '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+      + '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideLayout" Target="../slideLayouts/slideLayout6.xml"/>'
+      + '</Relationships>'
+
+  let newRels = '', newSldIds = '', newCt = ''
+
+  chunks.forEach((chunk, ci) => {
+    const slideNum = ci + 1
+    const fileName = `ppt/slides/slide${slideNum}.xml`
+    const relFileName = `ppt/slides/_rels/slide${slideNum}.xml.rels`
+    const rid = ++maxRid
+    const sldId = ++maxSldId
+
+    // 치환: [제목] + 인원 데이터
+    let slideXml = applyMenuTitle(tplSlideXml, opts.menuTitle || '')
+    slideXml = applyPersonData(slideXml, chunk)
+
+    tplZip.file(fileName, slideXml)
+    tplZip.file(relFileName, tplRelsXml)
+
+    newRels   += `<Relationship Id="rId${rid}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide" Target="slides/slide${slideNum}.xml"/>`
+    newSldIds += `<p:sldId id="${sldId}" r:id="rId${rid}"/>`
+    newCt     += `<Override PartName="/ppt/slides/slide${slideNum}.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slide+xml"/>`
+  })
+
+  // presentation.xml 업데이트
+  presXml     = presXml.replace('<p:sldIdLst></p:sldIdLst>', `<p:sldIdLst>${newSldIds}</p:sldIdLst>`)
+  presRelsXml = presRelsXml.replace('</Relationships>', newRels + '</Relationships>')
+  ctXml       = ctXml.replace('</Types>', newCt + '</Types>')
+
+  tplZip.file('ppt/presentation.xml', presXml)
+  tplZip.file('ppt/_rels/presentation.xml.rels', presRelsXml)
+  tplZip.file('[Content_Types].xml', ctXml)
+
+  console.log(`[HistoryPptx] 완료 — ${baseRows.length}명 / ${chunks.length}슬라이드 / perPage=${perPage}`)
+
+  if (opts.returnZip) return { zip: tplZip }
+
+  const finalAb = await tplZip.generateAsync({
+    type: 'arraybuffer',
+    mimeType: 'application/vnd.openxmlformats-officedocument.presentationml.presentation'
+  })
+  const blob = new Blob([finalAb], { type: 'application/vnd.openxmlformats-officedocument.presentationml.presentation' })
+  const url  = URL.createObjectURL(blob)
+  const a    = document.createElement('a'); a.href = url
+  const title = (opts.menuTitle || '실적장표').slice(0, 15)
+  a.download = `${title}_${(parsedData.projectTitle || '').slice(0, 10)}.pptx`
+  a.click(); URL.revokeObjectURL(url)
+}
+
 // ── 사진장표 PPT (템플릿 기반) ─────────────────────────────────
 // 원본 PPTX 템플릿(photo-template.b64.js)을 JSZip으로 열고 DOMParser로
 // 슬라이드 XML을 파싱해 placeholder만 실제 값으로 치환한다.
