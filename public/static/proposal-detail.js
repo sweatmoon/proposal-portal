@@ -1466,6 +1466,48 @@ const PHOTO_LAYOUT_META = {
   9: { file: 'ppt/slides/slide4.xml', rows: 3, cols: 3, orderIndexToSlot: [1, 2, 3, 6, 9, 4, 5, 7, 8], titleLabel: '9인장표' },
 }
 
+// ── 템플릿별 슬롯 x/y 경계 (EMU 단위, 분석된 실제 좌표 기반) ──────────────
+// sp 중앙점(x+cx/2, y+cy/2)이 어느 col/row 구간에 속하는지 판별
+// 반환: 0-based 슬롯 인덱스 (row * cols + col), 판별 불가 시 -1
+const SLOT_BOUNDARIES = {
+  // 2인: 1행 2열 — x 경계 4,700,000
+  2: { colBounds: [4_700_000], rowBounds: [] },
+  // 4인: 2행 2열 — x 경계 5,000,000 / y 경계 3,500,000
+  4: { colBounds: [5_000_000], rowBounds: [3_500_000] },
+  // 6인: 2행 3열 — x 경계 2,700,000 / 5,400,000 / y 경계 3,060,000
+  6: { colBounds: [2_700_000, 5_400_000], rowBounds: [3_060_000] },
+  // 9인: 3행 3열 — x 경계 2,500,000 / 5,500,000 / y 경계 2,200,000 / 4,000,000
+  9: { colBounds: [2_500_000, 5_500_000], rowBounds: [2_200_000, 4_000_000] },
+}
+
+// sp 요소 하나를 받아 0-based 슬롯 인덱스 반환 (sp 자체 좌표 사용)
+function getSpSlotIndex(sp, size) {
+  const bounds = SLOT_BOUNDARIES[size]
+  if (!bounds) return -1
+  // sp 직속 spPr > xfrm > off/ext 읽기
+  const spPr = sp.getElementsByTagNameNS('http://schemas.openxmlformats.org/presentationml/2006/main', 'spPr')[0]
+    || sp.getElementsByTagNameNS('http://schemas.openxmlformats.org/drawingml/2006/main', 'spPr')[0]
+  // spPr이 p:spPr인 경우도 처리
+  let xfrm = null
+  for (const ns of [
+    'http://schemas.openxmlformats.org/presentationml/2006/main',
+    'http://schemas.openxmlformats.org/drawingml/2006/main',
+  ]) {
+    const pr = sp.getElementsByTagNameNS(ns, 'spPr')[0]
+    if (pr) { xfrm = pr.getElementsByTagNameNS('http://schemas.openxmlformats.org/drawingml/2006/main', 'xfrm')[0]; if (xfrm) break }
+  }
+  if (!xfrm) return -1
+  const off = xfrm.getElementsByTagNameNS('http://schemas.openxmlformats.org/drawingml/2006/main', 'off')[0]
+  const ext = xfrm.getElementsByTagNameNS('http://schemas.openxmlformats.org/drawingml/2006/main', 'ext')[0]
+  if (!off || !ext) return -1
+  const cx = +off.getAttribute('x') + +ext.getAttribute('cx') / 2  // 중앙 x
+  const cy = +off.getAttribute('y') + +ext.getAttribute('cy') / 2  // 중앙 y
+  const col = bounds.colBounds.filter(b => cx >= b).length
+  const row = bounds.rowBounds.filter(b => cy >= b).length
+  const cols = bounds.colBounds.length + 1
+  return row * cols + col
+}
+
 // 행 우선 슬롯 채움 순서 (위쪽 행부터 왼→오른쪽으로 채운 뒤 다음 행)
 // 예) 3×3: [1,2,3, 4,5,6, 7,8,9] → 빈 슬롯이 항상 마지막 행 오른쪽에 위치
 function computeFillOrder(rows, cols) {
@@ -1573,6 +1615,104 @@ async function buildPhotoPptxFromTemplate(pages, templateZips) {
     const ext = xfrm.getElementsByTagNameNS(A_NS, 'ext')[0]
     if (!off || !ext) return null
     return { x: +off.getAttribute('x'), y: +off.getAttribute('y'), w: +ext.getAttribute('cx'), h: +ext.getAttribute('cy') }
+  }
+
+  // ── IT경력 컬러런 치환 ─────────────────────────────────────────
+  // [IT경력] 플레이스홀더 단락을 여러 행으로 분리하고 행별 색상 적용
+  // 행 구분자: '\n' 또는 데이터 내 줄바꿈
+  // 색상 규칙:
+  //   1행: [ 키워드 ] → #1655A2, 나머지 → #E60012
+  //   2행: [ 키워드 ] → #1655A2, 나머지 → #1655A2
+  //   3행~: [ 키워드 ] → #1655A2, 나머지 → #404040 + KoPub돋움체 Medium
+  function replaceItCareerWithColorRuns(pEl, label, value) {
+    if (!value) {
+      // 값 없으면 단락 비우기
+      replaceLabelInParagraphNorm(pEl, label, '')
+      return
+    }
+    // 원본 단락에서 서식 참조용 런 하나 찾기
+    const runs = Array.from(pEl.getElementsByTagNameNS(A_NS, 'r'))
+    if (!runs.length) return
+
+    // 기준 런의 rPr 클론 (폰트 크기, 볼드 등 기본 서식 유지)
+    const baseRun = runs[0]
+    const baseRPr = baseRun.getElementsByTagNameNS(A_NS, 'rPr')[0]
+
+    // 기존 런 모두 제거
+    runs.forEach(r => { if (r.parentNode) r.parentNode.removeChild(r) })
+
+    // 줄 분리: \n 기준
+    const lines = value.split('\n').filter(l => l.trim())
+
+    const doc = pEl.ownerDocument
+
+    function makeSolidFill(hexColor) {
+      const solidFill = doc.createElementNS(A_NS, 'a:solidFill')
+      const srgbClr = doc.createElementNS(A_NS, 'a:srgbClr')
+      srgbClr.setAttribute('val', hexColor)
+      solidFill.appendChild(srgbClr)
+      return solidFill
+    }
+
+    function makeRun(text, hexColor, fontName) {
+      const r = doc.createElementNS(A_NS, 'a:r')
+      const rPr = doc.createElementNS(A_NS, 'a:rPr')
+      // 기본 서식 복사
+      if (baseRPr) {
+        Array.from(baseRPr.attributes).forEach(attr => rPr.setAttribute(attr.name, attr.value))
+        // solidFill 제외한 자식 복사 (폰트 크기 등)
+        Array.from(baseRPr.childNodes).forEach(child => {
+          if (child.localName !== 'solidFill' && child.localName !== 'latin') {
+            rPr.appendChild(child.cloneNode(true))
+          }
+        })
+      }
+      // 색상 적용
+      rPr.appendChild(makeSolidFill(hexColor))
+      // 폰트 적용 (3행~: KoPub돋움체 Medium)
+      if (fontName) {
+        const latin = doc.createElementNS(A_NS, 'a:latin')
+        latin.setAttribute('typeface', fontName)
+        rPr.appendChild(latin)
+      }
+      const t = doc.createElementNS(A_NS, 'a:t')
+      t.textContent = text
+      r.appendChild(rPr)
+      r.appendChild(t)
+      return r
+    }
+
+    // 행별 런 생성 및 단락에 추가
+    // 키워드: [ xxx ] 패턴 — 첫 번째 ] 이전까지
+    // 나머지: ] 이후 텍스트
+    lines.forEach((line, lineIdx) => {
+      // 줄바꿈 런 (첫 행 제외)
+      if (lineIdx > 0) {
+        const brRun = doc.createElementNS(A_NS, 'a:br')
+        const brRPr = doc.createElementNS(A_NS, 'a:rPr')
+        if (baseRPr) Array.from(baseRPr.attributes).forEach(attr => brRPr.setAttribute(attr.name, attr.value))
+        brRun.appendChild(brRPr)
+        pEl.appendChild(brRun)
+      }
+
+      // 키워드/나머지 분리
+      const bracketEnd = line.indexOf(']')
+      let kwText = '', restText = line
+      if (bracketEnd !== -1) {
+        kwText = line.slice(0, bracketEnd + 1)   // [ xxx ]
+        restText = line.slice(bracketEnd + 1)     // 나머지
+      }
+
+      const rowIdx = lineIdx  // 0-based
+      const kwColor = '#1655A2'
+      let restColor, fontName
+      if (rowIdx === 0) { restColor = 'E60012'; }
+      else if (rowIdx === 1) { restColor = '1655A2'; }
+      else { restColor = '404040'; fontName = 'KoPub돋움체 Medium' }
+
+      if (kwText) pEl.appendChild(makeRun(kwText, kwColor, rowIdx >= 2 ? fontName : undefined))
+      if (restText) pEl.appendChild(makeRun(restText, restColor, fontName))
+    })
   }
 
   // ── 런(run) 분산 placeholder 치환 엔진 ──────────────────────────
@@ -1861,58 +2001,29 @@ async function buildPhotoPptxFromTemplate(pages, templateZips) {
 
     const xmlDoc = new DOMParser().parseFromString(tplXml, 'application/xml')
     const spTree = xmlDoc.getElementsByTagNameNS(P_NS, 'spTree')[0]
-    const shapeEls = Array.from(spTree.childNodes).filter(n => n.nodeType === 1 && (n.localName === 'sp' || n.localName === 'cxnSp'))
+    // sp, cxnSp, pic, grpSp 모두 포함 (카드 삭제 대상에 pic도 포함)
+    const shapeEls = Array.from(spTree.childNodes).filter(n => n.nodeType === 1 &&
+      (n.localName === 'sp' || n.localName === 'cxnSp' || n.localName === 'pic' || n.localName === 'grpSp'))
 
-    // ── 카드 배경 도형 자동 탐지: N개 정확히 반복되는 도형 중 면적 최대인 것 ──
-    const N = meta.rows * meta.cols
+    // ── sp 좌표 캐시 (shapeXfrm 기반) ──
     const xfrmOf = new Map()
-    const sizeGroups = {}
-    shapeEls.forEach(sp => {
-      const xf = shapeXfrm(sp)
-      if (!xf) return
-      xfrmOf.set(sp, xf)
-      const key = xf.w + 'x' + xf.h;
-      (sizeGroups[key] = sizeGroups[key] || []).push(xf)
-    })
-    const cardCandidates = Object.entries(sizeGroups).filter(([, arr]) => arr.length === N)
-    cardCandidates.sort((a, b) => (b[1][0].w * b[1][0].h) - (a[1][0].w * a[1][0].h))
-    const cardBoxes = cardCandidates.length ? cardCandidates[0][1] : []
-
-    const MARGIN_X = 60000, MARGIN_TOP = 400000, MARGIN_BOTTOM = 60000
-    function findCardIndex(pt) {
-      for (let ci = 0; ci < cardBoxes.length; ci++) {
-        const b = cardBoxes[ci]
-        if (pt.x >= b.x - MARGIN_X && pt.x <= b.x + b.w + MARGIN_X &&
-            pt.y >= b.y - MARGIN_TOP && pt.y <= b.y + b.h + MARGIN_BOTTOM) return ci
-      }
-      return -1
-    }
-    const cardShapes = cardBoxes.map(() => [])
-    shapeEls.forEach(sp => {
-      const xf = xfrmOf.get(sp)
-      if (!xf) return
-      const idx = findCardIndex({ x: xf.x + xf.w / 2, y: xf.y + xf.h / 2 })
-      if (idx >= 0) cardShapes[idx].push(sp)
+    shapeEls.forEach(el => {
+      const xf = shapeXfrm(el)
+      if (xf) xfrmOf.set(el, xf)
     })
 
-    // ── [이름] 단락 기준으로 슬롯 순서 결정 (런 분산 처리) ──
-    const nameParaOccurrences = getNameParaOccurrences(xmlDoc)
+    // ── 슬롯별 shape 귀속: sp 중앙 좌표 → 슬롯 인덱스(0-based) ──
+    const N = meta.rows * meta.cols
+    // slotShapes[slotIdx] = 해당 슬롯에 속하는 shape 요소 배열
+    const slotShapes = Array.from({ length: N }, () => [])
+    shapeEls.forEach(el => {
+      const xf = xfrmOf.get(el)
+      if (!xf) return
+      const si = getSpSlotIndex(el, size)
+      if (si >= 0 && si < N) slotShapes[si].push(el)
+    })
 
-    // ── 카드별 placeholder 치환 (런 분산 처리 엔진 사용) ──
-    // ⚠️ preFetchedParas는 반드시 카드 삭제 이전에 수집해야 함
-    //    카드 삭제 후 수집하면 빈 슬롯 단락이 제거되어 배열 크기가 줄고
-    //    nameParaOccurrences(삭제 전 N개) idx와 preFetchedParas(삭제 후 N-k개) idx가 어긋남
-    //    → 빈 슬롯 이후 인원들의 치환이 모두 실패 (ex. 9인 장표 8명 시 마지막 1명 누락)
-    // ⚠️ 템플릿에서 [ 감리이력1 ] 처럼 괄호 안에 공백이 있을 수 있으므로
-    //    정규화(공백 제거)된 concat 텍스트로 매핑 label을 탐색함
-    const ALL_LABELS = [
-      '[분야]', '[이름]', '[감리원등급]', '[자격구분]', '[자격요약]',
-      '[감리횟수]', '[자격수]', '[감리경력]', '[IT경력기간]', '[IT경력]', '[주요이력]',
-    ]
-    for (let ri = 1; ri <= 10; ri++) ALL_LABELS.push('[감리이력' + ri + ']')
-
-    // 단락 concat에서 공백 제거 후 label(공백 제거)과 매칭
-    // 실제 치환 시엔 원본 concat에서 실제 텍스트를 정확히 찾아 대체
+    // ── 라벨 매칭 헬퍼 ──
     function normLabel(s) { return s.replace(/\s+/g, '') }
     function paraMatchesLabel(pEl, label) {
       const concat = Array.from(pEl.getElementsByTagNameNS(A_NS, 'r'))
@@ -1921,72 +2032,84 @@ async function buildPhotoPptxFromTemplate(pages, templateZips) {
       return concat.replace(/\s+/g, '').includes(normLabel(label))
     }
 
-    // 카드 삭제 이전에 라벨별 단락 목록 미리 수집 (idx가 nameParaOccurrences와 1:1 대응)
-    const preFetchedParas = {}
-    ALL_LABELS.forEach(label => {
-      const paras = Array.from(xmlDoc.getElementsByTagNameNS(A_NS, 'p'))
-      const list = []
-      paras.forEach(p => { if (paraMatchesLabel(p, label)) list.push(p) })
-      preFetchedParas[label] = list
+    const ALL_LABELS = [
+      '[분야]', '[이름]', '[감리원등급]', '[자격구분]', '[자격요약]',
+      '[감리횟수]', '[자격수]', '[감리경력]', '[IT경력기간]', '[IT경력]', '[주요이력]',
+    ]
+    for (let ri = 1; ri <= 10; ri++) ALL_LABELS.push('[감리이력' + ri + ']')
+
+    // ── 슬롯별 라벨→단락 맵 사전 수집 ──
+    // preFetchedParasBySlot[slotIdx][label] = 해당 슬롯 sp 안의 단락 (없으면 null)
+    // 슬롯 sp 스코프로 수집하므로 다른 슬롯 단락과 절대 섞이지 않음
+    const preFetchedParasBySlot = Array.from({ length: N }, (_, si) => {
+      const labelMap = {}
+      ALL_LABELS.forEach(label => {
+        // 이 슬롯의 sp들 안에서만 단락 탐색
+        for (const el of slotShapes[si]) {
+          if (el.localName !== 'sp') continue
+          const paras = Array.from(el.getElementsByTagNameNS(A_NS, 'p'))
+          const found = paras.find(p => paraMatchesLabel(p, label))
+          if (found) { labelMap[label] = found; break }
+        }
+        if (!labelMap[label]) labelMap[label] = null
+      })
+      return labelMap
     })
 
-    // ── 미배정 슬롯 카드 삭제 (preFetch 이후에 실행) ──
-    // [이름] 단락이 속한 <a:p>의 조상 <p:sp>를 찾아 cardIndex 판별
-    const cardsToRemove = new Set()
-    nameParaOccurrences.forEach(({ para }, idx) => {
-      const slot = meta.orderIndexToSlot[idx]
-      if (page.slotPeople[slot]) return
-      // para(<a:p>) 조상에서 <p:sp> 찾기
-      let sp = para
-      while (sp && !(sp.nodeType === 1 && sp.localName === 'sp')) sp = sp.parentNode
-      const xf = sp && xfrmOf.get(sp)
-      if (xf) {
-        const ci = findCardIndex({ x: xf.x + xf.w / 2, y: xf.y + xf.h / 2 })
-        if (ci >= 0) cardsToRemove.add(ci)
-      }
-    })
-    cardsToRemove.forEach(ci => cardShapes[ci].forEach(sp => { if (sp.parentNode) sp.parentNode.removeChild(sp) }))
+    // ── 슬롯→orderIndex 역매핑 (orderIndexToSlot[orderIdx] = 1-based slot) ──
+    // slotIndexOf[1-based slot] = orderIdx (0-based)
+    const slotIndexOf = {}
+    meta.orderIndexToSlot.forEach((slot, oi) => { slotIndexOf[slot] = oi })
 
-    // ── 슬라이드 전체 [제목] 치환 (목차명 + 다중 장표 시 16pt (N/total) 넘버링) ──
-    // meta.titleLabel 전달: 실제 템플릿 placeholder 텍스트('9인장표' 등)를 탐지
+    // ── 미배정 슬롯 shape 삭제 ──
+    // slotShapes[slotIdx] 단위로 삭제하므로 정확함
+    for (let si = 0; si < N; si++) {
+      const slot1 = si + 1  // 1-based slot
+      if (page.slotPeople[slot1]) continue
+      slotShapes[si].forEach(el => { if (el.parentNode) el.parentNode.removeChild(el) })
+    }
+
+    // ── 슬라이드 전체 [제목] 치환 ──
     replaceTitleLabel(xmlDoc, page.slideTitle || '', page.pageNum || 1, page.totalPages || 1, meta.titleLabel)
 
-    nameParaOccurrences.forEach((_nameOcc, idx) => {
-      const slot = meta.orderIndexToSlot[idx]
-      const p = page.slotPeople[slot]
-      if (!p) return
-      const pr = p.profile || {}
+    // ── 슬롯별 치환 ──
+    for (let si = 0; si < N; si++) {
+      const slot1 = si + 1  // 1-based slot
+      const person = page.slotPeople[slot1]
+      if (!person) continue
+      const pr = person.profile || {}
+      const labelMap = preFetchedParasBySlot[si]
 
-      // 직접 매핑 필드: 미리 수집된 idx번째 단락에 치환
+      // 단순 텍스트 치환 필드
       const directMap = {
-        '[분야]':       p.field || '',
-        '[이름]':       p.name  || '',
-        '[감리원등급]':  p.grade || '',
+        '[분야]':       person.field || '',
+        '[이름]':       person.name  || '',
+        '[감리원등급]':  person.grade || '',
         '[자격구분]':   pr.자격구분   || '',
         '[자격요약]':   pr.자격요약   || '',
         '[감리횟수]':   pr.감리횟수   != null ? String(pr.감리횟수)   : '',
         '[자격수]':     pr.자격수     != null ? String(pr.자격수)     : '',
         '[감리경력]':   pr.감리경력   || '',
         '[IT경력기간]': pr.IT경력기간 || '',
-        '[IT경력]':     pr.IT경력     || '',
         '[주요이력]':   pr.주요이력   || '',
       }
       Object.entries(directMap).forEach(([label, value]) => {
-        const paraList = preFetchedParas[label]
-        const para = paraList && paraList[idx]
+        const para = labelMap[label]
         if (para) replaceLabelInParagraphNorm(para, label, value)
       })
 
-      // [감리이력1]~[감리이력10] 치환
+      // [감리이력1]~[감리이력10] — 템플릿 서식 그대로 텍스트만 치환
       const 실적List = pr.실적 || []
       for (let ri = 1; ri <= 10; ri++) {
         const label = '[감리이력' + ri + ']'
-        const value = 실적List[ri - 1] || ''
-        const paraList = preFetchedParas[label]
-        const para = paraList && paraList[idx]
-        if (para) replaceLabelInParagraphNorm(para, label, value)
+        const para = labelMap[label]
+        if (para) replaceLabelInParagraphNorm(para, label, 실적List[ri - 1] || '')
       }
-    })
+
+      // [IT경력] — 컬러런 적용 (행별 색상 규칙)
+      const itPara = labelMap['[IT경력]']
+      if (itPara) replaceItCareerWithColorRuns(itPara, '[IT경력]', pr.IT경력 || '')
+    }
 
     // ── 슬라이드 XML 저장 ──
     const slideRelsXml = await getSlideLayoutRel(tplZip, tplFile)
