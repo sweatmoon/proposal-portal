@@ -340,7 +340,7 @@ function readPhotoAssignConfig() {
   })
   return _pawTocList
     .filter(toc => toc.cats.length > 0)   // 팀 미선택 목차 제외
-    .map(toc => ({ title: toc.title, sheetSize: toc.sheetSize, catKeys: toc.cats }))
+    .map(toc => ({ menuCode: toc.menuCode, title: toc.title, sheetSize: toc.sheetSize, catKeys: toc.cats }))
 }
 
 function showAutoAlert(msg, ok) {
@@ -1158,38 +1158,58 @@ async function downloadPhotoAssignPptx(btn, opts) {
     const cache = buildPhotoAssignCache()
     if (!cache) { showAutoAlert('❌ 인력 데이터가 없습니다.', false); return null }
 
-    // 목차 설정 읽기
+    // ── 목차 설정 읽기 ──
+    // 1) UI DOM에서 읽기 (모달이 열려있을 때)
     let tocList = []
     try { tocList = readPhotoAssignConfig() } catch (e) { tocList = [] }
 
-    // opts.menuCode 지정 시 → 해당 menuCode 목차만 필터링
-    // (ppt-engine이 AUDITOR/CORE_EXPERT/EXPERT_PROFILE 각각 호출할 때 3개 전부 생성되는 버그 방지)
+    // 2) opts.menuCode 지정 시 → 해당 menuCode 목차만 필터링
+    //    (ppt-engine이 AUDITOR/CORE_EXPERT/EXPERT_PROFILE 각각 호출 시 해당 것만)
     if (opts.menuCode && tocList.length) {
       tocList = tocList.filter(t => t.menuCode === opts.menuCode)
     }
 
-    // 목차 미설정 시 fallback:
-    // opts.menuCode 지정 시 해당 메뉴 코드에 맞는 단일 목차 구성
-    // 미지정 시 PptMenuRegistry 기반으로 전체 PROFILE 목차 구성
+    // 3) tocList가 비어있으면 → _pawTocList 또는 PptMenuRegistry에서 직접 구성
+    //    (ppt-engine 호출 시 모달 미열림 상태이거나 DOM이 없는 경우)
     if (!tocList.length) {
       const activeCats = PHOTO_CATS.filter(c => (cache[c.key] || []).length > 0)
       const menuCode = opts.menuCode
-      if (menuCode && PAW_MENU_DEFAULT_CATS[menuCode]) {
-        // 단일 목차 (ppt-engine 직접 호출 케이스)
-        const defaultCatKeys = PAW_MENU_DEFAULT_CATS[menuCode]
-          .filter(k => activeCats.some(c => c.key === k))
-        const total = defaultCatKeys.reduce((s, k) => s + (cache[k] || []).length, 0)
-        if (defaultCatKeys.length && total > 0) {
-          tocList.push({ title: menuCode, sheetSize: suggestSheetSize(total), catKeys: defaultCatKeys })
-        }
-      } else {
-        // 전체 목차 fallback (하드코딩)
+
+      // _pawTocList 이미 로드됐으면 그걸 우선 사용
+      if (_pawTocList && _pawTocList.length) {
+        const src = menuCode
+          ? _pawTocList.filter(t => t.menuCode === menuCode)
+          : _pawTocList
+        tocList = src
+          .filter(t => t.cats.length > 0)
+          .map(t => ({ menuCode: t.menuCode, title: t.title, sheetSize: t.sheetSize, catKeys: t.cats }))
+      }
+
+      // _pawTocList도 없으면 PptMenuRegistry에서 직접 로드
+      if (!tocList.length && menuCode && PAW_MENU_DEFAULT_CATS[menuCode]) {
+        try {
+          const registry = await PptMenuRegistry.load()
+          const m = registry.byCode[menuCode]
+          const title = m ? [m.menu_number, m.menu_name].filter(Boolean).join(' ') : menuCode
+          const defaultCatKeys = PAW_MENU_DEFAULT_CATS[menuCode]
+            .filter(k => activeCats.some(c => c.key === k))
+          const total = defaultCatKeys.reduce((s, k) => s + (cache[k] || []).length, 0)
+          if (defaultCatKeys.length && total > 0) {
+            const fixedSheet = PAW_MENU_FIXED_SHEET[menuCode]
+            const sheetSize = fixedSheet !== undefined ? fixedSheet : suggestSheetSize(total)
+            tocList.push({ menuCode, title, sheetSize, catKeys: defaultCatKeys })
+          }
+        } catch (e) { /* registry 실패 시 하드코딩 fallback으로 진행 */ }
+      }
+
+      // 최후 하드코딩 fallback
+      if (!tocList.length) {
         if (cache.audit && cache.audit.length)
-          tocList.push({ title: '감리원 전문역량', sheetSize: 2, catKeys: ['audit'] })
+          tocList.push({ menuCode: 'AUDITOR_PROFILE', title: '감리원 전문역량', sheetSize: 2, catKeys: ['audit'] })
         const expKeys = activeCats.filter(c => c.key !== 'audit').map(c => c.key)
         if (expKeys.length) {
           const tot = expKeys.reduce((s, k) => s + cache[k].length, 0)
-          tocList.push({ title: '전문역량', sheetSize: suggestSheetSize(tot), catKeys: expKeys })
+          tocList.push({ menuCode: 'EXPERT_PROFILE', title: '전문역량', sheetSize: suggestSheetSize(tot), catKeys: expKeys })
         }
       }
     }
