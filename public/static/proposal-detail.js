@@ -538,6 +538,7 @@ async function downloadAssignPptx(btn, opts) {
   opts = opts || {}
   if (typeof PptxGenJS === 'undefined') { alert('PPT 라이브러리 로딩 중입니다.'); return null }
   setBtnState(btn, true)
+  console.log('[AssignPptx] opts.templateB64:', opts.templateB64 ? '있음(길이:'+opts.templateB64.length+')' : 'null/없음', '| groupFilter:', opts.groupFilter || '없음')
   try {
     let rows = computeAssignRows()
     if (!rows.length) { alert('인력 데이터가 없습니다.'); return null }

@@ -622,6 +622,7 @@ async function generateMenuPpt(menu, vm) {
     case 'AUDITOR_HISTORY': {
       const _tpls = Array.isArray(menu.templates) ? menu.templates : [];
       const _tpl  = _tpls.find(t => t.pptx_b64_key) || null;
+      console.log('[PptEngine] AUDITOR_HISTORY templates:', _tpls.length, '개, 템플릿 b64:', _tpl ? '있음(길이:'+_tpl.pptx_b64_key.length+')' : 'null');
       result = await downloadAssignPptx(null, { returnZip: true, groupFilter: 'AUDITOR', templateB64: _tpl ? _tpl.pptx_b64_key : null });
       break;
     }
@@ -630,6 +631,7 @@ async function generateMenuPpt(menu, vm) {
     case 'EXPERT_HISTORY': {
       const _tpls = Array.isArray(menu.templates) ? menu.templates : [];
       const _tpl  = _tpls.find(t => t.pptx_b64_key) || null;
+      console.log('[PptEngine] EXPERT_HISTORY templates:', _tpls.length, '개, 템플릿 b64:', _tpl ? '있음(길이:'+_tpl.pptx_b64_key.length+')' : 'null');
       result = await downloadAssignPptx(null, { returnZip: true, groupFilter: 'EXPERT', templateB64: _tpl ? _tpl.pptx_b64_key : null });
       break;
     }
@@ -639,6 +641,7 @@ async function generateMenuPpt(menu, vm) {
     case 'MANPOWER_MD': {
       const _tpls = Array.isArray(menu.templates) ? menu.templates : [];
       const _tpl  = _tpls.find(t => t.pptx_b64_key) || null;
+      console.log('[PptEngine] MANPOWER_MD templates:', _tpls.length, '개, 템플릿 b64:', _tpl ? '있음(길이:'+_tpl.pptx_b64_key.length+')' : 'null');
       result = await downloadAssignPptx(null, { returnZip: true, templateB64: _tpl ? _tpl.pptx_b64_key : null });
       break;
     }
