@@ -2445,13 +2445,15 @@ async function downloadPhotoAssignPptx(btn, opts) {
       if (!people.length) continue
 
       // 템플릿 크기 단위로 페이지 분할
-      // slotPeople: i번째 인원 → orderIndexToSlot[i] 슬롯에 배치
-      // (행 우선 fillOrder 기준이 아니라 템플릿 XML 슬롯 순서 기준으로 채워야
-      //  빈 슬롯이 뒤쪽에 몰리고 앞 슬롯부터 순서대로 채워짐)
+      // slotPeople: i번째 인원 → 슬롯(i+1) 에 배치 (행 우선: 왼→오른, 위→아래)
+      // orderIndexToSlot은 "XML shape 저장 순서 → 시각 슬롯 번호" 매핑이므로
+      // 인원 배치는 단순 1-based 슬롯 순서(행 우선)로 하면 됨.
+      // XML 처리 측(buildPhotoPptxFromTemplate)에서 slotShapes[slotIdx]로 귀속하므로
+      // slotPeople[1]→슬롯1(행1열1), slotPeople[2]→슬롯2(행1열2), ... 가 정확히 들어감.
       for (let start = 0; start < people.length; start += sheetSize) {
         const pagePeople = people.slice(start, start + sheetSize)
         const slotPeople = {}
-        pagePeople.forEach((p, i) => { slotPeople[meta.orderIndexToSlot[i]] = p })
+        pagePeople.forEach((p, i) => { slotPeople[i + 1] = p })  // 행 우선 1-based
         pages.push({ sheetSize, slotPeople, slideTitle })
       }
     }
