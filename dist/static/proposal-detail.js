@@ -2267,10 +2267,26 @@ async function buildPhotoPptxFromTemplate(pages, templateZips) {
       }
     }
 
-    // ── 슬라이드 XML 저장 ──
-    const slideRelsXml = await getSlideLayoutRel(tplZip, tplFile)
-    baseZip.file(`ppt/slides/${fname}`, new XMLSerializer().serializeToString(xmlDoc))
-    baseZip.file(`ppt/slides/_rels/${fname}.rels`, slideRelsXml)
+    // ── 슬라이드 XML 저장 (rels rId 재번호매김) ──
+    // 템플릿 rels를 그대로 복사하면 baseZip의 기존 rId와 충돌 → 이미지 깨짐
+    // 각 슬라이드마다 모든 rId를 전역 maxRid 이후로 재할당
+    const rawRelsXml = await getSlideLayoutRel(tplZip, tplFile)
+    const rIdMap = {}
+    const remappedRelsXml = rawRelsXml.replace(
+      /(<Relationship\s+Id=")([^"]+)(")/g,
+      (_, pre, oldId, post) => {
+        const newId = `rId${++maxRid}`
+        rIdMap[oldId] = newId
+        return pre + newId + post
+      }
+    )
+    // 슬라이드 XML 내 r:embed / r:link / r:id 참조도 동일하게 교체
+    let slideXmlStr = new XMLSerializer().serializeToString(xmlDoc)
+    slideXmlStr = slideXmlStr.replace(/\br:(embed|link|id)="([^"]+)"/g, (full, attr, oldId) =>
+      rIdMap[oldId] ? `r:${attr}="${rIdMap[oldId]}"` : full
+    )
+    baseZip.file(`ppt/slides/${fname}`, slideXmlStr)
+    baseZip.file(`ppt/slides/_rels/${fname}.rels`, remappedRelsXml)
 
     const rid = `rId${++maxRid}`
     const sldId = ++maxSldId
