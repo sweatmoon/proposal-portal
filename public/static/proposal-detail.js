@@ -1590,6 +1590,13 @@ async function buildPhotoPptxFromTemplate(pages, templateZips) {
 
   let maxRid   = 0; presRelsXml.replace(/Id="rId(\d+)"/g, (_, n) => { maxRid   = Math.max(maxRid,   +n); return _ })
   let maxSldId = 255; presXml.replace(/<p:sldId id="(\d+)"/g, (_, n) => { maxSldId = Math.max(maxSldId, +n); return _ })
+  // baseZip의 기존 미디어 파일 인덱스 파악 → 충돌 없는 새 이름 생성용
+  // 새 슬라이드 이미지는 image_gsN 이름으로 저장 (기존 imageN 파일과 이름 충돌 방지)
+  let maxMediaIdx = 0
+  Object.keys(baseZip.files).forEach(k => {
+    const m = k.match(/^ppt\/media\/image(?:_gs)?(\d+)\./i)
+    if (m) maxMediaIdx = Math.max(maxMediaIdx, +m[1])
+  })
 
   let newRels = '', newIds = '', newCt = ''
 
@@ -2267,12 +2274,35 @@ async function buildPhotoPptxFromTemplate(pages, templateZips) {
       }
     }
 
-    // ── 슬라이드 XML 저장 (rels rId 재번호매김) ──
-    // 템플릿 rels를 그대로 복사하면 baseZip의 기존 rId와 충돌 → 이미지 깨짐
-    // 각 슬라이드마다 모든 rId를 전역 maxRid 이후로 재할당
+    // ── 슬라이드 XML 저장 (rels rId 재번호매김 + 미디어 파일 복사) ──
+    // 문제: 2인/6인/9인 템플릿이 같은 이름(image3.png 등)의 다른 이미지를 가짐
+    //   → baseZip에 이미 있으면 복사 안 하면 엉뚱한 2인 이미지가 사용됨
+    // 해결: 각 슬라이드의 이미지를 무조건 새 고유 이름(maxMediaIdx++)으로 복사
+    //        rels의 Target도 새 이름으로 재작성 → 슬라이드 XML r:embed도 함께 재매핑
     const rawRelsXml = await getSlideLayoutRel(tplZip, tplFile)
+
+    // 이미지 Target → 새 이름 매핑 테이블 구성
+    const targetRemap = {}  // '../media/image3.png' → '../media/image_new_N.png'
+    const imgRelEntries = [...rawRelsXml.matchAll(/Type="[^"]*\/image"[^>]*Target="([^"]+)"/g)]
+    for (const m of imgRelEntries) {
+      const origTarget = m[1]  // e.g. ../media/image3.png
+      const ext = origTarget.replace(/.*\./, '.')  // .png / .jpeg
+      const newIdx = ++maxMediaIdx
+      const newFileName = `ppt/media/image_gs${newIdx}${ext}`
+      targetRemap[origTarget] = `../media/image_gs${newIdx}${ext}`
+
+      // tplZip에서 소스 파일 읽어 baseZip에 새 이름으로 저장
+      const origPath = ('ppt/slides/' + origTarget).replace(/\/[^/]+\/\.\.\//g, '/')
+      const srcFile = tplZip.file(origPath)
+      if (srcFile) {
+        const bytes = await srcFile.async('arraybuffer')
+        baseZip.file(newFileName, bytes)
+      }
+    }
+
+    // rels: rId 재번호매김 + Target 새 이름으로 교체
     const rIdMap = {}
-    const remappedRelsXml = rawRelsXml.replace(
+    let remappedRelsXml = rawRelsXml.replace(
       /(<Relationship\s+Id=")([^"]+)(")/g,
       (_, pre, oldId, post) => {
         const newId = `rId${++maxRid}`
@@ -2280,6 +2310,12 @@ async function buildPhotoPptxFromTemplate(pages, templateZips) {
         return pre + newId + post
       }
     )
+    // Target 교체 (이미지만)
+    remappedRelsXml = remappedRelsXml.replace(
+      /Target="([^"]+)"/g,
+      (full, tgt) => targetRemap[tgt] ? `Target="${targetRemap[tgt]}"` : full
+    )
+
     // 슬라이드 XML 내 r:embed / r:link / r:id 참조도 동일하게 교체
     let slideXmlStr = new XMLSerializer().serializeToString(xmlDoc)
     slideXmlStr = slideXmlStr.replace(/\br:(embed|link|id)="([^"]+)"/g, (full, attr, oldId) =>
