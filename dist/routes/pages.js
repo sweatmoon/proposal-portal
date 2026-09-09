@@ -2121,7 +2121,7 @@ app.get('/ppt-generate', (c) => {
       return '<div class="per-kw-block bg-slate-50 rounded-lg p-3" data-pid="' + p.id + '">'
         + '<div class="flex items-center justify-between mb-2">'
         + '<span class="text-xs font-semibold text-slate-700">' + escapeHtml(p.name || '') + '</span>'
-        + '<button type="button" class="text-xs text-indigo-500 hover:text-indigo-700 flex items-center gap-1" onclick="addPerKwRow(this.closest(\'.per-kw-block\'))">'
+        + '<button type="button" class="text-xs text-indigo-500 hover:text-indigo-700 flex items-center gap-1 add-per-kw-btn">'
         + '<i class="fas fa-plus-circle text-[10px]"></i> 키워드 추가</button>'
         + '</div>'
         + '<div class="per-kw-rows space-y-1.5">' + rowsHtml + '</div>'
@@ -2237,7 +2237,7 @@ app.get('/ppt-generate', (c) => {
     div.innerHTML = '<input type="text" placeholder="키워드 (예: {{사업명}})" class="kw-key w-44 text-xs px-2.5 py-1.5 border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-violet-300">'
       + '<span class="text-slate-300 text-xs flex-shrink-0">→</span>'
       + '<input type="text" placeholder="변환 텍스트" class="kw-val flex-1 text-xs px-2.5 py-1.5 border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-violet-300">'
-      + '<button type="button" class="text-slate-300 hover:text-red-400 text-sm px-1 flex-shrink-0" onclick="this.closest(\'.kw-row\').remove()"><i class="fas fa-times"></i></button>'
+      + '<button type="button" class="text-slate-300 hover:text-red-400 text-sm px-1 flex-shrink-0 rm-row-btn" data-rm=".kw-row"><i class="fas fa-times"></i></button>'
     container.appendChild(div)
     div.querySelector('.kw-key').focus()
   }
@@ -2291,7 +2291,7 @@ app.get('/ppt-generate', (c) => {
     // 표지 확인
     var coverMenu = bundleMenus.find(function(m) { return m.menu_code === 'ATT_COVER' })
     if (!coverMenu || !coverMenu.templates || !coverMenu.templates[0] || !coverMenu.templates[0].pptx_b64_key) {
-      alert('표지(ATT_COVER) 템플릿이 등록되지 않았습니다.\nPPT 템플릿 관리 → 첨부 탭에서 먼저 등록해주세요.')
+      alert('표지(ATT_COVER) 템플릿이 등록되지 않았습니다.\\nPPT 템플릿 관리 → 첨부 탭에서 먼저 등록해주세요.')
       return
     }
 
@@ -2308,7 +2308,7 @@ app.get('/ppt-generate', (c) => {
     })
 
     if (missing.length) {
-      alert('템플릿 미등록 항목:\n' + missing.join('\n') + '\n\nPPT 템플릿 관리 → 첨부 탭에서 먼저 등록해주세요.')
+      alert('템플릿 미등록 항목:\\n' + missing.join('\\n') + '\\n\\nPPT 템플릿 관리 → 첨부 탭에서 먼저 등록해주세요.')
       return
     }
     if (!order.length && !unsupported.length) {
@@ -2491,13 +2491,13 @@ app.get('/ppt-generate', (c) => {
           + '<input type="text" class="free-kw-key w-36 text-[11px] px-2 py-1 border border-slate-200 rounded focus:outline-none focus:ring-1 focus:ring-violet-300" placeholder="{{키워드}}" value="' + escapeHtml(r.key) + '">'
           + '<span class="text-slate-300 text-xs flex-shrink-0">→</span>'
           + '<input type="text" class="free-kw-val flex-1 text-[11px] px-2 py-1 border border-slate-200 rounded focus:outline-none focus:ring-1 focus:ring-violet-300" placeholder="변환 텍스트" value="' + escapeHtml(r.val) + '">'
-          + '<button type="button" class="text-slate-300 hover:text-red-400 px-0.5 text-xs flex-shrink-0" onclick="this.closest(\'.free-per-row\').remove()"><i class="fas fa-times"></i></button>'
+          + '<button type="button" class="text-slate-300 hover:text-red-400 px-0.5 text-xs flex-shrink-0 rm-row-btn" data-rm=".free-per-row"><i class="fas fa-times"></i></button>'
           + '</div>'
       }).join('')
       return '<div class="free-per-block bg-violet-50 border border-violet-100 rounded-lg p-3" data-pid="' + p.id + '">'
         + '<div class="flex items-center justify-between mb-2">'
         + '<span class="text-xs font-bold text-violet-700">' + escapeHtml(p.name||'') + '</span>'
-        + '<button type="button" class="text-[11px] text-indigo-500 hover:text-indigo-700 flex items-center gap-1" onclick="addFreePerKwRow(this.closest(\'.free-per-block\'))">'
+        + '<button type="button" class="text-[11px] text-indigo-500 hover:text-indigo-700 flex items-center gap-1 add-free-per-kw-btn">'
         + '<i class="fas fa-plus-circle text-[10px]"></i> 키워드 추가</button>'
         + '</div>'
         + '<div class="free-per-rows space-y-1">' + rowsHtml + '</div>'
@@ -2512,7 +2512,7 @@ app.get('/ppt-generate', (c) => {
     div.innerHTML = '<input type="text" class="free-kw-key w-36 text-[11px] px-2 py-1 border border-slate-200 rounded focus:outline-none focus:ring-1 focus:ring-violet-300" placeholder="{{키워드}}">'
       + '<span class="text-slate-300 text-xs flex-shrink-0">→</span>'
       + '<input type="text" class="free-kw-val flex-1 text-[11px] px-2 py-1 border border-slate-200 rounded focus:outline-none focus:ring-1 focus:ring-violet-300" placeholder="변환 텍스트">'
-      + '<button type="button" class="text-slate-300 hover:text-red-400 px-0.5 text-xs flex-shrink-0" onclick="this.closest(\'.free-per-row\').remove()"><i class="fas fa-times"></i></button>'
+      + '<button type="button" class="text-slate-300 hover:text-red-400 px-0.5 text-xs flex-shrink-0 rm-row-btn" data-rm=".free-per-row"><i class="fas fa-times"></i></button>'
     rowsEl.appendChild(div)
     div.querySelector('.free-kw-key').focus()
   }
@@ -2525,7 +2525,7 @@ app.get('/ppt-generate', (c) => {
     div.innerHTML = '<input type="text" class="free-gkw-key w-36 text-xs px-2 py-1.5 border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-300" placeholder="{{키워드}}">'
       + '<span class="text-slate-300 text-xs flex-shrink-0">→</span>'
       + '<input type="text" class="free-gkw-val flex-1 text-xs px-2 py-1.5 border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-300" placeholder="변환 텍스트">'
-      + '<button type="button" class="text-slate-300 hover:text-red-400 text-sm px-0.5 flex-shrink-0" onclick="this.closest(\'.free-gkw-row\').remove()"><i class="fas fa-times"></i></button>'
+      + '<button type="button" class="text-slate-300 hover:text-red-400 text-sm px-0.5 flex-shrink-0 rm-row-btn" data-rm=".free-gkw-row"><i class="fas fa-times"></i></button>'
     container.appendChild(div)
     div.querySelector('.free-gkw-key').focus()
   }
@@ -2567,7 +2567,7 @@ app.get('/ppt-generate', (c) => {
 
     var coverMenu = freeAllMenus.find(function(m) { return m.menu_code === 'ATT_COVER' })
     if (!coverMenu || !coverMenu.templates || !coverMenu.templates[0] || !coverMenu.templates[0].pptx_b64_key) {
-      alert('표지(ATT_COVER) 템플릿이 등록되지 않았습니다.\nPPT 템플릿 관리 → 첨부 탭에서 먼저 등록해주세요.')
+      alert('표지(ATT_COVER) 템플릿이 등록되지 않았습니다.\\nPPT 템플릿 관리 → 첨부 탭에서 먼저 등록해주세요.')
       return
     }
 
@@ -2583,7 +2583,7 @@ app.get('/ppt-generate', (c) => {
       if (!m.templates || !m.templates[0] || !m.templates[0].pptx_b64_key) { missing.push(m.menu_name); return }
       order.push({ key: typeKey, menu: m })
     })
-    if (missing.length) { alert('템플릿 미등록:\n' + missing.join('\n') + '\n\nPPT 템플릿 관리 → 첨부 탭에서 등록해주세요.'); return }
+    if (missing.length) { alert('템플릿 미등록:\\n' + missing.join('\\n') + '\\n\\nPPT 템플릿 관리 → 첨부 탭에서 등록해주세요.'); return }
     if (!order.length) { alert('생성 가능한 항목이 없습니다.'); return }
 
     var btn = document.getElementById('freeBundleBtn')
@@ -2639,6 +2639,16 @@ app.get('/ppt-generate', (c) => {
 
   document.getElementById('freePersonnelSearch').addEventListener('input', function(e) {
     renderFreePersonnelList(e.target.value)
+  })
+
+  // ── 이벤트 위임: 인력별 키워드 추가 버튼 + 행 삭제 버튼 (onclick 따옴표 충돌 회피) ──
+  document.addEventListener('click', function(e) {
+    var btn = e.target.closest('.add-per-kw-btn')
+    if (btn) { addPerKwRow(btn.closest('.per-kw-block')); return }
+    var btn2 = e.target.closest('.add-free-per-kw-btn')
+    if (btn2) { addFreePerKwRow(btn2.closest('.free-per-block')); return }
+    var rmBtn = e.target.closest('.rm-row-btn')
+    if (rmBtn) { var sel = rmBtn.getAttribute('data-rm'); if (sel) rmBtn.closest(sel).remove(); return }
   })
   </script>
   `;
