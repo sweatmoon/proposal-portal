@@ -173,6 +173,26 @@ app.get('/', async (c) => {
 app.get('/proposals', async (c) => {
     const status = c.req.query('status') || '';
     const search = c.req.query('search') || '';
+    const PAGE_SIZE = 10;
+    const page = Math.max(1, parseInt(c.req.query('page') || '1', 10));
+    let whereSql = `FROM audit_projects p LEFT JOIN proposal_members pm ON pm.project_id = p.id WHERE 1=1`;
+    const params = [];
+    let idx = 1;
+    if (status) {
+        whereSql += ` AND p.proposal_status = $${idx++}`;
+        params.push(status);
+    }
+    if (search) {
+        whereSql += ` AND (p.project_name ILIKE $${idx} OR p.client_org ILIKE $${idx})`;
+        params.push(`%${search}%`);
+        idx++;
+    }
+    const countSql = `SELECT COUNT(DISTINCT p.id) AS total ${whereSql}`;
+    const countRow = await query(countSql, params);
+    const totalCount = parseInt(countRow[0]?.total || '0', 10);
+    const totalPages = Math.max(1, Math.ceil(totalCount / PAGE_SIZE));
+    const currentPage = Math.min(page, totalPages);
+    const offset = (currentPage - 1) * PAGE_SIZE;
     let sql = `
     SELECT p.id, p.project_name, p.client_org, p.bid_notice_no,
            p.bid_deadline, p.bid_amount, p.bid_rate,
@@ -180,22 +200,11 @@ app.get('/proposals', async (c) => {
            p.proposal_status, p.eval_method,
            p.writer, p.director, p.registered_yearmonth,
            COUNT(DISTINCT pm.id) AS member_count
-    FROM audit_projects p
-    LEFT JOIN proposal_members pm ON pm.project_id = p.id
-    WHERE 1=1
+    ${whereSql}
+    GROUP BY p.id ORDER BY p.bid_deadline DESC NULLS LAST, p.id DESC
+    LIMIT $${idx} OFFSET $${idx + 1}
   `;
-    const params = [];
-    let idx = 1;
-    if (status) {
-        sql += ` AND p.proposal_status = $${idx++}`;
-        params.push(status);
-    }
-    if (search) {
-        sql += ` AND (p.project_name ILIKE $${idx} OR p.client_org ILIKE $${idx})`;
-        params.push(`%${search}%`);
-        idx++;
-    }
-    sql += ` GROUP BY p.id ORDER BY p.bid_deadline DESC NULLS LAST, p.id DESC`;
+    params.push(PAGE_SIZE, offset);
     const projects = await query(sql, params);
     const statusTabs = ['', '입력중', '자동화요청', '지원요청', '지원완료'].map(s => {
         const active = status === s;
@@ -206,7 +215,7 @@ app.get('/proposals', async (c) => {
     }).join('');
     const rows = projects.map((p, i) => `
     <tr class="hover:bg-indigo-50 transition group" onclick="location.href='/proposals/${p.id}'">
-      <td class="px-4 py-3 text-center text-sm text-slate-400">${i + 1}</td>
+      <td class="px-4 py-3 text-center text-sm text-slate-400">${offset + i + 1}</td>
       <td class="px-4 py-3">
         <div class="text-sm font-semibold text-indigo-700 leading-snug line-clamp-2 max-w-xs">${p.project_name}</div>
         ${p.bid_notice_no ? `<div class="text-xs text-slate-400 mt-0.5">${p.bid_notice_no}</div>` : ''}
@@ -230,7 +239,7 @@ app.get('/proposals', async (c) => {
   <div class="p-6 md:p-8">
     <div class="mb-6">
       <h1 class="text-2xl font-bold text-slate-800">제안작업표</h1>
-      <p class="text-slate-500 text-sm mt-1">총 ${projects.length}건</p>
+      <p class="text-slate-500 text-sm mt-1">총 ${totalCount}건</p>
     </div>
 
     <!-- 필터 + 검색 -->
@@ -273,6 +282,18 @@ app.get('/proposals', async (c) => {
           </tbody>
         </table>
       </div>
+      ${totalPages > 1 ? `
+      <div class="flex items-center justify-center gap-1 px-4 py-3 border-t border-slate-100">
+        ${currentPage > 1 ? `<a href="/proposals?${new URLSearchParams({ ...(status ? { status } : {}), ...(search ? { search } : {}), page: String(currentPage - 1) }).toString()}" class="px-3 py-1.5 rounded-lg border border-slate-200 text-sm text-slate-600 hover:border-indigo-300 hover:text-indigo-600 transition"><i class="fas fa-chevron-left"></i></a>` : `<span class="px-3 py-1.5 rounded-lg border border-slate-100 text-sm text-slate-300"><i class="fas fa-chevron-left"></i></span>`}
+        ${Array.from({ length: totalPages }, (_, i) => i + 1).map(pg => {
+        const isActive = pg === currentPage;
+        const url = '/proposals?' + new URLSearchParams({ ...(status ? { status } : {}), ...(search ? { search } : {}), page: String(pg) }).toString();
+        return isActive
+            ? `<span class="px-3 py-1.5 rounded-lg bg-indigo-600 text-white text-sm font-semibold">${pg}</span>`
+            : `<a href="${url}" class="px-3 py-1.5 rounded-lg border border-slate-200 text-sm text-slate-600 hover:border-indigo-300 hover:text-indigo-600 transition">${pg}</a>`;
+    }).join('')}
+        ${currentPage < totalPages ? `<a href="/proposals?${new URLSearchParams({ ...(status ? { status } : {}), ...(search ? { search } : {}), page: String(currentPage + 1) }).toString()}" class="px-3 py-1.5 rounded-lg border border-slate-200 text-sm text-slate-600 hover:border-indigo-300 hover:text-indigo-600 transition"><i class="fas fa-chevron-right"></i></a>` : `<span class="px-3 py-1.5 rounded-lg border border-slate-100 text-sm text-slate-300"><i class="fas fa-chevron-right"></i></span>`}
+      </div>` : ''}
     </div>
   </div>
 
@@ -1813,6 +1834,10 @@ app.get('/ppt-generate', (c) => {
           </tbody>
         </table>
       </div>
+      <div id="projectListPager" class="flex items-center justify-between px-4 py-3 border-t border-slate-100 hidden">
+        <span id="projectListInfo" class="text-xs text-slate-400"></span>
+        <div id="projectListPageBtns" class="flex gap-1"></div>
+      </div>
     </section>
 
     <!-- ══════════════════════════════════════════════════
@@ -1943,34 +1968,79 @@ app.get('/ppt-generate', (c) => {
   }
 
   // ── 사업 목록 로드 ─────────────────────────────────────────────
+  var _allProjects = []      // 전체 사업 목록 캐시
+  var _projPage = 1
+  var _projPageSize = 10
+
+  function renderProjectPage() {
+    var tbody = document.getElementById('projectListBody')
+    var pager = document.getElementById('projectListPager')
+    var info  = document.getElementById('projectListInfo')
+    var btns  = document.getElementById('projectListPageBtns')
+    var total = _allProjects.length
+    if (!total) {
+      tbody.innerHTML = '<tr><td colspan="6" class="px-4 py-10 text-center text-slate-400">등록된 사업이 없습니다</td></tr>'
+      pager.classList.add('hidden'); return
+    }
+    var totalPages = Math.max(1, Math.ceil(total / _projPageSize))
+    if (_projPage > totalPages) _projPage = totalPages
+    var start = (_projPage - 1) * _projPageSize
+    var slice = _allProjects.slice(start, start + _projPageSize)
+    tbody.innerHTML = slice.map(function(p) {
+      return '<tr class="hover:bg-indigo-50 transition border-b border-slate-100 last:border-0">'
+        + '<td class="px-4 py-3 font-medium text-slate-700">' + escapeHtml(p.project_name || '-') + '</td>'
+        + '<td class="px-4 py-3 text-slate-600">' + escapeHtml(p.client_org || '-') + '</td>'
+        + '<td class="px-4 py-3 text-center text-slate-600">' + escapeHtml(p.registered_yearmonth || '-') + '</td>'
+        + '<td class="px-4 py-3 text-center text-slate-600">' + escapeHtml(p.bid_deadline || '-') + '</td>'
+        + '<td class="px-4 py-3 text-center"><span class="inline-block px-2 py-0.5 rounded-full text-xs font-medium bg-slate-100 text-slate-600">' + escapeHtml(p.proposal_status || '-') + '</span></td>'
+        + '<td class="px-4 py-3 text-center"><button class="bundle-open-btn bg-violet-600 hover:bg-violet-700 text-white text-xs font-semibold px-3 py-1.5 rounded-lg transition" data-pid="' + p.id + '" data-pname="' + escapeHtml(p.project_name || '') + '"><i class="fas fa-paperclip"></i> 첨부PPT 생성</button></td>'
+        + '</tr>'
+    }).join('')
+    document.querySelectorAll('.bundle-open-btn').forEach(function(btn) {
+      btn.addEventListener('click', function() {
+        openBundleModal(Number(btn.dataset.pid), btn.dataset.pname)
+      })
+    })
+    // 페이저 렌더
+    if (totalPages <= 1) { pager.classList.add('hidden'); return }
+    pager.classList.remove('hidden')
+    info.textContent = '총 ' + total + '건 (' + _projPage + ' / ' + totalPages + ' 페이지)'
+    var btnHtml = ''
+    if (_projPage > 1) {
+      btnHtml += '<button onclick="_projPage--; renderProjectPage()" class="px-2.5 py-1 rounded border border-slate-200 text-xs text-slate-600 hover:border-indigo-300 hover:text-indigo-600 transition"><i class="fas fa-chevron-left"></i></button>'
+    } else {
+      btnHtml += '<span class="px-2.5 py-1 rounded border border-slate-100 text-xs text-slate-300"><i class="fas fa-chevron-left"></i></span>'
+    }
+    var startPg = Math.max(1, _projPage - 2)
+    var endPg   = Math.min(totalPages, startPg + 4)
+    if (endPg - startPg < 4) startPg = Math.max(1, endPg - 4)
+    for (var pg = startPg; pg <= endPg; pg++) {
+      if (pg === _projPage) {
+        btnHtml += '<span class="px-2.5 py-1 rounded bg-indigo-600 text-white text-xs font-semibold">' + pg + '</span>'
+      } else {
+        btnHtml += '<button onclick="_projPage=' + pg + '; renderProjectPage()" class="px-2.5 py-1 rounded border border-slate-200 text-xs text-slate-600 hover:border-indigo-300 hover:text-indigo-600 transition">' + pg + '</button>'
+      }
+    }
+    if (_projPage < totalPages) {
+      btnHtml += '<button onclick="_projPage++; renderProjectPage()" class="px-2.5 py-1 rounded border border-slate-200 text-xs text-slate-600 hover:border-indigo-300 hover:text-indigo-600 transition"><i class="fas fa-chevron-right"></i></button>'
+    } else {
+      btnHtml += '<span class="px-2.5 py-1 rounded border border-slate-100 text-xs text-slate-300"><i class="fas fa-chevron-right"></i></span>'
+    }
+    btns.innerHTML = btnHtml
+  }
+
   async function loadProjects(search) {
     var tbody = document.getElementById('projectListBody')
     tbody.innerHTML = '<tr><td colspan="6" class="px-4 py-10 text-center text-slate-400">불러오는 중...</td></tr>'
+    document.getElementById('projectListPager').classList.add('hidden')
     try {
       var url = '/api/audit-projects' + (search ? '?search=' + encodeURIComponent(search) : '')
       var r = await fetch(url)
       var j = await r.json()
       if (!j.ok) throw new Error(j.error || '조회 실패')
-      var rows = j.data || []
-      if (!rows.length) {
-        tbody.innerHTML = '<tr><td colspan="6" class="px-4 py-10 text-center text-slate-400">등록된 사업이 없습니다</td></tr>'
-        return
-      }
-      tbody.innerHTML = rows.map(function(p) {
-        return '<tr class="hover:bg-indigo-50 transition border-b border-slate-100 last:border-0">'
-          + '<td class="px-4 py-3 font-medium text-slate-700">' + escapeHtml(p.project_name || '-') + '</td>'
-          + '<td class="px-4 py-3 text-slate-600">' + escapeHtml(p.client_org || '-') + '</td>'
-          + '<td class="px-4 py-3 text-center text-slate-600">' + escapeHtml(p.registered_yearmonth || '-') + '</td>'
-          + '<td class="px-4 py-3 text-center text-slate-600">' + escapeHtml(p.bid_deadline || '-') + '</td>'
-          + '<td class="px-4 py-3 text-center"><span class="inline-block px-2 py-0.5 rounded-full text-xs font-medium bg-slate-100 text-slate-600">' + escapeHtml(p.proposal_status || '-') + '</span></td>'
-          + '<td class="px-4 py-3 text-center"><button class="bundle-open-btn bg-violet-600 hover:bg-violet-700 text-white text-xs font-semibold px-3 py-1.5 rounded-lg transition" data-pid="' + p.id + '" data-pname="' + escapeHtml(p.project_name || '') + '"><i class="fas fa-paperclip"></i> 첨부PPT 생성</button></td>'
-          + '</tr>'
-      }).join('')
-      document.querySelectorAll('.bundle-open-btn').forEach(function(btn) {
-        btn.addEventListener('click', function() {
-          openBundleModal(Number(btn.dataset.pid), btn.dataset.pname)
-        })
-      })
+      _allProjects = j.data || []
+      _projPage = 1
+      renderProjectPage()
     } catch(e) {
       tbody.innerHTML = '<tr><td colspan="6" class="px-4 py-10 text-center text-red-500">' + escapeHtml(e.message) + '</td></tr>'
     }
