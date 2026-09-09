@@ -67,4 +67,23 @@ app.get('/:id/phases', async (c) => {
   }
 })
 
+/** GET /api/audit-projects/:id/members — 사업별 인력 목록 */
+app.get('/:id/members', async (c) => {
+  try {
+    const id = Number(c.req.param('id'))
+    const rows = await query(
+      `SELECT id, person_name, member_group, member_type, domain,
+              auditor_grade, is_fulltime, total_md
+       FROM proposal_members
+       WHERE project_id = $1
+       ORDER BY id ASC`,
+      [id]
+    )
+    return c.json({ ok: true, data: rows })
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : String(e)
+    return c.json({ ok: false, error: msg }, 500)
+  }
+})
+
 export default app

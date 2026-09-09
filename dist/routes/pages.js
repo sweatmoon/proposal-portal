@@ -1993,6 +1993,36 @@ app.get('/ppt-generate', (c) => {
     document.getElementById('bundleModal').classList.add('hidden')
   }
 
+  // menu_code → ppt-attachment-bundle API의 ATTACHMENT_TYPES 키 매핑
+  var MENU_CODE_TO_TYPE = {
+    'ATT_COVER':       'cover',
+    'ATT_SCHEDULE':    'schedule',
+    'ATT_CAREER':      'career',
+    'ATT_CONSENT':     'consent',
+    'ATT_STAMP_NO':    null,         // 도장X: 별도 API 없음 — 범용(도장X)은 직접 복사
+    'ATT_STAMP_YES':   null,         // 도장O: stamp 그룹(bizreg 등) 공유 템플릿
+    'ATT_EMPLOYMENT':  'employmentCert',
+    'ATT_CAREER_CERT': 'careerCert',
+    'ATT_STAFFING':    'staffingStatus'
+  }
+
+  // ATTACHMENT_TYPES에 정의된 키만 API가 처리 가능
+  var SUPPORTED_TYPES = ['schedule','career','consent','financial','bizreg','taxcert',
+                         'localtaxcert','corpregistry','insurance','employmentCert',
+                         'careerCert','staffingStatus']
+
+  // base64 문자열 → Blob 변환 헬퍼
+  function b64ToBlob(b64, mime) {
+    try {
+      var bin = atob(b64)
+      var arr = new Uint8Array(bin.length)
+      for (var i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i)
+      return new Blob([arr], { type: mime })
+    } catch(e) {
+      return null
+    }
+  }
+
   async function confirmGenerateBundle() {
     if (!bundleProjectId) return
     var selected = bundleMenus.filter(function(m) { return bundleItemChecked[m.id] })
@@ -2004,29 +2034,94 @@ app.get('/ppt-generate', (c) => {
     btn.disabled = true
     btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-1"></i>생성 중...'
     closeBundleModal()
+
     try {
-      var r = await fetch('/api/ppt-attachment-bundle/' + bundleProjectId, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          items: selected.map(function(m) { return { menuId: m.id, menuCode: m.menu_code, menuName: m.menu_name } }),
-          careerOnePage: bundleCareerPageMode === '1page',
-          stampType: bundleStampType
-        })
+      var PPTX_MIME = 'application/vnd.openxmlformats-officedocument.presentationml.presentation'
+
+      // ── 1. 표지(ATT_COVER) 메뉴 찾기 ───────────────────────────
+      var coverMenu = bundleMenus.find(function(m) { return m.menu_code === 'ATT_COVER' })
+      if (!coverMenu || !coverMenu.templates || !coverMenu.templates[0] || !coverMenu.templates[0].pptx_b64_key) {
+        throw new Error('표지(ATT_COVER) 템플릿이 등록되지 않았습니다. PPT 템플릿 관리 → 첨부 탭에서 먼저 등록해주세요.')
+      }
+      var coverBlob = b64ToBlob(coverMenu.templates[0].pptx_b64_key, PPTX_MIME)
+      if (!coverBlob) throw new Error('표지 템플릿 파일 변환에 실패했습니다.')
+
+      // ── 2. 선택 항목을 API 키 순서 배열로 변환 ─────────────────
+      var order = []
+      var missingTemplates = []
+      var unsupportedItems = []
+
+      selected.forEach(function(m) {
+        if (m.menu_code === 'ATT_COVER') return  // 표지는 별도 처리
+        var typeKey = MENU_CODE_TO_TYPE[m.menu_code]
+        if (typeKey === undefined) { unsupportedItems.push(m.menu_name); return }
+        if (typeKey === null) {
+          // ATT_STAMP_NO / ATT_STAMP_YES 등 직접 처리 불가 항목 — 경고만
+          unsupportedItems.push(m.menu_name + ' (API 미지원)')
+          return
+        }
+        if (!SUPPORTED_TYPES.includes(typeKey)) { unsupportedItems.push(m.menu_name); return }
+        var tpl = m.templates && m.templates[0]
+        if (!tpl || !tpl.pptx_b64_key) {
+          missingTemplates.push(m.menu_name)
+          return
+        }
+        order.push({ key: typeKey, menu: m })
       })
+
+      if (unsupportedItems.length) {
+        var skipMsg = unsupportedItems.join(', ') + ' 항목은 현재 API에서 지원되지 않아 제외됩니다.'
+        if (!confirm(skipMsg + '\n\n계속 진행할까요?')) {
+          btn.disabled = false
+          btn.innerHTML = '<i class="fas fa-magic mr-1"></i>생성'
+          return
+        }
+      }
+      if (missingTemplates.length) {
+        throw new Error('다음 항목의 템플릿이 등록되지 않았습니다: ' + missingTemplates.join(', ')
+          + '\n\nPPT 템플릿 관리 → 첨부 탭에서 먼저 등록해주세요.')
+      }
+      if (!order.length) {
+        throw new Error('생성할 수 있는 항목이 없습니다. 템플릿이 등록된 항목을 선택해주세요.')
+      }
+
+      // ── 3. stamp 필요 여부 확인 ─────────────────────────────────
+      var STAMP_TYPES = ['bizreg','taxcert','localtaxcert','corpregistry','insurance']
+      var needsStamp = order.some(function(o) { return STAMP_TYPES.includes(o.key) })
+      if (needsStamp && !bundleStampType) {
+        throw new Error('도장 종류(원본대조필 / 사실과상위없음)를 선택해주세요.')
+      }
+
+      // ── 4. FormData 구성 ────────────────────────────────────────
+      var fd = new FormData()
+      fd.append('cover', new File([coverBlob], 'cover.pptx', { type: PPTX_MIME }))
+      fd.append('order', JSON.stringify(order.map(function(o) { return o.key })))
+      if (needsStamp) fd.append('stampType', bundleStampType)
+      fd.append('careerOnePage', String(bundleCareerPageMode === '1page'))
+
+      order.forEach(function(o) {
+        var tplBlob = b64ToBlob(o.menu.templates[0].pptx_b64_key, PPTX_MIME)
+        fd.append(o.key, new File([tplBlob], o.key + '.pptx', { type: PPTX_MIME }))
+      })
+
+      // ── 5. API 호출 ─────────────────────────────────────────────
+      var r = await fetch('/api/ppt-attachment-bundle/' + bundleProjectId, { method: 'POST', body: fd })
       if (!r.ok) {
         var ej = await r.json().catch(function() { return {} })
         throw new Error(ej.error || ('생성 실패 (' + r.status + ')'))
       }
+
+      // ── 6. 파일 다운로드 ────────────────────────────────────────
       var blob = await r.blob()
       var cd = r.headers.get('Content-Disposition') || ''
-      var m2 = cd.match(/filename\\*?=["']?(?:UTF-8'')?([^"';]+)/i)
+      var m2 = cd.match(/filename\*?=["']?(?:UTF-8'')?([^"';]+)/i)
       var filename = m2 ? decodeURIComponent(m2[1]) : ('첨부PPT_' + bundleProjectId + '.pptx')
       var url = URL.createObjectURL(blob)
       var a = document.createElement('a')
       a.href = url; a.download = filename
       document.body.appendChild(a); a.click(); a.remove()
       URL.revokeObjectURL(url)
+
     } catch(e) {
       alert('첨부PPT 생성 실패: ' + e.message)
     } finally {
