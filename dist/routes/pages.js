@@ -5,7 +5,6 @@ import { Hono } from 'hono';
 import { query, queryOne } from '../db/client.js';
 import { layout, statusBadge, fmtMoney, fmtDate } from '../views/layout.js';
 // [ppt-portal 추가 기능] "첨부PPT 생성" 위젯 — 자세한 설명/이식 방법은 파일 상단 주석 참고.
-import { renderAttachmentBundleWidget } from '../views/attachment-bundle-widget.js';
 // ── 감리경력 "n년 n개월" 포맷 헬퍼 ──────────────────────────────
 // earliest: "YYYY.MM" 문자열
 function fmtCareer(earliest) {
@@ -1770,7 +1769,6 @@ app.get('/upload', (c) => {
 });
 // ── 첨부 및 서류 생성 페이지 ───────────────────────────────────────
 app.get('/ppt-generate', (c) => {
-    const bundleWidget = renderAttachmentBundleWidget();
     const body = `
   <div class="p-6 md:p-8 max-w-5xl" id="pptGenRoot">
     <h1 class="text-2xl font-bold text-slate-800 flex items-center gap-2 mb-1">
@@ -1808,7 +1806,74 @@ app.get('/ppt-generate', (c) => {
     </div>
   </div>
 
+  <!-- ── 첨부PPT 생성 모달 ── -->
+  <div id="bundleModal" class="hidden fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4 gap-4">
+    <div class="bg-white rounded-2xl shadow-xl w-full max-w-lg flex flex-col" style="max-height:90vh">
+      <div class="px-6 py-4 border-b border-slate-200 flex items-center justify-between flex-shrink-0">
+        <div>
+          <h3 class="font-bold text-slate-800"><i class="fas fa-paperclip mr-2 text-indigo-500"></i>첨부PPT 생성</h3>
+          <p class="text-xs text-slate-400 mt-0.5" id="bundleModalProjectName"></p>
+        </div>
+        <button onclick="closeBundleModal()" class="text-slate-400 hover:text-slate-700"><i class="fas fa-times"></i></button>
+      </div>
+      <div class="px-6 py-5 overflow-y-auto flex-1 min-h-0 space-y-4">
+
+        <!-- 항목 체크 목록 -->
+        <div>
+          <div class="text-xs font-semibold text-slate-500 mb-2 uppercase tracking-wide">생성할 항목 선택</div>
+          <div id="bundleItemList" class="space-y-1.5"></div>
+        </div>
+
+        <!-- 단계 선택 (일정표 체크 시) -->
+        <div id="bundleSchedulePhaseWrap" class="hidden bg-indigo-50 rounded-xl p-3 border border-indigo-200">
+          <div class="text-xs font-bold text-indigo-700 mb-1">단계별 감리 구분 선택</div>
+          <p class="text-xs text-indigo-400 mb-2">검수지원 단계는 자동으로 "검수지원"으로 표시됩니다. 추가 표시할 단계만 체크하세요.</p>
+          <div id="bundleSchedulePhaseList" class="space-y-1.5 max-h-40 overflow-y-auto text-xs text-slate-600"></div>
+        </div>
+
+        <!-- 페이지 구성 (경력 체크 시) -->
+        <div id="bundleCareerOnePageWrap" class="hidden bg-teal-50 rounded-xl p-3 border border-teal-200">
+          <div class="text-xs font-bold text-teal-700 mb-2">투입 감리원별 실적 및 경력 페이지 구성</div>
+          <div class="flex gap-4 text-sm text-slate-700">
+            <label class="flex items-center gap-1.5 cursor-pointer">
+              <input type="radio" name="bundleCareerPageMode" value="2page" class="accent-teal-600" onchange="bundleCareerPageMode=this.value"> 2페이지
+            </label>
+            <label class="flex items-center gap-1.5 cursor-pointer">
+              <input type="radio" name="bundleCareerPageMode" value="1page" class="accent-teal-600" onchange="bundleCareerPageMode=this.value"> 1페이지
+            </label>
+          </div>
+        </div>
+
+        <!-- 도장 선택 -->
+        <div id="bundleStampWrap" class="hidden bg-amber-50 rounded-xl p-3 border border-amber-200">
+          <div class="text-xs font-bold text-amber-700 mb-2">찍을 도장 선택</div>
+          <div class="flex gap-4 text-sm text-slate-700">
+            <label class="flex items-center gap-1.5 cursor-pointer">
+              <input type="radio" name="bundleStamp" value="원본대조필" class="accent-amber-600" onchange="bundleStampType=this.value"> 원본대조필
+            </label>
+            <label class="flex items-center gap-1.5 cursor-pointer">
+              <input type="radio" name="bundleStamp" value="사실과상위없음" class="accent-amber-600" onchange="bundleStampType=this.value"> 사실과상위없음
+            </label>
+          </div>
+        </div>
+
+      </div>
+      <div class="px-6 py-3 border-t border-slate-100 flex justify-end gap-2 flex-shrink-0">
+        <button onclick="closeBundleModal()" class="px-4 py-2 text-sm rounded-lg border border-slate-300 text-slate-600 hover:bg-slate-50">취소</button>
+        <button onclick="confirmGenerateBundle()" id="bundleConfirmBtn"
+          class="px-4 py-2 text-sm rounded-lg bg-violet-600 hover:bg-violet-700 text-white font-semibold">
+          <i class="fas fa-magic mr-1"></i>생성
+        </button>
+      </div>
+    </div>
+  </div>
+
   <script>
+  // ── 사업 목록 ─────────────────────────────────────────────────
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]))
+  }
+
   async function loadProjects(search) {
     const tbody = document.getElementById('projectListBody')
     tbody.innerHTML = '<tr><td colspan="6" class="px-4 py-10 text-center text-slate-400">불러오는 중...</td></tr>'
@@ -1822,40 +1887,147 @@ app.get('/ppt-generate', (c) => {
         tbody.innerHTML = '<tr><td colspan="6" class="px-4 py-10 text-center text-slate-400">등록된 사업이 없습니다</td></tr>'
         return
       }
-      tbody.innerHTML = rows.map(p => \`
-        <tr class="hover:bg-indigo-50 transition border-b border-slate-100 last:border-0">
-          <td class="px-4 py-3 font-medium text-slate-700">\${escapeHtml(p.project_name || '-')}</td>
-          <td class="px-4 py-3 text-slate-600">\${escapeHtml(p.client_org || '-')}</td>
-          <td class="px-4 py-3 text-center text-slate-600">\${escapeHtml(p.registered_yearmonth || '-')}</td>
-          <td class="px-4 py-3 text-center text-slate-600">\${escapeHtml(p.bid_deadline || '-')}</td>
-          <td class="px-4 py-3 text-center">
-            <span class="inline-block px-2 py-0.5 rounded-full text-xs font-medium bg-slate-100 text-slate-600">\${escapeHtml(p.proposal_status || '-')}</span>
-          </td>
-          <td class="px-4 py-3 text-center">
-            <button onclick="openBundleModal(\${p.id}, this)"
-              class="bg-violet-600 hover:bg-violet-700 text-white text-xs font-semibold px-3 py-1.5 rounded-lg transition">
-              <i class="fas fa-paperclip"></i> 첨부PPT 생성
-            </button>
-          </td>
-        </tr>\`).join('')
+      tbody.innerHTML = rows.map(p => '<tr class="hover:bg-indigo-50 transition border-b border-slate-100 last:border-0">'
+        + '<td class="px-4 py-3 font-medium text-slate-700">' + escapeHtml(p.project_name || '-') + '</td>'
+        + '<td class="px-4 py-3 text-slate-600">' + escapeHtml(p.client_org || '-') + '</td>'
+        + '<td class="px-4 py-3 text-center text-slate-600">' + escapeHtml(p.registered_yearmonth || '-') + '</td>'
+        + '<td class="px-4 py-3 text-center text-slate-600">' + escapeHtml(p.bid_deadline || '-') + '</td>'
+        + '<td class="px-4 py-3 text-center"><span class="inline-block px-2 py-0.5 rounded-full text-xs font-medium bg-slate-100 text-slate-600">' + escapeHtml(p.proposal_status || '-') + '</span></td>'
+        + '<td class="px-4 py-3 text-center"><button onclick="openBundleModal(' + p.id + ', \'' + escapeHtml(p.project_name || '') + '\', this)" class="bg-violet-600 hover:bg-violet-700 text-white text-xs font-semibold px-3 py-1.5 rounded-lg transition"><i class="fas fa-paperclip"></i> 첨부PPT 생성</button></td>'
+        + '</tr>').join('')
     } catch (e) {
       tbody.innerHTML = '<tr><td colspan="6" class="px-4 py-10 text-center text-red-500">' + escapeHtml(e.message) + '</td></tr>'
     }
   }
 
-  function escapeHtml(s) {
-    return String(s).replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]))
+  let searchTimer
+  document.getElementById('searchInput').addEventListener('input', function(e) {
+    clearTimeout(searchTimer)
+    searchTimer = setTimeout(function() { loadProjects(e.target.value) }, 300)
+  })
+  loadProjects('')
+
+  // ── 첨부PPT 생성 모달 ─────────────────────────────────────────
+  // DB의 첨부 항목(ppt_menus category=attachment)을 불러와서 체크 목록으로 표시
+
+  var bundleProjectId = null
+  var bundleProjectName = ''
+  var bundleBtnEl = null
+  var bundleItemChecked = {}
+  var bundleCareerPageMode = '2page'
+  var bundleStampType = null
+  var bundleMenus = []  // DB에서 불러온 첨부 항목 목록
+
+  async function openBundleModal(id, projectName, btnEl) {
+    bundleProjectId = id
+    bundleProjectName = projectName
+    bundleBtnEl = btnEl
+    bundleItemChecked = {}
+    bundleCareerPageMode = '2page'
+    bundleStampType = null
+    document.getElementById('bundleModalProjectName').textContent = projectName
+    document.getElementById('bundleModal').classList.remove('hidden')
+    document.getElementById('bundleSchedulePhaseWrap').classList.add('hidden')
+    document.getElementById('bundleCareerOnePageWrap').classList.add('hidden')
+    document.getElementById('bundleStampWrap').classList.add('hidden')
+
+    // DB에서 첨부 항목 목록 로드
+    var listEl = document.getElementById('bundleItemList')
+    listEl.innerHTML = '<div class="text-slate-400 text-sm text-center py-4"><i class="fas fa-spinner fa-spin mr-1"></i>항목 불러오는 중...</div>'
+    try {
+      var r = await fetch('/api/ppt-menus?category=attachment')
+      var j = await r.json()
+      if (!j.ok) throw new Error(j.error || '항목 조회 실패')
+      var allMenus = j.data || []
+      // 최상위 섹션 제외, 실제 항목(child)만 추출
+      bundleMenus = []
+      allMenus.forEach(function(m) {
+        if (m.children && m.children.length) {
+          m.children.forEach(function(c) { bundleMenus.push(c) })
+        } else if (m.parent_id) {
+          bundleMenus.push(m)
+        }
+      })
+      if (!bundleMenus.length) {
+        listEl.innerHTML = '<div class="text-slate-400 text-sm text-center py-6">'
+          + '<i class="fas fa-exclamation-circle text-amber-400 text-2xl mb-2 block"></i>'
+          + '<a href="/ppt-templates" class="text-indigo-600 underline">PPT 템플릿 관리 → 첨부 탭</a>에서 먼저 첨부 항목을 초기화해주세요.'
+          + '</div>'
+        return
+      }
+      renderBundleItemList()
+    } catch(e) {
+      listEl.innerHTML = '<div class="text-red-500 text-sm text-center py-4">' + escapeHtml(e.message) + '</div>'
+    }
   }
 
-  let searchTimer
-  document.getElementById('searchInput').addEventListener('input', (e) => {
-    clearTimeout(searchTimer)
-    searchTimer = setTimeout(() => loadProjects(e.target.value), 300)
-  })
+  function renderBundleItemList() {
+    var listEl = document.getElementById('bundleItemList')
+    listEl.innerHTML = bundleMenus.map(function(m) {
+      var checked = !!bundleItemChecked[m.id]
+      var hasTemplate = m.template_count > 0
+      return '<label class="flex items-center gap-3 px-3 py-2.5 rounded-xl border cursor-pointer transition '
+        + (checked ? 'border-violet-200 bg-violet-50' : 'border-slate-200 hover:bg-slate-50') + '">'
+        + '<input type="checkbox" class="w-4 h-4 accent-violet-600 bundle-item-cb" data-menu-id="' + m.id + '" data-menu-code="' + escapeHtml(m.menu_code) + '" ' + (checked ? 'checked' : '') + ' onchange="onBundleItemChange(' + m.id + ', this.checked)">'
+        + '<span class="flex-1 text-sm font-medium text-slate-700">' + escapeHtml(m.menu_name) + '</span>'
+        + (hasTemplate
+          ? '<span class="text-xs text-emerald-600"><i class="fas fa-check-circle"></i> 템플릿 있음</span>'
+          : '<span class="text-xs text-amber-500"><i class="fas fa-exclamation-circle"></i> 템플릿 없음</span>')
+        + '</label>'
+    }).join('')
+  }
 
-  loadProjects('')
+  function onBundleItemChange(menuId, checked) {
+    bundleItemChecked[menuId] = checked
+    renderBundleItemList()
+  }
+
+  function closeBundleModal() {
+    document.getElementById('bundleModal').classList.add('hidden')
+  }
+
+  async function confirmGenerateBundle() {
+    if (!bundleProjectId) return
+    var selected = bundleMenus.filter(function(m) { return bundleItemChecked[m.id] })
+    if (!selected.length) {
+      alert('생성할 항목을 하나 이상 체크해주세요.')
+      return
+    }
+    var btn = document.getElementById('bundleConfirmBtn')
+    btn.disabled = true
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-1"></i>생성 중...'
+    closeBundleModal()
+    try {
+      var r = await fetch('/api/ppt-attachment-bundle/' + bundleProjectId, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          items: selected.map(function(m) { return { menuId: m.id, menuCode: m.menu_code, menuName: m.menu_name } }),
+          careerOnePage: bundleCareerPageMode === '1page',
+          stampType: bundleStampType
+        })
+      })
+      if (!r.ok) {
+        var ej = await r.json().catch(function() { return {} })
+        throw new Error(ej.error || ('생성 실패 (' + r.status + ')'))
+      }
+      var blob = await r.blob()
+      var cd = r.headers.get('Content-Disposition') || ''
+      var m2 = cd.match(/filename\\*?=["']?(?:UTF-8'')?([^"';]+)/i)
+      var filename = m2 ? decodeURIComponent(m2[1]) : ('첨부PPT_' + bundleProjectId + '.pptx')
+      var url = URL.createObjectURL(blob)
+      var a = document.createElement('a')
+      a.href = url; a.download = filename
+      document.body.appendChild(a); a.click(); a.remove()
+      URL.revokeObjectURL(url)
+    } catch(e) {
+      alert('첨부PPT 생성 실패: ' + e.message)
+    } finally {
+      btn.disabled = false
+      btn.innerHTML = '<i class="fas fa-magic mr-1"></i>생성'
+    }
+  }
   </script>
-  <script>${bundleWidget.script}</script>
   `;
     return c.html(layout('첨부 및 서류 생성', body, 'ppt-generate'));
 });
