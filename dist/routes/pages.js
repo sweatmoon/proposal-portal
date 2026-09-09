@@ -4,6 +4,8 @@
 import { Hono } from 'hono';
 import { query, queryOne } from '../db/client.js';
 import { layout, statusBadge, fmtMoney, fmtDate } from '../views/layout.js';
+// [ppt-portal 추가 기능] "첨부PPT 생성" 위젯 — 자세한 설명/이식 방법은 파일 상단 주석 참고.
+import { renderAttachmentBundleWidget } from '../views/attachment-bundle-widget.js';
 // ── 감리경력 "n년 n개월" 포맷 헬퍼 ──────────────────────────────
 // earliest: "YYYY.MM" 문자열
 function fmtCareer(earliest) {
@@ -1036,6 +1038,16 @@ app.get('/personnel', async (c) => {
       <td class="px-4 py-3 text-center text-sm text-slate-500">${p.audit_count ?? 0}건</td>
       <td class="px-4 py-3 text-sm text-slate-500">${p.phone ?? '-'}</td>
     </tr>`).join('');
+    // [ppt-portal 추가 기능 — 감리원 경력 확인서 발급요청] 모달 체크리스트 후보 —
+    // 이 문서 자체가 "감리원"용이라 수석감리원/감리원 등급만 대상으로 한다(2026-09-08).
+    const careerRequestCandidates = list.filter(p => p.auditor_grade === '수석감리원' || p.auditor_grade === '감리원');
+    const careerRequestRows = careerRequestCandidates.map(p => `
+    <label class="career-request-row flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-indigo-50 cursor-pointer" data-name="${String(p.name).toLowerCase()}">
+      <input type="checkbox" class="career-request-checkbox w-4 h-4 accent-indigo-600" value="${p.id}">
+      <span class="text-sm font-medium text-slate-800 flex-1">${p.name}</span>
+      <span class="text-xs text-slate-400">${p.auditor_grade}</span>
+      <span class="text-xs text-slate-400">${p.company ?? '-'}</span>
+    </label>`).join('');
     const body = `
   <div class="p-6 md:p-8">
     <div class="mb-6">
@@ -1043,7 +1055,7 @@ app.get('/personnel', async (c) => {
       <p class="text-slate-500 text-sm mt-1">총 ${list.length}명</p>
     </div>
 
-    <div class="flex flex-wrap gap-2 mb-4 items-center">
+    <div class="flex flex-wrap gap-2 mb-4 items-center justify-between">
       <form method="GET" action="/personnel" class="flex gap-2 flex-wrap">
         <input type="text" name="search" value="${search}"
           placeholder="이름 / 회사 검색..."
@@ -1055,6 +1067,10 @@ app.get('/personnel', async (c) => {
           <i class="fas fa-search mr-1"></i>검색
         </button>
       </form>
+      <button type="button" onclick="openCareerRequestModal()"
+        class="px-4 py-2 bg-emerald-600 text-white rounded-lg text-sm hover:bg-emerald-700 whitespace-nowrap">
+        <i class="fas fa-file-excel mr-1"></i>경력 확인서 발급요청
+      </button>
     </div>
 
     <div class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
@@ -1081,7 +1097,114 @@ app.get('/personnel', async (c) => {
         </table>
       </div>
     </div>
-  </div>`;
+  </div>
+
+  <!-- [ppt-portal 추가 기능] 감리원 경력 확인서 발급요청 모달 -->
+  <div id="careerRequestModal" class="hidden fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
+    <div class="bg-white rounded-2xl shadow-xl w-full max-w-lg max-h-[85vh] flex flex-col">
+      <div class="px-5 py-4 border-b border-slate-200 flex items-center justify-between">
+        <h2 class="font-bold text-slate-800">감리원 경력 확인서 발급요청</h2>
+        <button type="button" onclick="closeCareerRequestModal()" class="text-slate-400 hover:text-slate-600">
+          <i class="fas fa-times"></i>
+        </button>
+      </div>
+      <div class="px-5 py-3 border-b border-slate-100 flex gap-2 items-center">
+        <input type="text" id="careerRequestFilter" placeholder="이름으로 필터..." oninput="filterCareerRequestRows(this.value)"
+          class="flex-1 border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300">
+        <button type="button" onclick="toggleAllCareerRequestRows(true)" class="text-xs text-indigo-600 hover:underline whitespace-nowrap">전체선택</button>
+        <button type="button" onclick="toggleAllCareerRequestRows(false)" class="text-xs text-slate-400 hover:underline whitespace-nowrap">전체해제</button>
+      </div>
+      <div class="px-2 py-2 overflow-y-auto flex-1">
+        ${careerRequestRows || '<p class="text-center text-slate-400 text-sm py-8">수석감리원/감리원 등급의 인력이 없습니다.</p>'}
+      </div>
+      <div class="px-5 py-4 border-t border-slate-200 flex items-center justify-between">
+        <span id="careerRequestCount" class="text-xs text-slate-400">0명 선택</span>
+        <button type="button" id="careerRequestSubmitBtn" onclick="submitCareerRequest()"
+          class="px-4 py-2 bg-emerald-600 text-white rounded-lg text-sm hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed">
+          요청서 생성
+        </button>
+      </div>
+    </div>
+  </div>
+  <script>
+    function openCareerRequestModal() {
+      document.getElementById('careerRequestModal').classList.remove('hidden')
+      updateCareerRequestCount()
+    }
+    function closeCareerRequestModal() {
+      document.getElementById('careerRequestModal').classList.add('hidden')
+    }
+    function filterCareerRequestRows(text) {
+      const needle = text.trim().toLowerCase()
+      document.querySelectorAll('.career-request-row').forEach(row => {
+        row.style.display = !needle || row.dataset.name.includes(needle) ? '' : 'none'
+      })
+    }
+    function toggleAllCareerRequestRows(checked) {
+      document.querySelectorAll('.career-request-row').forEach(row => {
+        if (row.style.display === 'none') return
+        row.querySelector('.career-request-checkbox').checked = checked
+      })
+      updateCareerRequestCount()
+    }
+    function updateCareerRequestCount() {
+      const n = document.querySelectorAll('.career-request-checkbox:checked').length
+      document.getElementById('careerRequestCount').textContent = n + '명 선택'
+    }
+    document.addEventListener('change', (ev) => {
+      if (ev.target.classList && ev.target.classList.contains('career-request-checkbox')) updateCareerRequestCount()
+    })
+    async function submitCareerRequest() {
+      const ids = [...document.querySelectorAll('.career-request-checkbox:checked')].map(el => Number(el.value))
+      if (!ids.length) { alert('한 명 이상 선택해주세요.'); return }
+
+      const btn = document.getElementById('careerRequestSubmitBtn')
+      btn.disabled = true
+      btn.textContent = '생성 중...'
+      try {
+        const res = await fetch('/api/personnel-career-request', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ personnelIds: ids }),
+        })
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}))
+          throw new Error(err.error || ('요청 실패 (' + res.status + ')'))
+        }
+        const blob = await res.blob()
+        const disposition = res.headers.get('Content-Disposition') || ''
+        const m = disposition.match(/filename="([^"]+)"/)
+        const filename = m ? decodeURIComponent(m[1]) : '감리원_경력_확인서_발급요청.xlsx'
+
+        const url = URL.createObjectURL(blob)
+        const a = document.createElement('a')
+        a.href = url; a.download = filename
+        document.body.appendChild(a); a.click(); a.remove()
+        URL.revokeObjectURL(url)
+
+        const decodeList = (h) => { const v = res.headers.get(h); return v ? decodeURIComponent(v).split(',').filter(Boolean) : [] }
+        const notFound = decodeList('X-Skipped-Not-Found')
+        const noPptx = decodeList('X-Skipped-No-Cert-Pptx')
+        const noGradeImg = decodeList('X-Skipped-No-Grade-Image')
+        const noCertImg = decodeList('X-Skipped-No-Cert-Image')
+        const noHireDate = decodeList('X-Skipped-No-Hire-Date')
+        const notices = []
+        if (noPptx.length) notices.push('자격증 스캔본을 못 찾음(그림 미삽입): ' + noPptx.join(', '))
+        if (noGradeImg.length) notices.push('등급 이미지를 못 찾음: ' + noGradeImg.join(', '))
+        if (noCertImg.length) notices.push('자격명 이미지를 못 찾음: ' + noCertImg.join(', '))
+        if (noHireDate.length) notices.push('입사일을 못 찾음(재직증명서발행파일에 없거나 퇴직 처리됨): ' + noHireDate.join(', '))
+        if (notFound.length) notices.push('인력 정보를 못 찾음(제외됨): ' + notFound.join(', '))
+        if (notices.length) alert('일부 항목을 확인해주세요:\\n\\n' + notices.join('\\n'))
+
+        closeCareerRequestModal()
+      } catch (e) {
+        alert('요청서 생성 중 오류가 발생했습니다: ' + e.message)
+      } finally {
+        btn.disabled = false
+        btn.textContent = '요청서 생성'
+      }
+    }
+  </script>`;
     return c.html(layout('인력정보', body, 'personnel'));
 });
 // ── 인력 상세 ─────────────────────────────────────────────────
@@ -1136,18 +1259,15 @@ app.get('/personnel/:id', async (c) => {
       <td class="px-4 py-2.5 text-sm text-slate-500 text-center">${h.phase ?? '-'}</td>
       <td class="px-4 py-2.5 text-sm text-slate-500 text-center">${h.participation_rate != null ? h.participation_rate + '%' : '-'}</td>
     </tr>`).join('');
-    // IT 경력 목록
+    // IT 경력 목록 (감리 이외의 IT 경력: 기간(년)|경력|담당 업무|유사 경력의 근거)
     const careerRows = itCareer.map(c2 => `
     <tr class="border-t border-slate-100 hover:bg-slate-50">
       <td class="px-4 py-2.5 text-xs text-slate-500 whitespace-nowrap">${c2.period_start ?? ''} ~ ${c2.period_end ?? ''}</td>
       <td class="px-4 py-2.5 text-sm font-medium text-slate-800 max-w-xs">
-        <div class="line-clamp-2">${c2.project_name}</div>
+        <div class="line-clamp-2">${c2.career}</div>
       </td>
-      <td class="px-4 py-2.5 text-sm text-slate-600">${c2.client_org ?? '-'}</td>
-      <td class="px-4 py-2.5 text-sm text-slate-500 text-center">${c2.domain ?? '-'}</td>
-      <td class="px-4 py-2.5 text-sm text-slate-500 text-center">${c2.role ?? '-'}</td>
-      <td class="px-4 py-2.5 text-sm text-slate-500">${c2.company ?? '-'}</td>
-      <td class="px-4 py-2.5 text-xs text-slate-400">${c2.remarks ?? '-'}</td>
+      <td class="px-4 py-2.5 text-sm text-slate-600 whitespace-pre-line">${c2.duty ?? '-'}</td>
+      <td class="px-4 py-2.5 text-xs text-slate-400 whitespace-pre-line">${c2.basis ?? '-'}</td>
     </tr>`).join('');
     // 기본 정보 항목 헬퍼
     const infoItem = (label, value) => `<div class="flex gap-2 py-2 border-b border-slate-100 last:border-0">
@@ -1224,13 +1344,10 @@ app.get('/personnel/:id', async (c) => {
             <table class="w-full text-sm">
               <thead>
                 <tr class="bg-slate-50 text-xs text-slate-500 border-b border-slate-200">
-                  <th class="px-4 py-2.5 text-center">기간</th>
-                  <th class="px-4 py-2.5 text-left">사업명</th>
-                  <th class="px-4 py-2.5 text-left">발주기관</th>
-                  <th class="px-4 py-2.5 text-center">분야</th>
-                  <th class="px-4 py-2.5 text-center">역할</th>
-                  <th class="px-4 py-2.5 text-left">수행사</th>
-                  <th class="px-4 py-2.5 text-left">비고</th>
+                  <th class="px-4 py-2.5 text-center">기간(년)</th>
+                  <th class="px-4 py-2.5 text-left">경력</th>
+                  <th class="px-4 py-2.5 text-left">담당 업무</th>
+                  <th class="px-4 py-2.5 text-left">유사 경력의 근거</th>
                 </tr>
               </thead>
               <tbody class="divide-y divide-slate-100">${careerRows}</tbody>
@@ -1611,6 +1728,200 @@ app.get('/upload', (c) => {
   function clearLog() { document.getElementById('log').innerHTML = '<p class="log-line log-info">로그 초기화됨</p>' }
   </script>`;
     return c.html(layout('HTML 업로드', body, 'upload'));
+});
+// ── 사업별 PPT 생성 페이지 ───────────────────────────────────────
+app.get('/ppt-generate', (c) => {
+    // [ppt-portal 추가 기능] "첨부PPT 생성" 위젯 준비 — html/script를 아래 body/스크립트
+    // 안의 표시된 지점에 그대로 끼워 넣는다. 위젯 자체의 내용은 전부
+    // src/views/attachment-bundle-widget.ts 에 있고, 여기서는 "어디에 꽂는지"만 정한다.
+    const bundleWidget = renderAttachmentBundleWidget();
+    const body = `
+  <div class="p-6 md:p-8 max-w-5xl" id="pptGenRoot">
+    <h1 class="text-2xl font-bold text-slate-800 flex items-center gap-2 mb-1">
+      <i class="fas fa-file-powerpoint text-indigo-500"></i> 사업별 PPT 생성
+    </h1>
+    <p class="text-sm text-slate-500 mb-6">
+      DB에 적재된 사업 목록입니다. 아래에서 첨부 템플릿을 먼저 업로드한 뒤,
+      원하는 사업의 "PPT 생성" 버튼을 누르면 템플릿의 플레이스홀더가 해당 사업 데이터로
+      치환된 pptx 파일이 바로 다운로드됩니다.
+    </p>
+
+    <!-- 첨부 템플릿 업로드 -->
+    <div class="bg-white rounded-xl border border-slate-200 p-5 mb-6 space-y-5">
+      <div>
+        <h2 class="text-sm font-bold text-slate-700 mb-1 flex items-center gap-2">
+          <i class="fas fa-paperclip text-amber-500"></i> 첨부 템플릿 (범용 — {{TOKEN}} 방식)
+        </h2>
+        <p class="text-xs text-slate-400 mb-3">
+          이 파일은 서버에 저장되지 않고, "PPT 생성" 클릭 시에만 그 요청 처리 중에 잠깐 사용되고 폐기됩니다.
+        </p>
+        <input id="tplFileInput" type="file" accept=".pptx,application/vnd.openxmlformats-officedocument.presentationml.presentation"
+               class="block w-full text-sm text-slate-600 file:mr-4 file:py-2 file:px-4
+                      file:rounded-lg file:border-0 file:text-sm file:font-semibold
+                      file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100 cursor-pointer" />
+        <div id="tplStatus" class="mt-2 text-xs font-medium text-slate-400">선택된 템플릿 없음</div>
+
+        <details class="mt-4">
+          <summary class="text-xs text-indigo-600 cursor-pointer font-medium">지원되는 플레이스홀더 보기</summary>
+          <div class="mt-2 text-xs text-slate-500 bg-slate-50 rounded-lg p-3 leading-relaxed font-mono">
+            {{PROJECT_NAME}} {{CLIENT_ORG}} {{BID_NOTICE_NO}} {{REGISTERED_YM}} {{BID_DEADLINE}}<br>
+            {{BID_AMOUNT}} {{REQUIRED_MD}} {{PROPOSED_MD}} {{WRITER}} {{DIRECTOR}}<br>
+            {{TARGET_PROJECT_NAME}} {{TARGET_CLIENT_ORG}} {{TARGET_CONTRACTOR}}<br>
+            {{TARGET_PERIOD_START}} {{TARGET_PERIOD_END}}
+          </div>
+        </details>
+      </div>
+
+    </div>
+
+    ${bundleWidget.html}
+
+    <!-- 검색 -->
+    <div class="mb-3">
+      <input id="searchInput" type="text" placeholder="사업명 / 발주처 검색"
+             class="w-full md:w-80 px-3 py-2 border border-slate-200 rounded-lg text-sm
+                    focus:outline-none focus:ring-2 focus:ring-indigo-300" />
+    </div>
+
+    <!-- 사업 목록 -->
+    <div class="bg-white rounded-xl border border-slate-200 overflow-hidden">
+      <table class="w-full text-sm">
+        <thead class="bg-slate-50 border-b border-slate-200">
+          <tr>
+            <th class="px-4 py-3 text-left font-semibold text-slate-500">사업명</th>
+            <th class="px-4 py-3 text-left font-semibold text-slate-500">발주처</th>
+            <th class="px-4 py-3 text-center font-semibold text-slate-500">등록연월</th>
+            <th class="px-4 py-3 text-center font-semibold text-slate-500">마감일</th>
+            <th class="px-4 py-3 text-center font-semibold text-slate-500">상태</th>
+            <th class="px-4 py-3 text-center font-semibold text-slate-500">PPT</th>
+            <!-- [ppt-portal 추가 기능] 열 하나 -->
+            <th class="px-4 py-3 text-center font-semibold text-slate-500">첨부PPT</th>
+          </tr>
+        </thead>
+        <tbody id="projectListBody">
+          <tr><td colspan="7" class="px-4 py-10 text-center text-slate-400">불러오는 중...</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <script>
+  let templateFile = null
+
+  const tplInput  = document.getElementById('tplFileInput')
+  const tplStatus = document.getElementById('tplStatus')
+  tplInput.addEventListener('change', () => {
+    templateFile = tplInput.files && tplInput.files[0] ? tplInput.files[0] : null
+    tplStatus.textContent = templateFile
+      ? '✅ 선택됨: ' + templateFile.name + ' (' + Math.round(templateFile.size / 1024) + 'KB) — 이 세션 동안만 메모리에 보관됩니다'
+      : '선택된 템플릿 없음'
+    tplStatus.className = templateFile ? 'mt-2 text-xs font-medium text-emerald-600' : 'mt-2 text-xs font-medium text-slate-400'
+  })
+
+  // [ppt-portal 추가 기능] "첨부PPT 생성" 위젯의 JS(BUNDLE_ITEM_DEFS, openBundleModal,
+  // confirmGenerateBundle 등)는 여기 없습니다 — 이 <script> 태그와 절대 안 섞이도록
+  // src/views/attachment-bundle-widget.ts 안에서 "별도의" <script> 태그로 아래쪽에
+  // 따로 렌더링됩니다(파일 끝의 \` + '<script>' + bundleWidget.script + ... \` 부분 참고).
+  // loadProjects()가 만드는 "첨부PPT 생성" 버튼의 onclick="openBundleModal(...)"이
+  // 그 스크립트가 전역에 등록해두는 함수를 이름으로 호출하는 것뿐이라, 여기서
+  // import하거나 신경 쓸 게 없습니다.
+
+  async function loadProjects(search) {
+    const tbody = document.getElementById('projectListBody')
+    tbody.innerHTML = '<tr><td colspan="7" class="px-4 py-10 text-center text-slate-400">불러오는 중...</td></tr>'
+    try {
+      const url = '/api/audit-projects' + (search ? '?search=' + encodeURIComponent(search) : '')
+      const r = await fetch(url)
+      const j = await r.json()
+      if (!j.ok) throw new Error(j.error || '조회 실패')
+      const rows = j.data || []
+      if (!rows.length) {
+        tbody.innerHTML = '<tr><td colspan="7" class="px-4 py-10 text-center text-slate-400">등록된 사업이 없습니다</td></tr>'
+        return
+      }
+      tbody.innerHTML = rows.map(p => \`
+        <tr class="hover:bg-indigo-50 transition border-b border-slate-100 last:border-0">
+          <td class="px-4 py-3 font-medium text-slate-700">\${escapeHtml(p.project_name || '-')}</td>
+          <td class="px-4 py-3 text-slate-600">\${escapeHtml(p.client_org || '-')}</td>
+          <td class="px-4 py-3 text-center text-slate-600">\${escapeHtml(p.registered_yearmonth || '-')}</td>
+          <td class="px-4 py-3 text-center text-slate-600">\${escapeHtml(p.bid_deadline || '-')}</td>
+          <td class="px-4 py-3 text-center">
+            <span class="inline-block px-2 py-0.5 rounded-full text-xs font-medium bg-slate-100 text-slate-600">\${escapeHtml(p.proposal_status || '-')}</span>
+          </td>
+          <td class="px-4 py-3 text-center">
+            <button onclick="generatePpt(\${p.id}, this)"
+              class="bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold px-3 py-1.5 rounded-lg transition">
+              <i class="fas fa-download"></i> PPT 생성
+            </button>
+          </td>
+          <!-- ▼ [ppt-portal 추가 기능] 여기 버튼 셀 하나만 이 테이블의 유일한 추가 지점입니다.
+               openBundleModal()은 attachment-bundle-widget.ts의 별도 스크립트가 전역에 등록합니다. -->
+          <td class="px-4 py-3 text-center">
+            <button onclick="openBundleModal(\${p.id}, this)"
+              class="bg-violet-600 hover:bg-violet-700 text-white text-xs font-semibold px-3 py-1.5 rounded-lg transition">
+              <i class="fas fa-paperclip"></i> 첨부PPT 생성
+            </button>
+          </td>
+          <!-- ▲ [ppt-portal 추가 기능] 끝 -->
+        </tr>\`).join('')
+    } catch (e) {
+      tbody.innerHTML = '<tr><td colspan="7" class="px-4 py-10 text-center text-red-500">' + escapeHtml(e.message) + '</td></tr>'
+    }
+  }
+
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]))
+  }
+
+  async function generatePpt(id, btnEl) {
+    if (!templateFile) {
+      alert('먼저 첨부 템플릿(.pptx)을 업로드해주세요.')
+      return
+    }
+    const originalHtml = btnEl.innerHTML
+    btnEl.disabled = true
+    btnEl.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 생성 중...'
+    try {
+      const fd = new FormData()
+      fd.append('template', templateFile)
+      const r = await fetch('/api/ppt-generate/' + id, { method: 'POST', body: fd })
+      if (!r.ok) {
+        const j = await r.json().catch(() => ({}))
+        throw new Error(j.error || ('생성 실패 (' + r.status + ')'))
+      }
+      const blob = await r.blob()
+      const cd = r.headers.get('Content-Disposition') || ''
+      const m = cd.match(/filename\\*?=["']?(?:UTF-8'')?([^"';]+)/i)
+      const filename = m ? decodeURIComponent(m[1]) : ('proposal_' + id + '.pptx')
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url; a.download = filename
+      document.body.appendChild(a); a.click(); a.remove()
+      URL.revokeObjectURL(url)
+    } catch (e) {
+      alert('PPT 생성 실패: ' + e.message)
+    } finally {
+      btnEl.disabled = false
+      btnEl.innerHTML = originalHtml
+    }
+  }
+
+  let searchTimer
+  document.getElementById('searchInput').addEventListener('input', (e) => {
+    clearTimeout(searchTimer)
+    searchTimer = setTimeout(() => loadProjects(e.target.value), 300)
+  })
+
+  loadProjects('')
+  </script>
+
+  <!-- ▼ [ppt-portal 추가 기능] 첨부PPT 위젯 전용 스크립트 — 위 <script>와 일부러 분리했습니다.
+       이 화면에서 "첨부PPT 생성" 기능만 떼어낼 때, 위 <script> 블록은 그대로 두고
+       이 <script> 태그와 위쪽의 bundleWidget.html 부분만 들어내면 됩니다. -->
+  <script>${bundleWidget.script}</script>
+  <!-- ▲ [ppt-portal 추가 기능] 끝 -->
+  `;
+    return c.html(layout('사업별 PPT 생성', body, 'ppt-generate'));
 });
 // ── PPT 템플릿 관리 페이지 ─────────────────────────────────────
 app.get('/ppt-templates', async (c) => {
