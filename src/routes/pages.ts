@@ -2055,7 +2055,7 @@ app.get('/ppt-generate', (c) => {
     var listEl = document.getElementById('bundleItemList')
     listEl.innerHTML = bundleMenus.map(function(m) {
       var checked = !!bundleItemChecked[m.id]
-      var hasTemplate = m.template_count > 0
+      var hasTemplate = m.templates && m.templates.length > 0 && !!m.templates[0].pptx_b64_key
       return '<label class="flex items-center gap-3 px-3 py-2.5 rounded-xl border cursor-pointer transition '
         + (checked ? 'border-violet-200 bg-violet-50' : 'border-slate-200 hover:bg-slate-50') + '">'
         + '<input type="checkbox" class="w-4 h-4 accent-violet-600 bundle-item-cb" data-menu-id="' + m.id + '" data-menu-code="' + escapeHtml(m.menu_code) + '" ' + (checked ? 'checked' : '') + ' onchange="onBundleItemChange(' + m.id + ', this.checked)">'
