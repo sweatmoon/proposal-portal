@@ -2487,7 +2487,7 @@ app.get('/ppt-generate', (c) => {
   // ── 자유생성: 인력 입력 파싱 (성명:담당분야 형식) ──────────
   function parseFreePersonnel(raw) {
     // 쉼표 또는 줄바꿈으로 구분
-    return raw.split(/[,\n]/).map(function(item) {
+    return raw.split(/[,\\n]/).map(function(item) {
       var parts = item.split(':')
       var name = parts[0].trim()
       var domain = parts.slice(1).join(':').trim()
@@ -2588,7 +2588,7 @@ app.get('/ppt-generate', (c) => {
       // ── 키워드 목록 파싱 (쉼표/줄바꿈 구분) ──────────────────
       var kwRaw = (document.getElementById('freeKwInput').value || '').trim()
       var kwList = kwRaw
-        ? kwRaw.split(/[\n,]/).map(function(s) { return s.trim() }).filter(Boolean)
+        ? kwRaw.split(/[\\n,]/).map(function(s) { return s.trim() }).filter(Boolean)
         : []
       if (kwList.length) fd.append('freeKeywords', JSON.stringify(kwList))
 
@@ -2596,7 +2596,7 @@ app.get('/ppt-generate', (c) => {
       var mappingRaw = (document.getElementById('freeKwMappingInput').value || '').trim()
       var mappingList = []
       if (mappingRaw) {
-        mappingRaw.split('\n').forEach(function(line) {
+        mappingRaw.split('\\n').forEach(function(line) {
           line = line.trim()
           if (!line) return
           var parts = line.split(/->/)
