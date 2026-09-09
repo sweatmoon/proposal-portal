@@ -2233,10 +2233,6 @@ app.get('/ppt-generate', (c) => {
     document.getElementById('kwGlobalRows').innerHTML = ''
     document.getElementById('personnelKwSection').classList.add('hidden')
     document.getElementById('personnelKwRows').innerHTML = ''
-    document.getElementById('personnelSearchInput').value = ''
-
-    // 인력 목록 로드 (병렬)
-    loadPersonnelList()
 
     var listEl = document.getElementById('bundleItemList')
     listEl.innerHTML = '<div class="text-slate-400 text-xs text-center py-4"><i class="fas fa-spinner fa-spin mr-1"></i>항목 불러오는 중...</div>'
@@ -2255,11 +2251,6 @@ app.get('/ppt-generate', (c) => {
       listEl.innerHTML = '<div class="text-red-500 text-xs text-center py-4">' + escapeHtml(e.message) + '</div>'
     }
   }
-
-  // 인력 검색 입력 이벤트
-  document.getElementById('personnelSearchInput').addEventListener('input', function(e) {
-    renderPersonnelList(e.target.value)
-  })
 
   function renderBundleItemList() {
     var listEl = document.getElementById('bundleItemList')
