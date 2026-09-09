@@ -516,7 +516,7 @@ const erdHtml = `<!DOCTYPE html>
         <div class="erd-col"><span class="col-name">domain</span><span class="col-type">TEXT</span></div>
         <div class="erd-col"><span class="col-name">role</span><span class="col-type">TEXT</span></div>
         <div class="erd-col"><span class="col-name">phase</span><span class="col-type">TEXT</span></div>
-        <div class="erd-col"><span class="col-name">participation_rate</span><span class="col-type">TEXT</span></div>
+        <div class="erd-col"><span class="col-name">participation_rate</span><span class="col-type">INT</span></div>
         <div class="erd-col"><span class="col-name">created_at</span><span class="col-type">TEXT</span></div>
       </div>
 

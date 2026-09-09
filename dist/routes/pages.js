@@ -1257,7 +1257,7 @@ app.get('/personnel/:id', async (c) => {
       <td class="px-4 py-2.5 text-sm text-slate-500 text-center">${h.domain ?? '-'}</td>
       <td class="px-4 py-2.5 text-sm text-slate-500 text-center">${h.role ?? '-'}</td>
       <td class="px-4 py-2.5 text-sm text-slate-500 text-center">${h.phase ?? '-'}</td>
-      <td class="px-4 py-2.5 text-sm text-slate-500 text-center">${h.participation_rate ?? '-'}</td>
+      <td class="px-4 py-2.5 text-sm text-slate-500 text-center">${h.participation_rate != null ? h.participation_rate + '%' : '-'}</td>
     </tr>`).join('');
     // IT 경력 목록 (감리 이외의 IT 경력: 기간(년)|경력|담당 업무|유사 경력의 근거)
     const careerRows = itCareer.map(c2 => `

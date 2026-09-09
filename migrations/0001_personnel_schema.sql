@@ -80,7 +80,7 @@ CREATE TABLE IF NOT EXISTS personnel_audit_history (
   domain          TEXT,               -- 담당 분야 (예: 응용시스템, 사업관리)
   role            TEXT,               -- 역할 (총괄/감리원/전문가/컨설턴트)
   phase           TEXT,               -- 참여 단계 (요구정의/설계/구현/종료 등)
-  participation_rate TEXT,               -- 참여단계/참여율 (텍스트 그대로 저장)
+  participation_rate INTEGER DEFAULT 100, -- 참여율 (%)
 
   created_at      TEXT NOT NULL DEFAULT (datetime('now','localtime'))
 );
