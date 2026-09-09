@@ -1851,7 +1851,7 @@ app.get('/upload', (c) => {
   return c.html(layout('HTML 업로드', body, 'upload'))
 })
 
-// ── 사업별 PPT 생성 페이지 ───────────────────────────────────────
+// ── 첨부 및 서류 생성 페이지 ───────────────────────────────────────
 app.get('/ppt-generate', (c) => {
   // [ppt-portal 추가 기능] "첨부PPT 생성" 위젯 준비 — html/script를 아래 body/스크립트
   // 안의 표시된 지점에 그대로 끼워 넣는다. 위젯 자체의 내용은 전부
@@ -1860,7 +1860,7 @@ app.get('/ppt-generate', (c) => {
   const body = `
   <div class="p-6 md:p-8 max-w-5xl" id="pptGenRoot">
     <h1 class="text-2xl font-bold text-slate-800 flex items-center gap-2 mb-1">
-      <i class="fas fa-file-powerpoint text-indigo-500"></i> 사업별 PPT 생성
+      <i class="fas fa-file-powerpoint text-indigo-500"></i> 첨부 및 서류 생성
     </h1>
     <p class="text-sm text-slate-500 mb-6">
       DB에 적재된 사업 목록입니다. 아래에서 첨부 템플릿을 먼저 업로드한 뒤,
@@ -2043,7 +2043,7 @@ app.get('/ppt-generate', (c) => {
   <script>${bundleWidget.script}</script>
   <!-- ▲ [ppt-portal 추가 기능] 끝 -->
   `
-  return c.html(layout('사업별 PPT 생성', body, 'ppt-generate'))
+  return c.html(layout('첨부 및 서류 생성', body, 'ppt-generate'))
 })
 
 // ── PPT 템플릿 관리 페이지 ─────────────────────────────────────
@@ -2051,36 +2051,47 @@ app.get('/ppt-templates', async (c) => {
   const body = `
   <div class="p-6 md:p-8" id="pptMgrRoot">
 
-    <div class="mb-6 flex items-center justify-between gap-4 flex-wrap">
+    <!-- 헤더 -->
+    <div class="mb-5 flex items-center justify-between gap-4 flex-wrap">
       <div>
         <h1 class="text-2xl font-bold text-slate-800 flex items-center gap-2">
-          <i class="fas fa-layer-group text-indigo-500"></i> PPT 목차/메뉴 관리
+          <i class="fas fa-layer-group text-indigo-500"></i> PPT 템플릿 관리
         </h1>
-        <p class="text-slate-500 text-sm mt-1">각 목차 메뉴별 생성 규칙·템플릿을 설정합니다.</p>
+        <p class="text-slate-500 text-sm mt-1">제안서 목차별 / 첨부·서류 템플릿을 관리합니다.</p>
       </div>
-      <div class="flex gap-2">
-        <button onclick="runMigrate()" class="px-3 py-1.5 text-xs rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-300 transition">
-          <i class="fas fa-database mr-1"></i>테이블 생성
-        </button>
-        <button onclick="runSeed()" class="px-3 py-1.5 text-xs rounded-lg bg-amber-50 hover:bg-amber-100 text-amber-700 border border-amber-300 transition">
-          <i class="fas fa-seedling mr-1"></i>기본 메뉴 시드
-        </button>
-        <button onclick="openMasterModal()" class="px-3 py-1.5 text-xs rounded-lg bg-violet-600 hover:bg-violet-700 text-white transition">
-          <i class="fas fa-layer-group mr-1"></i>마스터 템플릿
-        </button>
+      <div class="flex gap-2" id="headerButtons">
+        <!-- 탭별로 동적 렌더링 -->
       </div>
     </div>
 
     <div id="pptAlert" class="hidden mb-4 p-3 rounded-lg text-sm font-medium"></div>
 
-    <!-- 2-panel layout -->
+    <!-- 탭 네비 -->
+    <div class="flex gap-1 mb-5 border-b border-slate-200">
+      <button id="tabBtn-proposal"
+        onclick="switchTab('proposal')"
+        class="px-5 py-2.5 text-sm font-semibold rounded-t-lg transition border border-b-0 -mb-px
+               bg-white text-indigo-600 border-slate-200">
+        <i class="fas fa-clipboard-list mr-1.5"></i>제안서
+      </button>
+      <button id="tabBtn-attachment"
+        onclick="switchTab('attachment')"
+        class="px-5 py-2.5 text-sm font-semibold rounded-t-lg transition border border-b-0 -mb-px
+               bg-slate-50 text-slate-500 border-transparent hover:text-slate-700">
+        <i class="fas fa-paperclip mr-1.5"></i>첨부
+      </button>
+    </div>
+
+    <!-- 2-panel layout (양쪽 탭 공통 구조) -->
     <div class="flex gap-5" style="min-height:600px">
 
       <!-- LEFT: 메뉴 트리 -->
       <div class="w-72 flex-shrink-0">
         <div class="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
           <div class="px-4 py-3 bg-slate-50 border-b border-slate-200 flex items-center justify-between">
-            <span class="text-sm font-semibold text-slate-700"><i class="fas fa-sitemap mr-2 text-indigo-400"></i>목차 메뉴</span>
+            <span class="text-sm font-semibold text-slate-700" id="treeLabel">
+              <i class="fas fa-sitemap mr-2 text-indigo-400"></i>목차 메뉴
+            </span>
             <button onclick="loadTree()" class="text-xs text-slate-400 hover:text-indigo-500"><i class="fas fa-sync-alt"></i></button>
           </div>
           <div id="menuTree" class="p-2 overflow-y-auto" style="max-height:560px">
@@ -2250,6 +2261,32 @@ app.get('/ppt-templates', async (c) => {
   // ── 상태 ──────────────────────────────────────────────────────
   let _selectedMenuId = null
   let _treeData = []
+  let _activeTab = 'proposal'
+
+  const TAB_ACTIVE   = 'px-5 py-2.5 text-sm font-semibold rounded-t-lg transition border border-b-0 -mb-px bg-white text-indigo-600 border-slate-200'
+  const TAB_INACTIVE = 'px-5 py-2.5 text-sm font-semibold rounded-t-lg transition border border-b-0 -mb-px bg-slate-50 text-slate-500 border-transparent hover:text-slate-700'
+
+  const HDR_PROPOSAL = '<button onclick=\\"runMigrate()\\" class=\\"px-3 py-1.5 text-xs rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-300 transition\\"><i class=\\"fas fa-database mr-1\\"></i>테이블 생성</button>'
+    + '<button onclick=\\"runSeed()\\" class=\\"px-3 py-1.5 text-xs rounded-lg bg-amber-50 hover:bg-amber-100 text-amber-700 border border-amber-300 transition\\"><i class=\\"fas fa-seedling mr-1\\"></i>기본 메뉴 시드</button>'
+    + '<button onclick=\\"openMasterModal()\\" class=\\"px-3 py-1.5 text-xs rounded-lg bg-violet-600 hover:bg-violet-700 text-white transition\\"><i class=\\"fas fa-layer-group mr-1\\"></i>마스터 템플릿</button>'
+  const HDR_ATTACHMENT = '<button onclick=\\"runMigrate()\\" class=\\"px-3 py-1.5 text-xs rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-300 transition\\"><i class=\\"fas fa-database mr-1\\"></i>테이블 생성</button>'
+    + '<button onclick=\\"runAttachmentSeed()\\" class=\\"px-3 py-1.5 text-xs rounded-lg bg-teal-50 hover:bg-teal-100 text-teal-700 border border-teal-300 transition\\"><i class=\\"fas fa-paperclip mr-1\\"></i>첨부 항목 초기화</button>'
+
+  function switchTab(tab) {
+    _activeTab = tab
+    document.getElementById('tabBtn-proposal').className   = tab === 'proposal'   ? TAB_ACTIVE : TAB_INACTIVE
+    document.getElementById('tabBtn-attachment').className = tab === 'attachment' ? TAB_ACTIVE : TAB_INACTIVE
+    document.getElementById('headerButtons').innerHTML = tab === 'proposal' ? HDR_PROPOSAL : HDR_ATTACHMENT
+    document.getElementById('treeLabel').innerHTML = tab === 'proposal'
+      ? '<i class=\\"fas fa-sitemap mr-2 text-indigo-400\\"></i>목차 메뉴'
+      : '<i class=\\"fas fa-paperclip mr-2 text-teal-400\\"></i>첨부·서류 항목'
+    const dp = document.getElementById('detailPanel')
+    dp.innerHTML = '<div class=\\"text-center\\"><i class=\\"fas fa-mouse-pointer text-4xl mb-3 opacity-30\\"></i><p class=\\"text-sm\\">왼쪽 트리에서 메뉴를 선택하세요</p></div>'
+    dp.className = 'bg-white rounded-xl shadow-sm border border-slate-200 h-full flex items-center justify-center text-slate-400'
+    _selectedMenuId = null
+    loadTree()
+  }
+
 
   // ── 알림 ──────────────────────────────────────────────────────
   function showAlert(msg, ok) {
@@ -2274,12 +2311,21 @@ app.get('/ppt-templates', async (c) => {
     if (j.ok) loadTree()
   }
 
+  async function runAttachmentSeed() {
+    if (!confirm('첨부 템플릿 항목 9종을 DB에 초기화합니다. 기존 항목명은 업데이트됩니다. 계속할까요?')) return
+    const r = await fetch('/api/ppt-menus/attachment-seed', { method: 'POST' })
+    const j = await r.json()
+    showAlert(j.ok ? '✅ 첨부 항목 초기화 완료' : '❌ ' + j.error, j.ok)
+    if (j.ok) loadTree()
+  }
+
   // ── 트리 로드 ─────────────────────────────────────────────────
   async function loadTree() {
     document.getElementById('menuTree').innerHTML =
       '<div class="text-center text-slate-400 text-sm py-6"><i class="fas fa-spinner fa-spin mr-1"></i>로딩 중...</div>'
     try {
-      const r = await fetch('/api/ppt-menus')
+      const catParam = '?category=' + _activeTab
+      const r = await fetch('/api/ppt-menus' + catParam)
       const j = await r.json()
       if (!j.ok) throw new Error(j.error)
       _treeData = j.data
@@ -3194,7 +3240,7 @@ app.get('/ppt-templates', async (c) => {
   })
 
   // ── 초기 로드 ─────────────────────────────────────────────────
-  loadTree()
+  switchTab('proposal')  // 제안서 탭으로 초기화 (헤더 버튼 + 트리 로드)
   </script>`
 
   return c.html(layout('PPT 템플릿 관리', body, 'ppt-templates'))
