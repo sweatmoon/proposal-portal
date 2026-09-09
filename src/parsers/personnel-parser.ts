@@ -97,7 +97,7 @@ export interface PersonnelAuditHistory {
   domain: string
   role: string
   phase: string
-  participation_rate: number
+  participation_rate: string | null
 }
 
 export interface PersonnelItCareer {
@@ -333,7 +333,7 @@ export function parsePersonnelHtml(html: string): ParsedPersonnel {
       domain:             r[4] ?? '',
       role:               r[5] ?? '',
       phase:              '',
-      participation_rate: extractNumber(r[6] ?? '') ?? null,
+      participation_rate: r[6] || null,
     })
   }
 

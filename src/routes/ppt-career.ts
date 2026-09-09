@@ -89,7 +89,7 @@ interface HistoryRow {
   sector: string | null
   domain: string | null
   role: string | null
-  participation_rate: number | null
+  participation_rate: string | null
 }
 interface ItCareerRow {
   period_start: string | null
@@ -190,8 +190,8 @@ const CERT_HEADER_MARKERS = ['자격증 명', '발급처', '구분 (국가 공�
 function fmtYearMonth(yearmonth: string | null): string {
   return yearmonth ?? ''
 }
-function fmtParticipation(rate: number | null): string {
-  return rate === null || rate === undefined ? '' : `${rate}%`
+function fmtParticipation(rate: string | null): string {
+  return rate ?? ''
 }
 
 /** "YYYY.MM" 문자열을 {y, m}으로 파싱. 형식이 아니면 null. */
