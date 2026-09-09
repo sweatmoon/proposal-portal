@@ -2678,7 +2678,7 @@ app.get('/ppt-templates', async (c) => {
     btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-1"></i>업로드 중...'
     try {
       const fd = new FormData()
-      fd.append('file', _attTplFile)
+      fd.append('pptx_file', _attTplFile)
       fd.append('template_name', _attTplFile.name.replace(/\\.pptx$/i,''))
       fd.append('variant_code', 'DEFAULT')
       const r = await fetch('/api/ppt-menus/' + menuId + '/templates', { method: 'POST', body: fd })
