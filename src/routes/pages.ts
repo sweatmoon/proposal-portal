@@ -1891,7 +1891,7 @@ app.get('/ppt-generate', (c) => {
 
   <!-- ── 첨부PPT 생성 모달 ── -->
   <div id="bundleModal" class="hidden fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
-    <div class="bg-white rounded-2xl shadow-xl w-full flex flex-col" style="max-width:960px;max-height:92vh">
+    <div class="bg-white rounded-2xl shadow-xl w-full flex flex-col" style="max-width:900px;max-height:92vh">
 
       <!-- 헤더 -->
       <div class="px-6 py-4 border-b border-slate-200 flex items-center justify-between flex-shrink-0">
@@ -1902,27 +1902,52 @@ app.get('/ppt-generate', (c) => {
         <button onclick="closeBundleModal()" class="text-slate-400 hover:text-slate-700 text-xl w-8 h-8 flex items-center justify-center"><i class="fas fa-times"></i></button>
       </div>
 
-      <!-- 2열 레이아웃 -->
-      <div class="flex flex-1 min-h-0 overflow-hidden">
+      <!-- 2-column body -->
+      <div class="flex-1 overflow-hidden flex min-h-0">
 
-        <!-- 왼쪽: 첨부 항목 선택 -->
-        <div class="w-64 flex-shrink-0 border-r border-slate-200 flex flex-col">
-          <div class="px-4 py-3 bg-slate-50 border-b border-slate-200">
-            <div class="text-xs font-bold text-slate-600 uppercase tracking-wide">① 첨부 항목 선택</div>
+        <!-- 왼쪽: ① 첨부 항목 선택 -->
+        <div class="w-64 flex-shrink-0 border-r border-slate-100 flex flex-col overflow-hidden">
+          <div class="px-4 py-3 bg-slate-50 border-b border-slate-100 flex-shrink-0">
+            <div class="text-xs font-bold text-slate-500 uppercase tracking-wide">① 첨부 항목 선택</div>
           </div>
           <div id="bundleItemList" class="flex-1 overflow-y-auto p-3 space-y-1.5"></div>
         </div>
 
-        <!-- 오른쪽: 인력 선택 + 키워드 -->
-        <div class="flex-1 flex flex-col min-w-0">
-          <div class="px-4 py-3 bg-slate-50 border-b border-slate-200 flex items-center gap-3">
-            <div class="text-xs font-bold text-slate-600 uppercase tracking-wide">② 인력 선택 &amp; 키워드 변환</div>
-            <span class="text-xs text-slate-400">(선택 인력별로 키워드→치환 텍스트 입력)</span>
+        <!-- 오른쪽: ② 인력 선택 & 키워드 변환 -->
+        <div class="flex-1 flex flex-col overflow-hidden min-w-0">
+          <div class="px-4 py-3 bg-slate-50 border-b border-slate-100 flex-shrink-0">
+            <div class="text-xs font-bold text-slate-500 uppercase tracking-wide">② 인력 선택 &amp; 키워드 변환 <span class="text-slate-400 font-normal normal-case">(선택 인력별로 키워드→치환 텍스트 입력)</span></div>
           </div>
-          <div class="flex-1 overflow-y-auto p-4">
-            <div id="bundleMemberList" class="space-y-2">
-              <div class="text-slate-400 text-sm text-center py-8"><i class="fas fa-spinner fa-spin mr-1"></i>인력 불러오는 중...</div>
+          <div class="flex-1 overflow-y-auto p-4 space-y-4 min-h-0">
+
+            <!-- 인력 목록 (전체 DB, 사업 무관) -->
+            <div>
+              <div class="flex items-center justify-between mb-2">
+                <span class="text-xs font-semibold text-slate-600">인력 목록</span>
+                <input id="personnelSearchInput" type="text" placeholder="이름 검색..."
+                  class="text-xs px-2 py-1 border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-violet-300 w-32" />
+              </div>
+              <div id="personnelListArea" class="space-y-1 max-h-52 overflow-y-auto pr-1">
+                <div class="text-slate-400 text-xs text-center py-4"><i class="fas fa-spinner fa-spin mr-1"></i>불러오는 중...</div>
+              </div>
             </div>
+
+            <!-- 선택된 인력별 키워드→변환 입력 -->
+            <div id="personnelKwSection" class="hidden">
+              <div class="text-xs font-semibold text-slate-600 mb-2">선택된 인력 · 키워드 → 변환 텍스트</div>
+              <div id="personnelKwRows" class="space-y-3"></div>
+            </div>
+
+            <!-- 전역 키워드 → 변환 텍스트 (기존) -->
+            <div>
+              <div class="text-xs font-semibold text-slate-600 mb-1.5">공통 키워드 → 변환 텍스트 <span class="text-slate-400 font-normal">(선택사항)</span></div>
+              <div id="kwGlobalRows" class="space-y-1.5"></div>
+              <button type="button" onclick="addGlobalKwRow()"
+                class="mt-2 text-xs text-indigo-500 hover:text-indigo-700 flex items-center gap-1 font-medium">
+                <i class="fas fa-plus-circle"></i> 키워드 추가
+              </button>
+            </div>
+
           </div>
         </div>
 
@@ -1939,173 +1964,414 @@ app.get('/ppt-generate', (c) => {
     </div>
   </div>
 
-  <!-- 키워드 행 템플릿 -->
-  <template id="kwRowTpl">
-    <div class="kw-row flex gap-1.5 items-center mt-1">
-      <input type="text" placeholder="키워드" class="kw-key w-28 text-xs px-2 py-1 border border-slate-200 rounded focus:outline-none focus:ring-1 focus:ring-violet-300">
-      <span class="text-slate-300 text-xs">→</span>
-      <input type="text" placeholder="변환 텍스트" class="kw-val flex-1 text-xs px-2 py-1 border border-slate-200 rounded focus:outline-none focus:ring-1 focus:ring-violet-300">
-      <button type="button" class="kw-del text-slate-300 hover:text-red-400 text-xs px-1" onclick="this.closest(\'.kw-row\').remove()"><i class="fas fa-times"></i></button>
-    </div>
-  </template>
-
   <script>
   function escapeHtml(s) {
-    return String(s).replace(/[&<>"']/g, m => ({\'&\':\'&amp;\',\'<\':\'&lt;\',\'>\': \'&gt;\',\'"\': \'&quot;\',"\'": \'&#39;\'}[m]))
+    return String(s).replace(/[&<>"']/g, function(m) {
+      return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]
+    })
   }
 
+  // ── 사업 목록 로드 ─────────────────────────────────────────────
   async function loadProjects(search) {
-    const tbody = document.getElementById(\'projectListBody\')
-    tbody.innerHTML = \'<tr><td colspan="6" class="px-4 py-10 text-center text-slate-400">불러오는 중...</td></tr>\'
+    var tbody = document.getElementById('projectListBody')
+    tbody.innerHTML = '<tr><td colspan="6" class="px-4 py-10 text-center text-slate-400">불러오는 중...</td></tr>'
     try {
-      const url = \'/api/audit-projects\' + (search ? \'?search=\' + encodeURIComponent(search) : \'\')
-      const r = await fetch(url)
-      const j = await r.json()
-      if (!j.ok) throw new Error(j.error || \'조회 실패\')
-      const rows = j.data || []
+      var url = '/api/audit-projects' + (search ? '?search=' + encodeURIComponent(search) : '')
+      var r = await fetch(url)
+      var j = await r.json()
+      if (!j.ok) throw new Error(j.error || '조회 실패')
+      var rows = j.data || []
       if (!rows.length) {
-        tbody.innerHTML = \'<tr><td colspan="6" class="px-4 py-10 text-center text-slate-400">등록된 사업이 없습니다</td></tr>\'
+        tbody.innerHTML = '<tr><td colspan="6" class="px-4 py-10 text-center text-slate-400">등록된 사업이 없습니다</td></tr>'
         return
       }
-      tbody.innerHTML = rows.map(p => \'<tr class="hover:bg-indigo-50 transition border-b border-slate-100 last:border-0">\' + \'<td class="px-4 py-3 font-medium text-slate-700">\' + escapeHtml(p.project_name || \'-\') + \'</td>\' + \'<td class="px-4 py-3 text-slate-600">\' + escapeHtml(p.client_org || \'-\') + \'</td>\' + \'<td class="px-4 py-3 text-center text-slate-600">\' + escapeHtml(p.registered_yearmonth || \'-\') + \'</td>\' + \'<td class="px-4 py-3 text-center text-slate-600">\' + escapeHtml(p.bid_deadline || \'-\') + \'</td>\' + \'<td class="px-4 py-3 text-center"><span class="inline-block px-2 py-0.5 rounded-full text-xs font-medium bg-slate-100 text-slate-600">\' + escapeHtml(p.proposal_status || \'-\') + \'</span></td>\' + \'<td class="px-4 py-3 text-center"><button class="bundle-open-btn bg-violet-600 hover:bg-violet-700 text-white text-xs font-semibold px-3 py-1.5 rounded-lg transition" data-pid="\' + p.id + \'" data-pname="\' + escapeHtml(p.project_name || \'\') + \'"><i class="fas fa-paperclip"></i> 첨부PPT 생성</button></td>\' + \'</tr>\').join(\'\')
-      document.querySelectorAll(\'.bundle-open-btn\').forEach(function(btn) {
-        btn.addEventListener(\'click\', function() { openBundleModal(Number(btn.dataset.pid), btn.dataset.pname, btn) })
+      tbody.innerHTML = rows.map(function(p) {
+        return '<tr class="hover:bg-indigo-50 transition border-b border-slate-100 last:border-0">'
+          + '<td class="px-4 py-3 font-medium text-slate-700">' + escapeHtml(p.project_name || '-') + '</td>'
+          + '<td class="px-4 py-3 text-slate-600">' + escapeHtml(p.client_org || '-') + '</td>'
+          + '<td class="px-4 py-3 text-center text-slate-600">' + escapeHtml(p.registered_yearmonth || '-') + '</td>'
+          + '<td class="px-4 py-3 text-center text-slate-600">' + escapeHtml(p.bid_deadline || '-') + '</td>'
+          + '<td class="px-4 py-3 text-center"><span class="inline-block px-2 py-0.5 rounded-full text-xs font-medium bg-slate-100 text-slate-600">' + escapeHtml(p.proposal_status || '-') + '</span></td>'
+          + '<td class="px-4 py-3 text-center"><button class="bundle-open-btn bg-violet-600 hover:bg-violet-700 text-white text-xs font-semibold px-3 py-1.5 rounded-lg transition" data-pid="' + p.id + '" data-pname="' + escapeHtml(p.project_name || '') + '"><i class="fas fa-paperclip"></i> 첨부PPT 생성</button></td>'
+          + '</tr>'
+      }).join('')
+      document.querySelectorAll('.bundle-open-btn').forEach(function(btn) {
+        btn.addEventListener('click', function() {
+          openBundleModal(Number(btn.dataset.pid), btn.dataset.pname)
+        })
       })
-    } catch (e) {
-      tbody.innerHTML = \'<tr><td colspan="6" class="px-4 py-10 text-center text-red-500">\' + escapeHtml(e.message) + \'</td></tr>\'
+    } catch(e) {
+      tbody.innerHTML = '<tr><td colspan="6" class="px-4 py-10 text-center text-red-500">' + escapeHtml(e.message) + '</td></tr>'
     }
   }
 
-  let searchTimer
-  document.getElementById(\'searchInput\').addEventListener(\'input\', function(e) {
+  var searchTimer
+  document.getElementById('searchInput').addEventListener('input', function(e) {
     clearTimeout(searchTimer)
     searchTimer = setTimeout(function() { loadProjects(e.target.value) }, 300)
   })
-  loadProjects(\'\')
+  loadProjects('')
 
+  // ── 모달 상태 ──────────────────────────────────────────────────
   var bundleProjectId = null
-  var bundleMenus = []
-  var bundleMembers = []
+  var bundleMenus     = []
   var bundleItemChecked = {}
-  var bundleMemberChecked = {}
 
-  async function openBundleModal(id, projectName, btnEl) {
+  // ── 인력 관련 상태 ────────────────────────────────────────────
+  var allPersonnel = []          // 전체 인력 목록 캐시
+  var personnelChecked = {}      // { personnelId: true/false }
+  var personnelKwMap = {}        // { personnelId: [ {key,val}, ... ] }
+
+  // 인력 목록 로드 (모달 첫 열기 시 또는 캐시 없을 때)
+  async function loadPersonnelList() {
+    if (allPersonnel.length) { renderPersonnelList(''); return }
+    var area = document.getElementById('personnelListArea')
+    area.innerHTML = '<div class="text-slate-400 text-xs text-center py-4"><i class="fas fa-spinner fa-spin mr-1"></i>불러오는 중...</div>'
+    try {
+      var r = await fetch('/api/personnel')
+      var j = await r.json()
+      if (!j.ok) throw new Error(j.error || '인력 조회 실패')
+      allPersonnel = j.data || []
+      renderPersonnelList('')
+    } catch(e) {
+      area.innerHTML = '<div class="text-red-500 text-xs text-center py-4">' + escapeHtml(e.message) + '</div>'
+    }
+  }
+
+  function renderPersonnelList(search) {
+    var area = document.getElementById('personnelListArea')
+    var filtered = allPersonnel.filter(function(p) {
+      return !search || (p.name || '').toLowerCase().includes(search.toLowerCase())
+    })
+    if (!filtered.length) {
+      area.innerHTML = '<div class="text-slate-400 text-xs text-center py-3">검색 결과 없음</div>'
+      return
+    }
+    var GRADE_COLOR = {
+      '수석감리원': 'bg-blue-900 text-white',
+      '감리원': 'bg-blue-500 text-white',
+      '전문가': 'bg-purple-600 text-white',
+      '테스터': 'bg-purple-900 text-white'
+    }
+    area.innerHTML = filtered.map(function(p) {
+      var checked = !!personnelChecked[p.id]
+      var grade = p.auditor_grade || ''
+      var gradeClass = GRADE_COLOR[grade] || 'bg-slate-400 text-white'
+      // group label (오른쪽 작은 텍스트) — personnel API에서 member_group은 없으므로 position 활용
+      var groupLabel = p.position || ''
+      return '<label class="flex items-center gap-2 px-2.5 py-1.5 rounded-lg border cursor-pointer transition text-xs select-none '
+        + (checked ? 'border-violet-300 bg-violet-50' : 'border-transparent hover:bg-slate-50') + '">'
+        + '<input type="checkbox" class="w-3.5 h-3.5 accent-violet-600 flex-shrink-0 personnel-cb" data-pid="' + p.id + '" '
+        + (checked ? 'checked' : '') + ' onchange="onPersonnelChange(' + p.id + ', this.checked)">'
+        + '<span class="font-semibold text-slate-800 flex-shrink-0">' + escapeHtml(p.name || '') + '</span>'
+        + (grade ? '<span class="px-1.5 py-0.5 rounded text-[10px] font-bold flex-shrink-0 ' + gradeClass + '">' + escapeHtml(grade) + '</span>' : '')
+        + (groupLabel ? '<span class="text-slate-400 truncate">' + escapeHtml(groupLabel) + '</span>' : '')
+        + '</label>'
+    }).join('')
+  }
+
+  function onPersonnelChange(pid, checked) {
+    personnelChecked[pid] = checked
+    if (!checked) {
+      delete personnelKwMap[pid]
+    } else if (!personnelKwMap[pid]) {
+      personnelKwMap[pid] = []
+    }
+    // 라벨 스타일 갱신
+    var cb = document.querySelector('.personnel-cb[data-pid="' + pid + '"]')
+    if (cb) {
+      var label = cb.closest('label')
+      if (label) {
+        label.className = label.className.replace(/border-violet-300 bg-violet-50|border-transparent hover:bg-slate-50/g, '')
+        label.className += checked ? ' border-violet-300 bg-violet-50' : ' border-transparent hover:bg-slate-50'
+      }
+    }
+    renderPersonnelKwRows()
+  }
+
+  function renderPersonnelKwRows() {
+    var section = document.getElementById('personnelKwSection')
+    var container = document.getElementById('personnelKwRows')
+    var selectedPeople = allPersonnel.filter(function(p) { return personnelChecked[p.id] })
+    if (!selectedPeople.length) {
+      section.classList.add('hidden')
+      return
+    }
+    section.classList.remove('hidden')
+
+    // 기존 입력값 보존: DOM에서 현재 값 수집
+    container.querySelectorAll('.per-kw-block').forEach(function(block) {
+      var pid = Number(block.dataset.pid)
+      var rows = []
+      block.querySelectorAll('.per-kw-row').forEach(function(row) {
+        rows.push({ key: row.querySelector('.per-kw-key').value, val: row.querySelector('.per-kw-val').value })
+      })
+      personnelKwMap[pid] = rows
+    })
+
+    container.innerHTML = selectedPeople.map(function(p) {
+      var rows = personnelKwMap[p.id] || []
+      var rowsHtml = rows.map(function(r, i) {
+        return '<div class="per-kw-row flex gap-1.5 items-center">'
+          + '<input type="text" class="per-kw-key w-40 text-xs px-2 py-1 border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-violet-300" placeholder="키워드 (예: {{전문분야}})" value="' + escapeHtml(r.key) + '">'
+          + '<span class="text-slate-300 text-xs flex-shrink-0">→</span>'
+          + '<input type="text" class="per-kw-val flex-1 text-xs px-2 py-1 border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-violet-300" placeholder="변환 텍스트" value="' + escapeHtml(r.val) + '">'
+          + '<button type="button" class="text-slate-300 hover:text-red-400 text-sm px-0.5 flex-shrink-0" onclick="removePerKwRow(this)"><i class="fas fa-times"></i></button>'
+          + '</div>'
+      }).join('')
+      return '<div class="per-kw-block bg-slate-50 rounded-lg p-3" data-pid="' + p.id + '">'
+        + '<div class="flex items-center justify-between mb-2">'
+        + '<span class="text-xs font-semibold text-slate-700">' + escapeHtml(p.name || '') + '</span>'
+        + '<button type="button" class="text-xs text-indigo-500 hover:text-indigo-700 flex items-center gap-1" onclick="addPerKwRow(this.closest(\'.per-kw-block\'))">'
+        + '<i class="fas fa-plus-circle text-[10px]"></i> 키워드 추가</button>'
+        + '</div>'
+        + '<div class="per-kw-rows space-y-1.5">' + rowsHtml + '</div>'
+        + '</div>'
+    }).join('')
+  }
+
+  function addPerKwRow(block) {
+    var rowsEl = block.querySelector('.per-kw-rows')
+    var div = document.createElement('div')
+    div.className = 'per-kw-row flex gap-1.5 items-center'
+    div.innerHTML = '<input type="text" class="per-kw-key w-40 text-xs px-2 py-1 border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-violet-300" placeholder="키워드 (예: {{전문분야}})">'
+      + '<span class="text-slate-300 text-xs flex-shrink-0">→</span>'
+      + '<input type="text" class="per-kw-val flex-1 text-xs px-2 py-1 border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-violet-300" placeholder="변환 텍스트">'
+      + '<button type="button" class="text-slate-300 hover:text-red-400 text-sm px-0.5 flex-shrink-0" onclick="removePerKwRow(this)"><i class="fas fa-times"></i></button>'
+    rowsEl.appendChild(div)
+    div.querySelector('.per-kw-key').focus()
+  }
+
+  function removePerKwRow(btn) {
+    btn.closest('.per-kw-row').remove()
+  }
+
+  // 인력별 키워드 최종 수집 { personnelId: { key: val, ... } }
+  function collectPersonnelKeywords() {
+    // 먼저 현재 DOM에서 값 갱신
+    document.querySelectorAll('.per-kw-block').forEach(function(block) {
+      var pid = Number(block.dataset.pid)
+      var rows = []
+      block.querySelectorAll('.per-kw-row').forEach(function(row) {
+        rows.push({ key: row.querySelector('.per-kw-key').value.trim(), val: row.querySelector('.per-kw-val').value.trim() })
+      })
+      personnelKwMap[pid] = rows
+    })
+    var result = {}
+    Object.keys(personnelKwMap).forEach(function(pid) {
+      var rows = personnelKwMap[pid] || []
+      var map = {}
+      rows.forEach(function(r) { if (r.key) map[r.key] = r.val })
+      if (Object.keys(map).length) result[pid] = map
+    })
+    return result
+  }
+
+  // ── 모달 열기 ─────────────────────────────────────────────────
+  async function openBundleModal(id, projectName) {
     bundleProjectId = id
     bundleItemChecked = {}
-    bundleMemberChecked = {}
-    bundleMembers = []
     bundleMenus = []
-    document.getElementById(\'bundleModalProjectName\').textContent = projectName
-    document.getElementById(\'bundleModal\').classList.remove(\'hidden\')
-    var listEl = document.getElementById(\'bundleItemList\')
-    var memEl  = document.getElementById(\'bundleMemberList\')
-    listEl.innerHTML = \'<div class="text-slate-400 text-xs text-center py-4"><i class="fas fa-spinner fa-spin mr-1"></i>로딩 중...</div>\'
-    memEl.innerHTML  = \'<div class="text-slate-400 text-sm text-center py-8"><i class="fas fa-spinner fa-spin mr-1"></i>인력 불러오는 중...</div>\'
+    personnelChecked = {}
+    personnelKwMap = {}
+    document.getElementById('bundleModalProjectName').textContent = projectName
+    document.getElementById('bundleModal').classList.remove('hidden')
+    // 키워드 행 초기화
+    document.getElementById('kwGlobalRows').innerHTML = ''
+    document.getElementById('personnelKwSection').classList.add('hidden')
+    document.getElementById('personnelKwRows').innerHTML = ''
+    document.getElementById('personnelSearchInput').value = ''
+
+    // 인력 목록 로드 (병렬)
+    loadPersonnelList()
+
+    var listEl = document.getElementById('bundleItemList')
+    listEl.innerHTML = '<div class="text-slate-400 text-xs text-center py-4"><i class="fas fa-spinner fa-spin mr-1"></i>항목 불러오는 중...</div>'
     try {
-      var [menuRes, memRes] = await Promise.all([
-        fetch(\'/api/ppt-menus?category=attachment\'),
-        fetch(\'/api/audit-projects/\' + id + \'/members\')
-      ])
-      var [menuJ, memJ] = await Promise.all([menuRes.json(), memRes.json()])
-      if (!menuJ.ok) throw new Error(menuJ.error || \'항목 조회 실패\')
-      var allMenus = menuJ.data || []
+      var r = await fetch('/api/ppt-menus?category=attachment')
+      var j = await r.json()
+      if (!j.ok) throw new Error(j.error || '항목 조회 실패')
+      var allMenus = j.data || []
       bundleMenus = []
       allMenus.forEach(function(m) {
         if (m.children && m.children.length) { m.children.forEach(function(c) { bundleMenus.push(c) }) }
         else { bundleMenus.push(m) }
       })
-      if (!bundleMenus.length) {
-        listEl.innerHTML = \'<div class="text-slate-400 text-xs text-center py-6 px-2"><i class="fas fa-exclamation-circle text-amber-400 text-xl mb-2 block"></i><a href="/ppt-templates" class="text-indigo-600 underline">PPT 템플릿 관리 → 첨부 탭</a>에서 먼저 초기화해주세요.</div>\'
-      } else {
-        renderBundleItemList()
-      }
-      if (!memJ.ok) throw new Error(memJ.error || \'인력 조회 실패\')
-      bundleMembers = memJ.data || []
-      renderBundleMemberList()
+      renderBundleItemList()
     } catch(e) {
-      listEl.innerHTML = \'<div class="text-red-500 text-xs text-center py-4">\' + escapeHtml(e.message) + \'</div>\'
-      memEl.innerHTML  = \'<div class="text-red-500 text-sm text-center py-4">\' + escapeHtml(e.message) + \'</div>\'
+      listEl.innerHTML = '<div class="text-red-500 text-xs text-center py-4">' + escapeHtml(e.message) + '</div>'
     }
   }
 
+  // 인력 검색 입력 이벤트
+  document.getElementById('personnelSearchInput').addEventListener('input', function(e) {
+    renderPersonnelList(e.target.value)
+  })
+
   function renderBundleItemList() {
-    var listEl = document.getElementById(\'bundleItemList\')
+    var listEl = document.getElementById('bundleItemList')
     listEl.innerHTML = bundleMenus.map(function(m) {
       var checked = !!bundleItemChecked[m.id]
       var hasTemplate = m.templates && m.templates.length > 0 && !!m.templates[0].pptx_b64_key
-      return \'<label class="flex items-center gap-2 px-2.5 py-2 rounded-lg border cursor-pointer transition text-xs \' + (checked ? \'border-violet-300 bg-violet-50\' : \'border-slate-200 hover:bg-slate-50\') + \'"><input type="checkbox" class="w-3.5 h-3.5 accent-violet-600" \' + (checked ? \'checked\' : \'\') + \'  onchange="onBundleItemChange(\' + m.id + \', this.checked)"><span class="flex-1 font-medium text-slate-700">\' + escapeHtml(m.menu_name) + \'</span>\' + (hasTemplate ? \'<span class="text-emerald-500"><i class="fas fa-check-circle"></i></span>\' : \'<span class="text-amber-400"><i class="fas fa-exclamation-circle"></i></span>\') + \'</label>\'
-    }).join(\'\')
+      return '<label class="flex items-center gap-2 px-2.5 py-2 rounded-lg border cursor-pointer transition text-xs '
+        + (checked ? 'border-violet-300 bg-violet-50' : 'border-slate-200 hover:bg-slate-50') + '">'
+        + '<input type="checkbox" class="w-3.5 h-3.5 accent-violet-600 flex-shrink-0" '
+        + (checked ? 'checked' : '') + ' onchange="onBundleItemChange(' + m.id + ', this.checked)">'
+        + '<span class="flex-1 font-medium text-slate-700">' + escapeHtml(m.menu_name) + '</span>'
+        + (hasTemplate
+          ? '<i class="fas fa-check-circle text-emerald-500"></i>'
+          : '<i class="fas fa-exclamation-circle text-amber-400"></i>')
+        + '</label>'
+    }).join('')
   }
 
-  function onBundleItemChange(menuId, checked) { bundleItemChecked[menuId] = checked; renderBundleItemList() }
-
-  function renderBundleMemberList() {
-    var memEl = document.getElementById(\'bundleMemberList\')
-    if (!bundleMembers.length) { memEl.innerHTML = \'<div class="text-slate-400 text-sm text-center py-8">등록된 인력이 없습니다</div>\'; return }
-    memEl.innerHTML = bundleMembers.map(function(m) {
-      var checked = !!bundleMemberChecked[m.id]
-      var gradeColor = m.auditor_grade === \'수석감리원\' ? \'text-blue-700 bg-blue-50 border-blue-200\' : m.auditor_grade === \'감리원\' ? \'text-teal-700 bg-teal-50 border-teal-200\' : \'text-slate-600 bg-slate-50 border-slate-200\'
-      return \'<div class="member-row rounded-xl border transition \' + (checked ? \'border-violet-300 bg-violet-50/40\' : \'border-slate-200\') + \'" data-member-id="\' + m.id + \'"><label class="flex items-center gap-3 px-3 py-2.5 cursor-pointer select-none"><input type="checkbox" class="w-4 h-4 accent-violet-600" \' + (checked ? \'checked\' : \'\') + \'  onchange="onMemberCheck(\' + m.id + \', this.checked)"><span class="font-semibold text-sm text-slate-800">\' + escapeHtml(m.person_name || \'\') + \'</span><span class="text-xs px-1.5 py-0.5 rounded border \' + gradeColor + \'">\' + escapeHtml(m.auditor_grade || m.member_type || \'\') + \'</span><span class="text-xs text-slate-400 flex-1">\' + escapeHtml(m.domain || \'\') + \'</span><span class="text-xs text-slate-300">\' + escapeHtml(m.member_group || \'\') + \'</span></label><div class="kw-section px-3 pb-3 \' + (checked ? \'\' : \'hidden\') + \'" id="kwSection_\' + m.id + \'"><div class="text-xs font-semibold text-slate-500 mb-1.5">키워드 → 변환 텍스트</div><div id="kwRows_\' + m.id + \'"></div><button type="button" class="mt-1.5 text-xs text-indigo-500 hover:text-indigo-700 flex items-center gap-1" onclick="addKwRow(\' + m.id + \')"><i class="fas fa-plus-circle"></i> 키워드 추가</button></div></div>\'
-    }).join(\'\')
+  function onBundleItemChange(menuId, checked) {
+    bundleItemChecked[menuId] = checked
+    renderBundleItemList()
   }
 
-  function onMemberCheck(memberId, checked) {
-    bundleMemberChecked[memberId] = checked
-    var row = document.querySelector(\'.member-row[data-member-id="\' + memberId + \'"]\')
-    if (!row) return
-    if (checked) { row.classList.add(\'border-violet-300\'); row.classList.remove(\'border-slate-200\') }
-    else { row.classList.remove(\'border-violet-300\'); row.classList.add(\'border-slate-200\') }
-    var kwSec = document.getElementById(\'kwSection_\' + memberId)
-    if (kwSec) { if (checked) kwSec.classList.remove(\'hidden\'); else { kwSec.classList.add(\'hidden\'); var kr = document.getElementById(\'kwRows_\' + memberId); if (kr) kr.innerHTML = \'\' } }
+  // ── 키워드 행 추가/수집 ────────────────────────────────────────
+  function addGlobalKwRow() {
+    var container = document.getElementById('kwGlobalRows')
+    var div = document.createElement('div')
+    div.className = 'kw-row flex gap-2 items-center'
+    div.innerHTML = '<input type="text" placeholder="키워드 (예: {{사업명}})" class="kw-key w-44 text-xs px-2.5 py-1.5 border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-violet-300">'
+      + '<span class="text-slate-300 text-xs flex-shrink-0">→</span>'
+      + '<input type="text" placeholder="변환 텍스트" class="kw-val flex-1 text-xs px-2.5 py-1.5 border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-violet-300">'
+      + '<button type="button" class="text-slate-300 hover:text-red-400 text-sm px-1 flex-shrink-0" onclick="this.closest(\'.kw-row\').remove()"><i class="fas fa-times"></i></button>'
+    container.appendChild(div)
+    div.querySelector('.kw-key').focus()
   }
 
-  function addKwRow(memberId) {
-    var tpl = document.getElementById(\'kwRowTpl\')
-    var clone = tpl.content.cloneNode(true)
-    var container = document.getElementById(\'kwRows_\' + memberId)
-    if (container) container.appendChild(clone)
-  }
-
-  function getKeywordsForMember(memberId) {
-    var rows = document.querySelectorAll(\'#kwRows_\' + memberId + \'  .kw-row\')
-    var result = []
+  function collectKeywords() {
+    var rows = document.querySelectorAll('#kwGlobalRows .kw-row')
+    var result = {}
     rows.forEach(function(row) {
-      var key = row.querySelector(\'.kw-key\') ? row.querySelector(\'.kw-key\').value.trim() : \'\' 
-      var val = row.querySelector(\'.kw-val\') ? row.querySelector(\'.kw-val\').value.trim() : \'\' 
-      if (key) result.push({ keyword: key, replacement: val })
+      var key = row.querySelector('.kw-key').value.trim()
+      var val = row.querySelector('.kw-val').value.trim()
+      if (key) result[key] = val
     })
     return result
   }
 
-  function closeBundleModal() { document.getElementById(\'bundleModal\').classList.add(\'hidden\') }
+  function closeBundleModal() {
+    document.getElementById('bundleModal').classList.add('hidden')
+  }
 
+  // ── menu_code → ATTACHMENT_TYPES 키 매핑 ─────────────────────
+  var MENU_CODE_TO_TYPE = {
+    'ATT_COVER':       'cover',
+    'ATT_SCHEDULE':    'schedule',
+    'ATT_CAREER':      'career',
+    'ATT_CONSENT':     'consent',
+    'ATT_STAMP_NO':    null,
+    'ATT_STAMP_YES':   null,
+    'ATT_EMPLOYMENT':  'employmentCert',
+    'ATT_CAREER_CERT': 'careerCert',
+    'ATT_STAFFING':    'staffingStatus'
+  }
+  var STAMP_TYPES = ['bizreg','taxcert','localtaxcert','corpregistry','insurance']
+  var PPTX_MIME   = 'application/vnd.openxmlformats-officedocument.presentationml.presentation'
+
+  function b64ToFile(b64, name) {
+    var bin = atob(b64)
+    var arr = new Uint8Array(bin.length)
+    for (var i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i)
+    return new File([arr], name, { type: PPTX_MIME })
+  }
+
+  // ── 키워드 치환 — base64 내부 텍스트 변환 ────────────────────
+  // 단순 치환: pptx_b64_key(base64)를 디코딩 → 텍스트 치환 → 다시 인코딩
+  // pptx 내부 XML에서 plain text 치환 (pptx는 zip이므로 JSZip 없이는 불가)
+  // → 서버 API가 keywords를 FormData로 받아 처리하도록 전달
   async function confirmGenerateBundle() {
     if (!bundleProjectId) return
-    var selectedItems = bundleMenus.filter(function(m) { return bundleItemChecked[m.id] })
-    if (!selectedItems.length) { alert(\'생성할 항목을 하나 이상 체크해주세요.\'); return }
-    var selectedMembers = bundleMembers.filter(function(m) { return bundleMemberChecked[m.id] }).map(function(m) {
-      return { id: m.id, person_name: m.person_name, auditor_grade: m.auditor_grade, member_type: m.member_type, domain: m.domain, member_group: m.member_group, keywords: getKeywordsForMember(m.id) }
+    var selected = bundleMenus.filter(function(m) { return bundleItemChecked[m.id] })
+    if (!selected.length) { alert('생성할 항목을 하나 이상 체크해주세요.'); return }
+
+    // 표지 확인
+    var coverMenu = bundleMenus.find(function(m) { return m.menu_code === 'ATT_COVER' })
+    if (!coverMenu || !coverMenu.templates || !coverMenu.templates[0] || !coverMenu.templates[0].pptx_b64_key) {
+      alert('표지(ATT_COVER) 템플릿이 등록되지 않았습니다.\nPPT 템플릿 관리 → 첨부 탭에서 먼저 등록해주세요.')
+      return
+    }
+
+    // 항목별 타입키 + 템플릿 유효성 검사
+    var order = []
+    var missing = []
+    var unsupported = []
+    selected.forEach(function(m) {
+      if (m.menu_code === 'ATT_COVER') return
+      var typeKey = MENU_CODE_TO_TYPE[m.menu_code]
+      if (!typeKey) { unsupported.push(m.menu_name); return }
+      if (!m.templates || !m.templates[0] || !m.templates[0].pptx_b64_key) { missing.push(m.menu_name); return }
+      order.push({ key: typeKey, menu: m })
     })
-    var btn = document.getElementById(\'bundleConfirmBtn\')
+
+    if (missing.length) {
+      alert('템플릿 미등록 항목:\n' + missing.join('\n') + '\n\nPPT 템플릿 관리 → 첨부 탭에서 먼저 등록해주세요.')
+      return
+    }
+    if (!order.length && !unsupported.length) {
+      alert('생성할 수 있는 항목이 없습니다.')
+      return
+    }
+    if (unsupported.length && !order.length) {
+      alert('선택한 항목(' + unsupported.join(', ') + ')은 현재 API에서 지원되지 않습니다.')
+      return
+    }
+
+    var btn = document.getElementById('bundleConfirmBtn')
     btn.disabled = true
-    btn.innerHTML = \'<i class="fas fa-spinner fa-spin mr-1"></i>생성 중...\'
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-1"></i>생성 중...'
     closeBundleModal()
+
     try {
-      var r = await fetch(\'/api/ppt-attachment-bundle/\' + bundleProjectId, {
-        method: \'POST\',
-        headers: { \'Content-Type\': \'application/json\' },
-        body: JSON.stringify({ items: selectedItems.map(function(m) { return { menuId: m.id, menuCode: m.menu_code, menuName: m.menu_name } }), members: selectedMembers })
+      var fd = new FormData()
+      fd.append('cover', b64ToFile(coverMenu.templates[0].pptx_b64_key, 'cover.pptx'))
+      fd.append('order', JSON.stringify(order.map(function(o) { return o.key })))
+
+      // 키워드 치환 맵 전달
+      var kwMap = collectKeywords()
+      if (Object.keys(kwMap).length) {
+        fd.append('keywords', JSON.stringify(kwMap))
+      }
+
+      // 인력별 키워드 치환 맵 전달
+      var perKwMap = collectPersonnelKeywords()
+      if (Object.keys(perKwMap).length) {
+        fd.append('personnelKeywords', JSON.stringify(perKwMap))
+      }
+
+      // 선택된 인력 ID 목록 전달
+      var selectedPersonnelIds = Object.keys(personnelChecked).filter(function(id) { return personnelChecked[id] })
+      if (selectedPersonnelIds.length) {
+        fd.append('personnelIds', JSON.stringify(selectedPersonnelIds.map(Number)))
+      }
+
+      order.forEach(function(o) {
+        fd.append(o.key, b64ToFile(o.menu.templates[0].pptx_b64_key, o.key + '.pptx'))
       })
-      if (!r.ok) { var ej = await r.json().catch(function() { return {} }); throw new Error(ej.error || (\'생성 실패 (\' + r.status + \')\')) }
+
+      var r = await fetch('/api/ppt-attachment-bundle/' + bundleProjectId, { method: 'POST', body: fd })
+      if (!r.ok) {
+        var ej = await r.json().catch(function() { return {} })
+        throw new Error(ej.error || ('생성 실패 (' + r.status + ')'))
+      }
       var blob = await r.blob()
-      var cd = r.headers.get(\'Content-Disposition\') || \'\' 
-      var m2 = cd.match(/filename\\*?=["\']?(?:UTF-8\'\')?([^"\'\';]+)/i)
-      var filename = m2 ? decodeURIComponent(m2[1]) : (\'첨부PPT_\' + bundleProjectId + \'.pptx\')
+      var cd = r.headers.get('Content-Disposition') || ''
+      var m2 = cd.match(/filename\*?=["']?(?:UTF-8'')?([^"';]+)/i)
+      var filename = m2 ? decodeURIComponent(m2[1]) : ('첨부PPT_' + bundleProjectId + '.pptx')
       var url = URL.createObjectURL(blob)
-      var a = document.createElement(\'a\'); a.href = url; a.download = filename
-      document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url)
-    } catch(e) { alert(\'첨부PPT 생성 실패: \' + e.message) }
-    finally { btn.disabled = false; btn.innerHTML = \'<i class="fas fa-magic mr-1"></i>생성\' }
+      var a = document.createElement('a'); a.href = url; a.download = filename
+      document.body.appendChild(a); a.click(); a.remove()
+      URL.revokeObjectURL(url)
+    } catch(e) {
+      alert('첨부PPT 생성 실패: ' + e.message)
+    } finally {
+      btn.disabled = false
+      btn.innerHTML = '<i class="fas fa-magic mr-1"></i>생성'
+    }
   }
   </script>
   `
