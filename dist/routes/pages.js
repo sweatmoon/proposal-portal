@@ -1904,50 +1904,12 @@ app.get('/ppt-generate', (c) => {
       <!-- 2-column body -->
       <div class="flex-1 overflow-hidden flex min-h-0">
 
-        <!-- 왼쪽: ① 첨부 항목 선택 -->
-        <div class="w-64 flex-shrink-0 border-r border-slate-100 flex flex-col overflow-hidden">
+        <!-- ① 첨부 항목 선택 (full width) -->
+        <div class="flex-1 flex flex-col overflow-hidden">
           <div class="px-4 py-3 bg-slate-50 border-b border-slate-100 flex-shrink-0">
             <div class="text-xs font-bold text-slate-500 uppercase tracking-wide">① 첨부 항목 선택</div>
           </div>
-          <div id="bundleItemList" class="flex-1 overflow-y-auto p-3 space-y-1.5"></div>
-        </div>
-
-        <!-- 오른쪽: ② 인력 선택 & 키워드 변환 -->
-        <div class="flex-1 flex flex-col overflow-hidden min-w-0">
-          <div class="px-4 py-3 bg-slate-50 border-b border-slate-100 flex-shrink-0">
-            <div class="text-xs font-bold text-slate-500 uppercase tracking-wide">② 인력 선택 &amp; 키워드 변환 <span class="text-slate-400 font-normal normal-case">(선택 인력별로 키워드→치환 텍스트 입력)</span></div>
-          </div>
-          <div class="flex-1 overflow-y-auto p-4 space-y-4 min-h-0">
-
-            <!-- 인력 목록 (전체 DB, 사업 무관) -->
-            <div>
-              <div class="flex items-center justify-between mb-2">
-                <span class="text-xs font-semibold text-slate-600">인력 목록</span>
-                <input id="personnelSearchInput" type="text" placeholder="이름 검색..."
-                  class="text-xs px-2 py-1 border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-violet-300 w-32" />
-              </div>
-              <div id="personnelListArea" class="space-y-1 max-h-52 overflow-y-auto pr-1">
-                <div class="text-slate-400 text-xs text-center py-4"><i class="fas fa-spinner fa-spin mr-1"></i>불러오는 중...</div>
-              </div>
-            </div>
-
-            <!-- 선택된 인력별 키워드→변환 입력 -->
-            <div id="personnelKwSection" class="hidden">
-              <div class="text-xs font-semibold text-slate-600 mb-2">선택된 인력 · 키워드 → 변환 텍스트</div>
-              <div id="personnelKwRows" class="space-y-3"></div>
-            </div>
-
-            <!-- 전역 키워드 → 변환 텍스트 (기존) -->
-            <div>
-              <div class="text-xs font-semibold text-slate-600 mb-1.5">공통 키워드 → 변환 텍스트 <span class="text-slate-400 font-normal">(선택사항)</span></div>
-              <div id="kwGlobalRows" class="space-y-1.5"></div>
-              <button type="button" onclick="addGlobalKwRow()"
-                class="mt-2 text-xs text-indigo-500 hover:text-indigo-700 flex items-center gap-1 font-medium">
-                <i class="fas fa-plus-circle"></i> 키워드 추가
-              </button>
-            </div>
-
-          </div>
+          <div id="bundleItemList" class="flex-1 overflow-y-auto p-4 space-y-1.5"></div>
         </div>
 
       </div>
