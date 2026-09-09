@@ -1890,327 +1890,222 @@ app.get('/ppt-generate', (c) => {
   </div>
 
   <!-- ── 첨부PPT 생성 모달 ── -->
-  <div id="bundleModal" class="hidden fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4 gap-4">
-    <div class="bg-white rounded-2xl shadow-xl w-full max-w-lg flex flex-col" style="max-height:90vh">
+  <div id="bundleModal" class="hidden fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
+    <div class="bg-white rounded-2xl shadow-xl w-full flex flex-col" style="max-width:960px;max-height:92vh">
+
+      <!-- 헤더 -->
       <div class="px-6 py-4 border-b border-slate-200 flex items-center justify-between flex-shrink-0">
         <div>
-          <h3 class="font-bold text-slate-800"><i class="fas fa-paperclip mr-2 text-indigo-500"></i>첨부PPT 생성</h3>
+          <h3 class="font-bold text-slate-800 text-lg"><i class="fas fa-paperclip mr-2 text-indigo-500"></i>첨부PPT 생성</h3>
           <p class="text-xs text-slate-400 mt-0.5" id="bundleModalProjectName"></p>
         </div>
-        <button onclick="closeBundleModal()" class="text-slate-400 hover:text-slate-700"><i class="fas fa-times"></i></button>
+        <button onclick="closeBundleModal()" class="text-slate-400 hover:text-slate-700 text-xl w-8 h-8 flex items-center justify-center"><i class="fas fa-times"></i></button>
       </div>
-      <div class="px-6 py-5 overflow-y-auto flex-1 min-h-0 space-y-4">
 
-        <!-- 항목 체크 목록 -->
-        <div>
-          <div class="text-xs font-semibold text-slate-500 mb-2 uppercase tracking-wide">생성할 항목 선택</div>
-          <div id="bundleItemList" class="space-y-1.5"></div>
-        </div>
+      <!-- 2열 레이아웃 -->
+      <div class="flex flex-1 min-h-0 overflow-hidden">
 
-        <!-- 단계 선택 (일정표 체크 시) -->
-        <div id="bundleSchedulePhaseWrap" class="hidden bg-indigo-50 rounded-xl p-3 border border-indigo-200">
-          <div class="text-xs font-bold text-indigo-700 mb-1">단계별 감리 구분 선택</div>
-          <p class="text-xs text-indigo-400 mb-2">검수지원 단계는 자동으로 "검수지원"으로 표시됩니다. 추가 표시할 단계만 체크하세요.</p>
-          <div id="bundleSchedulePhaseList" class="space-y-1.5 max-h-40 overflow-y-auto text-xs text-slate-600"></div>
-        </div>
-
-        <!-- 페이지 구성 (경력 체크 시) -->
-        <div id="bundleCareerOnePageWrap" class="hidden bg-teal-50 rounded-xl p-3 border border-teal-200">
-          <div class="text-xs font-bold text-teal-700 mb-2">투입 감리원별 실적 및 경력 페이지 구성</div>
-          <div class="flex gap-4 text-sm text-slate-700">
-            <label class="flex items-center gap-1.5 cursor-pointer">
-              <input type="radio" name="bundleCareerPageMode" value="2page" class="accent-teal-600" onchange="bundleCareerPageMode=this.value"> 2페이지
-            </label>
-            <label class="flex items-center gap-1.5 cursor-pointer">
-              <input type="radio" name="bundleCareerPageMode" value="1page" class="accent-teal-600" onchange="bundleCareerPageMode=this.value"> 1페이지
-            </label>
+        <!-- 왼쪽: 첨부 항목 선택 -->
+        <div class="w-64 flex-shrink-0 border-r border-slate-200 flex flex-col">
+          <div class="px-4 py-3 bg-slate-50 border-b border-slate-200">
+            <div class="text-xs font-bold text-slate-600 uppercase tracking-wide">① 첨부 항목 선택</div>
           </div>
+          <div id="bundleItemList" class="flex-1 overflow-y-auto p-3 space-y-1.5"></div>
         </div>
 
-        <!-- 도장 선택 -->
-        <div id="bundleStampWrap" class="hidden bg-amber-50 rounded-xl p-3 border border-amber-200">
-          <div class="text-xs font-bold text-amber-700 mb-2">찍을 도장 선택</div>
-          <div class="flex gap-4 text-sm text-slate-700">
-            <label class="flex items-center gap-1.5 cursor-pointer">
-              <input type="radio" name="bundleStamp" value="원본대조필" class="accent-amber-600" onchange="bundleStampType=this.value"> 원본대조필
-            </label>
-            <label class="flex items-center gap-1.5 cursor-pointer">
-              <input type="radio" name="bundleStamp" value="사실과상위없음" class="accent-amber-600" onchange="bundleStampType=this.value"> 사실과상위없음
-            </label>
+        <!-- 오른쪽: 인력 선택 + 키워드 -->
+        <div class="flex-1 flex flex-col min-w-0">
+          <div class="px-4 py-3 bg-slate-50 border-b border-slate-200 flex items-center gap-3">
+            <div class="text-xs font-bold text-slate-600 uppercase tracking-wide">② 인력 선택 &amp; 키워드 변환</div>
+            <span class="text-xs text-slate-400">(선택 인력별로 키워드→치환 텍스트 입력)</span>
+          </div>
+          <div class="flex-1 overflow-y-auto p-4">
+            <div id="bundleMemberList" class="space-y-2">
+              <div class="text-slate-400 text-sm text-center py-8"><i class="fas fa-spinner fa-spin mr-1"></i>인력 불러오는 중...</div>
+            </div>
           </div>
         </div>
 
       </div>
+
+      <!-- 하단 버튼 -->
       <div class="px-6 py-3 border-t border-slate-100 flex justify-end gap-2 flex-shrink-0">
         <button onclick="closeBundleModal()" class="px-4 py-2 text-sm rounded-lg border border-slate-300 text-slate-600 hover:bg-slate-50">취소</button>
         <button onclick="confirmGenerateBundle()" id="bundleConfirmBtn"
-          class="px-4 py-2 text-sm rounded-lg bg-violet-600 hover:bg-violet-700 text-white font-semibold">
+          class="px-5 py-2 text-sm rounded-lg bg-violet-600 hover:bg-violet-700 text-white font-semibold">
           <i class="fas fa-magic mr-1"></i>생성
         </button>
       </div>
     </div>
   </div>
 
+  <!-- 키워드 행 템플릿 -->
+  <template id="kwRowTpl">
+    <div class="kw-row flex gap-1.5 items-center mt-1">
+      <input type="text" placeholder="키워드" class="kw-key w-28 text-xs px-2 py-1 border border-slate-200 rounded focus:outline-none focus:ring-1 focus:ring-violet-300">
+      <span class="text-slate-300 text-xs">→</span>
+      <input type="text" placeholder="변환 텍스트" class="kw-val flex-1 text-xs px-2 py-1 border border-slate-200 rounded focus:outline-none focus:ring-1 focus:ring-violet-300">
+      <button type="button" class="kw-del text-slate-300 hover:text-red-400 text-xs px-1" onclick="this.closest(\'.kw-row\').remove()"><i class="fas fa-times"></i></button>
+    </div>
+  </template>
+
   <script>
-  // ── 사업 목록 ─────────────────────────────────────────────────
   function escapeHtml(s) {
-    return String(s).replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]))
+    return String(s).replace(/[&<>"']/g, m => ({\'&\':\'&amp;\',\'<\':\'&lt;\',\'>\': \'&gt;\',\'"\': \'&quot;\',"\'": \'&#39;\'}[m]))
   }
 
   async function loadProjects(search) {
-    const tbody = document.getElementById('projectListBody')
-    tbody.innerHTML = '<tr><td colspan="6" class="px-4 py-10 text-center text-slate-400">불러오는 중...</td></tr>'
+    const tbody = document.getElementById(\'projectListBody\')
+    tbody.innerHTML = \'<tr><td colspan="6" class="px-4 py-10 text-center text-slate-400">불러오는 중...</td></tr>\'
     try {
-      const url = '/api/audit-projects' + (search ? '?search=' + encodeURIComponent(search) : '')
+      const url = \'/api/audit-projects\' + (search ? \'?search=\' + encodeURIComponent(search) : \'\')
       const r = await fetch(url)
       const j = await r.json()
-      if (!j.ok) throw new Error(j.error || '조회 실패')
+      if (!j.ok) throw new Error(j.error || \'조회 실패\')
       const rows = j.data || []
       if (!rows.length) {
-        tbody.innerHTML = '<tr><td colspan="6" class="px-4 py-10 text-center text-slate-400">등록된 사업이 없습니다</td></tr>'
+        tbody.innerHTML = \'<tr><td colspan="6" class="px-4 py-10 text-center text-slate-400">등록된 사업이 없습니다</td></tr>\'
         return
       }
-      tbody.innerHTML = rows.map(p => '<tr class="hover:bg-indigo-50 transition border-b border-slate-100 last:border-0">'
-        + '<td class="px-4 py-3 font-medium text-slate-700">' + escapeHtml(p.project_name || '-') + '</td>'
-        + '<td class="px-4 py-3 text-slate-600">' + escapeHtml(p.client_org || '-') + '</td>'
-        + '<td class="px-4 py-3 text-center text-slate-600">' + escapeHtml(p.registered_yearmonth || '-') + '</td>'
-        + '<td class="px-4 py-3 text-center text-slate-600">' + escapeHtml(p.bid_deadline || '-') + '</td>'
-        + '<td class="px-4 py-3 text-center"><span class="inline-block px-2 py-0.5 rounded-full text-xs font-medium bg-slate-100 text-slate-600">' + escapeHtml(p.proposal_status || '-') + '</span></td>'
-        + '<td class="px-4 py-3 text-center"><button class="bundle-open-btn bg-violet-600 hover:bg-violet-700 text-white text-xs font-semibold px-3 py-1.5 rounded-lg transition" data-pid="' + p.id + '" data-pname="' + escapeHtml(p.project_name || '') + '"><i class="fas fa-paperclip"></i> 첨부PPT 생성</button></td>'
-        + '</tr>').join('')
-      // data-* 속성으로 이벤트 위임 (onclick 속성 내 따옴표 충돌 방지)
-      document.querySelectorAll('.bundle-open-btn').forEach(function(btn) {
-        btn.addEventListener('click', function() {
-          openBundleModal(Number(btn.dataset.pid), btn.dataset.pname, btn)
-        })
+      tbody.innerHTML = rows.map(p => \'<tr class="hover:bg-indigo-50 transition border-b border-slate-100 last:border-0">\' + \'<td class="px-4 py-3 font-medium text-slate-700">\' + escapeHtml(p.project_name || \'-\') + \'</td>\' + \'<td class="px-4 py-3 text-slate-600">\' + escapeHtml(p.client_org || \'-\') + \'</td>\' + \'<td class="px-4 py-3 text-center text-slate-600">\' + escapeHtml(p.registered_yearmonth || \'-\') + \'</td>\' + \'<td class="px-4 py-3 text-center text-slate-600">\' + escapeHtml(p.bid_deadline || \'-\') + \'</td>\' + \'<td class="px-4 py-3 text-center"><span class="inline-block px-2 py-0.5 rounded-full text-xs font-medium bg-slate-100 text-slate-600">\' + escapeHtml(p.proposal_status || \'-\') + \'</span></td>\' + \'<td class="px-4 py-3 text-center"><button class="bundle-open-btn bg-violet-600 hover:bg-violet-700 text-white text-xs font-semibold px-3 py-1.5 rounded-lg transition" data-pid="\' + p.id + \'" data-pname="\' + escapeHtml(p.project_name || \'\') + \'"><i class="fas fa-paperclip"></i> 첨부PPT 생성</button></td>\' + \'</tr>\').join(\'\')
+      document.querySelectorAll(\'.bundle-open-btn\').forEach(function(btn) {
+        btn.addEventListener(\'click\', function() { openBundleModal(Number(btn.dataset.pid), btn.dataset.pname, btn) })
       })
     } catch (e) {
-      tbody.innerHTML = '<tr><td colspan="6" class="px-4 py-10 text-center text-red-500">' + escapeHtml(e.message) + '</td></tr>'
+      tbody.innerHTML = \'<tr><td colspan="6" class="px-4 py-10 text-center text-red-500">\' + escapeHtml(e.message) + \'</td></tr>\'
     }
   }
 
   let searchTimer
-  document.getElementById('searchInput').addEventListener('input', function(e) {
+  document.getElementById(\'searchInput\').addEventListener(\'input\', function(e) {
     clearTimeout(searchTimer)
     searchTimer = setTimeout(function() { loadProjects(e.target.value) }, 300)
   })
-  loadProjects('')
-
-  // ── 첨부PPT 생성 모달 ─────────────────────────────────────────
-  // DB의 첨부 항목(ppt_menus category=attachment)을 불러와서 체크 목록으로 표시
+  loadProjects(\'\')
 
   var bundleProjectId = null
-  var bundleProjectName = ''
-  var bundleBtnEl = null
+  var bundleMenus = []
+  var bundleMembers = []
   var bundleItemChecked = {}
-  var bundleCareerPageMode = '2page'
-  var bundleStampType = null
-  var bundleMenus = []  // DB에서 불러온 첨부 항목 목록
+  var bundleMemberChecked = {}
 
   async function openBundleModal(id, projectName, btnEl) {
     bundleProjectId = id
-    bundleProjectName = projectName
-    bundleBtnEl = btnEl
     bundleItemChecked = {}
-    bundleCareerPageMode = '2page'
-    bundleStampType = null
-    document.getElementById('bundleModalProjectName').textContent = projectName
-    document.getElementById('bundleModal').classList.remove('hidden')
-    document.getElementById('bundleSchedulePhaseWrap').classList.add('hidden')
-    document.getElementById('bundleCareerOnePageWrap').classList.add('hidden')
-    document.getElementById('bundleStampWrap').classList.add('hidden')
-
-    // DB에서 첨부 항목 목록 로드
-    var listEl = document.getElementById('bundleItemList')
-    listEl.innerHTML = '<div class="text-slate-400 text-sm text-center py-4"><i class="fas fa-spinner fa-spin mr-1"></i>항목 불러오는 중...</div>'
+    bundleMemberChecked = {}
+    bundleMembers = []
+    bundleMenus = []
+    document.getElementById(\'bundleModalProjectName\').textContent = projectName
+    document.getElementById(\'bundleModal\').classList.remove(\'hidden\')
+    var listEl = document.getElementById(\'bundleItemList\')
+    var memEl  = document.getElementById(\'bundleMemberList\')
+    listEl.innerHTML = \'<div class="text-slate-400 text-xs text-center py-4"><i class="fas fa-spinner fa-spin mr-1"></i>로딩 중...</div>\'
+    memEl.innerHTML  = \'<div class="text-slate-400 text-sm text-center py-8"><i class="fas fa-spinner fa-spin mr-1"></i>인력 불러오는 중...</div>\'
     try {
-      var r = await fetch('/api/ppt-menus?category=attachment')
-      var j = await r.json()
-      if (!j.ok) throw new Error(j.error || '항목 조회 실패')
-      var allMenus = j.data || []
-      // 최상위 섹션 제외, 실제 항목(child)만 추출
-      // attachment 항목은 parent_id 없이 최상위로 등록됨 — 모두 직접 포함
+      var [menuRes, memRes] = await Promise.all([
+        fetch(\'/api/ppt-menus?category=attachment\'),
+        fetch(\'/api/audit-projects/\' + id + \'/members\')
+      ])
+      var [menuJ, memJ] = await Promise.all([menuRes.json(), memRes.json()])
+      if (!menuJ.ok) throw new Error(menuJ.error || \'항목 조회 실패\')
+      var allMenus = menuJ.data || []
       bundleMenus = []
       allMenus.forEach(function(m) {
-        if (m.children && m.children.length) {
-          m.children.forEach(function(c) { bundleMenus.push(c) })
-        } else {
-          bundleMenus.push(m)  // parent_id 유무 관계없이 포함
-        }
+        if (m.children && m.children.length) { m.children.forEach(function(c) { bundleMenus.push(c) }) }
+        else { bundleMenus.push(m) }
       })
       if (!bundleMenus.length) {
-        listEl.innerHTML = '<div class="text-slate-400 text-sm text-center py-6">'
-          + '<i class="fas fa-exclamation-circle text-amber-400 text-2xl mb-2 block"></i>'
-          + '<a href="/ppt-templates" class="text-indigo-600 underline">PPT 템플릿 관리 → 첨부 탭</a>에서 먼저 첨부 항목을 초기화해주세요.'
-          + '</div>'
-        return
+        listEl.innerHTML = \'<div class="text-slate-400 text-xs text-center py-6 px-2"><i class="fas fa-exclamation-circle text-amber-400 text-xl mb-2 block"></i><a href="/ppt-templates" class="text-indigo-600 underline">PPT 템플릿 관리 → 첨부 탭</a>에서 먼저 초기화해주세요.</div>\'
+      } else {
+        renderBundleItemList()
       }
-      renderBundleItemList()
+      if (!memJ.ok) throw new Error(memJ.error || \'인력 조회 실패\')
+      bundleMembers = memJ.data || []
+      renderBundleMemberList()
     } catch(e) {
-      listEl.innerHTML = '<div class="text-red-500 text-sm text-center py-4">' + escapeHtml(e.message) + '</div>'
+      listEl.innerHTML = \'<div class="text-red-500 text-xs text-center py-4">\' + escapeHtml(e.message) + \'</div>\'
+      memEl.innerHTML  = \'<div class="text-red-500 text-sm text-center py-4">\' + escapeHtml(e.message) + \'</div>\'
     }
   }
 
   function renderBundleItemList() {
-    var listEl = document.getElementById('bundleItemList')
+    var listEl = document.getElementById(\'bundleItemList\')
     listEl.innerHTML = bundleMenus.map(function(m) {
       var checked = !!bundleItemChecked[m.id]
       var hasTemplate = m.templates && m.templates.length > 0 && !!m.templates[0].pptx_b64_key
-      return '<label class="flex items-center gap-3 px-3 py-2.5 rounded-xl border cursor-pointer transition '
-        + (checked ? 'border-violet-200 bg-violet-50' : 'border-slate-200 hover:bg-slate-50') + '">'
-        + '<input type="checkbox" class="w-4 h-4 accent-violet-600 bundle-item-cb" data-menu-id="' + m.id + '" data-menu-code="' + escapeHtml(m.menu_code) + '" ' + (checked ? 'checked' : '') + ' onchange="onBundleItemChange(' + m.id + ', this.checked)">'
-        + '<span class="flex-1 text-sm font-medium text-slate-700">' + escapeHtml(m.menu_name) + '</span>'
-        + (hasTemplate
-          ? '<span class="text-xs text-emerald-600"><i class="fas fa-check-circle"></i> 템플릿 있음</span>'
-          : '<span class="text-xs text-amber-500"><i class="fas fa-exclamation-circle"></i> 템플릿 없음</span>')
-        + '</label>'
-    }).join('')
+      return \'<label class="flex items-center gap-2 px-2.5 py-2 rounded-lg border cursor-pointer transition text-xs \' + (checked ? \'border-violet-300 bg-violet-50\' : \'border-slate-200 hover:bg-slate-50\') + \'"><input type="checkbox" class="w-3.5 h-3.5 accent-violet-600" \' + (checked ? \'checked\' : \'\') + \'  onchange="onBundleItemChange(\' + m.id + \', this.checked)"><span class="flex-1 font-medium text-slate-700">\' + escapeHtml(m.menu_name) + \'</span>\' + (hasTemplate ? \'<span class="text-emerald-500"><i class="fas fa-check-circle"></i></span>\' : \'<span class="text-amber-400"><i class="fas fa-exclamation-circle"></i></span>\') + \'</label>\'
+    }).join(\'\')
   }
 
-  function onBundleItemChange(menuId, checked) {
-    bundleItemChecked[menuId] = checked
-    renderBundleItemList()
+  function onBundleItemChange(menuId, checked) { bundleItemChecked[menuId] = checked; renderBundleItemList() }
+
+  function renderBundleMemberList() {
+    var memEl = document.getElementById(\'bundleMemberList\')
+    if (!bundleMembers.length) { memEl.innerHTML = \'<div class="text-slate-400 text-sm text-center py-8">등록된 인력이 없습니다</div>\'; return }
+    memEl.innerHTML = bundleMembers.map(function(m) {
+      var checked = !!bundleMemberChecked[m.id]
+      var gradeColor = m.auditor_grade === \'수석감리원\' ? \'text-blue-700 bg-blue-50 border-blue-200\' : m.auditor_grade === \'감리원\' ? \'text-teal-700 bg-teal-50 border-teal-200\' : \'text-slate-600 bg-slate-50 border-slate-200\'
+      return \'<div class="member-row rounded-xl border transition \' + (checked ? \'border-violet-300 bg-violet-50/40\' : \'border-slate-200\') + \'" data-member-id="\' + m.id + \'"><label class="flex items-center gap-3 px-3 py-2.5 cursor-pointer select-none"><input type="checkbox" class="w-4 h-4 accent-violet-600" \' + (checked ? \'checked\' : \'\') + \'  onchange="onMemberCheck(\' + m.id + \', this.checked)"><span class="font-semibold text-sm text-slate-800">\' + escapeHtml(m.person_name || \'\') + \'</span><span class="text-xs px-1.5 py-0.5 rounded border \' + gradeColor + \'">\' + escapeHtml(m.auditor_grade || m.member_type || \'\') + \'</span><span class="text-xs text-slate-400 flex-1">\' + escapeHtml(m.domain || \'\') + \'</span><span class="text-xs text-slate-300">\' + escapeHtml(m.member_group || \'\') + \'</span></label><div class="kw-section px-3 pb-3 \' + (checked ? \'\' : \'hidden\') + \'" id="kwSection_\' + m.id + \'"><div class="text-xs font-semibold text-slate-500 mb-1.5">키워드 → 변환 텍스트</div><div id="kwRows_\' + m.id + \'"></div><button type="button" class="mt-1.5 text-xs text-indigo-500 hover:text-indigo-700 flex items-center gap-1" onclick="addKwRow(\' + m.id + \')"><i class="fas fa-plus-circle"></i> 키워드 추가</button></div></div>\'
+    }).join(\'\')
   }
 
-  function closeBundleModal() {
-    document.getElementById('bundleModal').classList.add('hidden')
+  function onMemberCheck(memberId, checked) {
+    bundleMemberChecked[memberId] = checked
+    var row = document.querySelector(\'.member-row[data-member-id="\' + memberId + \'"]\')
+    if (!row) return
+    if (checked) { row.classList.add(\'border-violet-300\'); row.classList.remove(\'border-slate-200\') }
+    else { row.classList.remove(\'border-violet-300\'); row.classList.add(\'border-slate-200\') }
+    var kwSec = document.getElementById(\'kwSection_\' + memberId)
+    if (kwSec) { if (checked) kwSec.classList.remove(\'hidden\'); else { kwSec.classList.add(\'hidden\'); var kr = document.getElementById(\'kwRows_\' + memberId); if (kr) kr.innerHTML = \'\' } }
   }
 
-  // menu_code → ppt-attachment-bundle API의 ATTACHMENT_TYPES 키 매핑
-  var MENU_CODE_TO_TYPE = {
-    'ATT_COVER':       'cover',
-    'ATT_SCHEDULE':    'schedule',
-    'ATT_CAREER':      'career',
-    'ATT_CONSENT':     'consent',
-    'ATT_STAMP_NO':    null,         // 도장X: 별도 API 없음 — 범용(도장X)은 직접 복사
-    'ATT_STAMP_YES':   null,         // 도장O: stamp 그룹(bizreg 등) 공유 템플릿
-    'ATT_EMPLOYMENT':  'employmentCert',
-    'ATT_CAREER_CERT': 'careerCert',
-    'ATT_STAFFING':    'staffingStatus'
+  function addKwRow(memberId) {
+    var tpl = document.getElementById(\'kwRowTpl\')
+    var clone = tpl.content.cloneNode(true)
+    var container = document.getElementById(\'kwRows_\' + memberId)
+    if (container) container.appendChild(clone)
   }
 
-  // ATTACHMENT_TYPES에 정의된 키만 API가 처리 가능
-  var SUPPORTED_TYPES = ['schedule','career','consent','financial','bizreg','taxcert',
-                         'localtaxcert','corpregistry','insurance','employmentCert',
-                         'careerCert','staffingStatus']
-
-  // base64 문자열 → Blob 변환 헬퍼
-  function b64ToBlob(b64, mime) {
-    try {
-      var bin = atob(b64)
-      var arr = new Uint8Array(bin.length)
-      for (var i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i)
-      return new Blob([arr], { type: mime })
-    } catch(e) {
-      return null
-    }
+  function getKeywordsForMember(memberId) {
+    var rows = document.querySelectorAll(\'#kwRows_\' + memberId + \'  .kw-row\')
+    var result = []
+    rows.forEach(function(row) {
+      var key = row.querySelector(\'.kw-key\') ? row.querySelector(\'.kw-key\').value.trim() : \'\' 
+      var val = row.querySelector(\'.kw-val\') ? row.querySelector(\'.kw-val\').value.trim() : \'\' 
+      if (key) result.push({ keyword: key, replacement: val })
+    })
+    return result
   }
+
+  function closeBundleModal() { document.getElementById(\'bundleModal\').classList.add(\'hidden\') }
 
   async function confirmGenerateBundle() {
     if (!bundleProjectId) return
-    var selected = bundleMenus.filter(function(m) { return bundleItemChecked[m.id] })
-    if (!selected.length) {
-      alert('생성할 항목을 하나 이상 체크해주세요.')
-      return
-    }
-    var btn = document.getElementById('bundleConfirmBtn')
+    var selectedItems = bundleMenus.filter(function(m) { return bundleItemChecked[m.id] })
+    if (!selectedItems.length) { alert(\'생성할 항목을 하나 이상 체크해주세요.\'); return }
+    var selectedMembers = bundleMembers.filter(function(m) { return bundleMemberChecked[m.id] }).map(function(m) {
+      return { id: m.id, person_name: m.person_name, auditor_grade: m.auditor_grade, member_type: m.member_type, domain: m.domain, member_group: m.member_group, keywords: getKeywordsForMember(m.id) }
+    })
+    var btn = document.getElementById(\'bundleConfirmBtn\')
     btn.disabled = true
-    btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-1"></i>생성 중...'
+    btn.innerHTML = \'<i class="fas fa-spinner fa-spin mr-1"></i>생성 중...\'
     closeBundleModal()
-
     try {
-      var PPTX_MIME = 'application/vnd.openxmlformats-officedocument.presentationml.presentation'
-
-      // ── 1. 표지(ATT_COVER) 메뉴 찾기 ───────────────────────────
-      var coverMenu = bundleMenus.find(function(m) { return m.menu_code === 'ATT_COVER' })
-      if (!coverMenu || !coverMenu.templates || !coverMenu.templates[0] || !coverMenu.templates[0].pptx_b64_key) {
-        throw new Error('표지(ATT_COVER) 템플릿이 등록되지 않았습니다. PPT 템플릿 관리 → 첨부 탭에서 먼저 등록해주세요.')
-      }
-      var coverBlob = b64ToBlob(coverMenu.templates[0].pptx_b64_key, PPTX_MIME)
-      if (!coverBlob) throw new Error('표지 템플릿 파일 변환에 실패했습니다.')
-
-      // ── 2. 선택 항목을 API 키 순서 배열로 변환 ─────────────────
-      var order = []
-      var missingTemplates = []
-      var unsupportedItems = []
-
-      selected.forEach(function(m) {
-        if (m.menu_code === 'ATT_COVER') return  // 표지는 별도 처리
-        var typeKey = MENU_CODE_TO_TYPE[m.menu_code]
-        if (typeKey === undefined) { unsupportedItems.push(m.menu_name); return }
-        if (typeKey === null) {
-          // ATT_STAMP_NO / ATT_STAMP_YES 등 직접 처리 불가 항목 — 경고만
-          unsupportedItems.push(m.menu_name + ' (API 미지원)')
-          return
-        }
-        if (!SUPPORTED_TYPES.includes(typeKey)) { unsupportedItems.push(m.menu_name); return }
-        var tpl = m.templates && m.templates[0]
-        if (!tpl || !tpl.pptx_b64_key) {
-          missingTemplates.push(m.menu_name)
-          return
-        }
-        order.push({ key: typeKey, menu: m })
+      var r = await fetch(\'/api/ppt-attachment-bundle/\' + bundleProjectId, {
+        method: \'POST\',
+        headers: { \'Content-Type\': \'application/json\' },
+        body: JSON.stringify({ items: selectedItems.map(function(m) { return { menuId: m.id, menuCode: m.menu_code, menuName: m.menu_name } }), members: selectedMembers })
       })
-
-      if (unsupportedItems.length) {
-        var skipMsg = unsupportedItems.join(', ') + ' 항목은 현재 API에서 지원되지 않아 제외됩니다.'
-        if (!confirm(skipMsg + '\n\n계속 진행할까요?')) {
-          btn.disabled = false
-          btn.innerHTML = '<i class="fas fa-magic mr-1"></i>생성'
-          return
-        }
-      }
-      if (missingTemplates.length) {
-        throw new Error('다음 항목의 템플릿이 등록되지 않았습니다: ' + missingTemplates.join(', ')
-          + '\n\nPPT 템플릿 관리 → 첨부 탭에서 먼저 등록해주세요.')
-      }
-      if (!order.length) {
-        throw new Error('생성할 수 있는 항목이 없습니다. 템플릿이 등록된 항목을 선택해주세요.')
-      }
-
-      // ── 3. stamp 필요 여부 확인 ─────────────────────────────────
-      var STAMP_TYPES = ['bizreg','taxcert','localtaxcert','corpregistry','insurance']
-      var needsStamp = order.some(function(o) { return STAMP_TYPES.includes(o.key) })
-      if (needsStamp && !bundleStampType) {
-        throw new Error('도장 종류(원본대조필 / 사실과상위없음)를 선택해주세요.')
-      }
-
-      // ── 4. FormData 구성 ────────────────────────────────────────
-      var fd = new FormData()
-      fd.append('cover', new File([coverBlob], 'cover.pptx', { type: PPTX_MIME }))
-      fd.append('order', JSON.stringify(order.map(function(o) { return o.key })))
-      if (needsStamp) fd.append('stampType', bundleStampType)
-      fd.append('careerOnePage', String(bundleCareerPageMode === '1page'))
-
-      order.forEach(function(o) {
-        var tplBlob = b64ToBlob(o.menu.templates[0].pptx_b64_key, PPTX_MIME)
-        fd.append(o.key, new File([tplBlob], o.key + '.pptx', { type: PPTX_MIME }))
-      })
-
-      // ── 5. API 호출 ─────────────────────────────────────────────
-      var r = await fetch('/api/ppt-attachment-bundle/' + bundleProjectId, { method: 'POST', body: fd })
-      if (!r.ok) {
-        var ej = await r.json().catch(function() { return {} })
-        throw new Error(ej.error || ('생성 실패 (' + r.status + ')'))
-      }
-
-      // ── 6. 파일 다운로드 ────────────────────────────────────────
+      if (!r.ok) { var ej = await r.json().catch(function() { return {} }); throw new Error(ej.error || (\'생성 실패 (\' + r.status + \')\')) }
       var blob = await r.blob()
-      var cd = r.headers.get('Content-Disposition') || ''
-      var m2 = cd.match(/filename\*?=["']?(?:UTF-8'')?([^"';]+)/i)
-      var filename = m2 ? decodeURIComponent(m2[1]) : ('첨부PPT_' + bundleProjectId + '.pptx')
+      var cd = r.headers.get(\'Content-Disposition\') || \'\' 
+      var m2 = cd.match(/filename\\*?=["\']?(?:UTF-8\'\')?([^"\'\';]+)/i)
+      var filename = m2 ? decodeURIComponent(m2[1]) : (\'첨부PPT_\' + bundleProjectId + \'.pptx\')
       var url = URL.createObjectURL(blob)
-      var a = document.createElement('a')
-      a.href = url; a.download = filename
-      document.body.appendChild(a); a.click(); a.remove()
-      URL.revokeObjectURL(url)
-
-    } catch(e) {
-      alert('첨부PPT 생성 실패: ' + e.message)
-    } finally {
-      btn.disabled = false
-      btn.innerHTML = '<i class="fas fa-magic mr-1"></i>생성'
-    }
+      var a = document.createElement(\'a\'); a.href = url; a.download = filename
+      document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url)
+    } catch(e) { alert(\'첨부PPT 생성 실패: \' + e.message) }
+    finally { btn.disabled = false; btn.innerHTML = \'<i class="fas fa-magic mr-1"></i>생성\' }
   }
   </script>
   `
