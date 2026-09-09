@@ -129,11 +129,11 @@ const ATTACHMENT_TYPES: Record<
       if (projectId === 0) {
         const kwRaw = form.get('freeKeywords')
         const mapRaw = form.get('freeMappings')
-        const pidRaw = form.get('personnelIds')
+        const namesRaw = form.get('personnelNames')
         freeOpts = {
           keywords: kwRaw ? JSON.parse(kwRaw as string) : [],
           mappings: mapRaw ? JSON.parse(mapRaw as string) : [],
-          personnelIds: pidRaw ? JSON.parse(pidRaw as string) : [],
+          personnelNames: namesRaw ? JSON.parse(namesRaw as string) : [],
         }
       }
       return (await buildCareerZip(buf, projectId, titlePrefix, onePage, freeOpts)).zip

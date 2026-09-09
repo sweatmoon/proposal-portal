@@ -1847,11 +1847,12 @@ app.get('/ppt-generate', (c) => {
             <div class="text-xs font-bold text-slate-500 uppercase tracking-wide mb-3">
               <i class="fas fa-users mr-1 text-violet-500"></i>② 인력 선택
             </div>
-            <input id="freePersonnelSearch" type="text" placeholder="이름 검색..."
-              class="w-full mb-2 text-xs px-3 py-1.5 border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-violet-300" />
-            <div id="freePersonnelList" class="space-y-1 max-h-64 overflow-y-auto border border-slate-100 rounded-lg p-2 bg-slate-50">
-              <div class="text-slate-400 text-xs text-center py-4"><i class="fas fa-spinner fa-spin mr-1"></i>불러오는 중...</div>
-            </div>
+            <div class="text-[11px] text-slate-400 mb-1.5">성명:담당분야 형식으로 쉼표 또는 줄바꿈으로 구분</div>
+            <textarea id="freePersonnelInput"
+              class="w-full text-xs px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-violet-300 resize-none"
+              rows="5"
+              placeholder="김현호:기능테스트, 김태호:웹접근성"></textarea>
+            <div id="freePersonnelValidation" class="mt-1.5 space-y-0.5 text-[11px]"></div>
           </div>
 
           <!-- 열3: 키워드→변환 입력 -->
@@ -2341,9 +2342,7 @@ app.get('/ppt-generate', (c) => {
 
   var freeAllMenus      = []    // 전체 attachment 메뉴
   var freeItemChecked   = {}    // { menuId: true/false }
-  var freeAllPersonnel  = []    // 전체 인력 캐시
-  var freePersonnelChecked = {} // { personnelId: true/false }
-  var freePersonnelKwMap   = {} // { personnelId: [{key,val},...] }
+  var freeAllPersonnelNames = [] // 전체 인력 이름 캐시 (검증용)
 
   // ── 자유생성: 첨부 항목 로드 ──────────────────────────────────
   async function loadFreeItems() {
@@ -2389,94 +2388,56 @@ app.get('/ppt-generate', (c) => {
   }
 
   // ── 자유생성: 인력 목록 로드 ──────────────────────────────────
+  // ── 자유생성: 인력 이름 목록 로드 (검증용) ─────────────────
   async function loadFreePersonnel() {
-    var el = document.getElementById('freePersonnelList')
-    if (freeAllPersonnel.length) { renderFreePersonnelList(''); return }
+    if (freeAllPersonnelNames.length) return
     try {
       var r = await fetch('/api/personnel')
       var j = await r.json()
       if (!j.ok) throw new Error(j.error || '인력 조회 실패')
-      freeAllPersonnel = j.data || []
-      renderFreePersonnelList('')
+      freeAllPersonnelNames = (j.data || []).map(function(p) { return p.name })
     } catch(e) {
-      el.innerHTML = '<div class="text-red-500 text-xs py-2">' + escapeHtml(e.message) + '</div>'
+      // 검증 실패 시 조용히 넘김 (텍스트박스 입력은 계속 가능)
     }
   }
 
-  function renderFreePersonnelList(search) {
-    var el = document.getElementById('freePersonnelList')
-    var filtered = freeAllPersonnel.filter(function(p) {
-      return !search || (p.name||'').toLowerCase().includes(search.toLowerCase())
-    })
-    if (!filtered.length) { el.innerHTML = '<div class="text-slate-400 text-xs text-center py-3">검색 결과 없음</div>'; return }
-    var GC = { '수석감리원':'bg-blue-900 text-white','감리원':'bg-blue-500 text-white','전문가':'bg-purple-600 text-white','테스터':'bg-purple-900 text-white' }
-    el.innerHTML = filtered.map(function(p) {
-      var checked = !!freePersonnelChecked[p.id]
-      var gc = GC[p.auditor_grade||''] || 'bg-slate-400 text-white'
-      return '<label class="flex items-center gap-2 px-2 py-1.5 rounded-md cursor-pointer transition text-xs select-none '
-        + (checked ? 'bg-violet-100' : 'hover:bg-white') + '">'
-        + '<input type="checkbox" class="w-3.5 h-3.5 accent-violet-600 flex-shrink-0 free-per-cb" data-pid="' + p.id + '" '
-        + (checked ? 'checked' : '') + ' onchange="onFreePersonnelChange(' + p.id + ', this.checked)">'
-        + '<span class="font-semibold text-slate-800 flex-shrink-0">' + escapeHtml(p.name||'') + '</span>'
-        + (p.auditor_grade ? '<span class="px-1.5 py-0.5 rounded text-[10px] font-bold flex-shrink-0 ' + gc + '">' + escapeHtml(p.auditor_grade) + '</span>' : '')
-        + (p.position ? '<span class="text-slate-400 truncate text-[10px]">' + escapeHtml(p.position) + '</span>' : '')
-        + '</label>'
-    }).join('')
+  // ── 자유생성: 인력 입력 파싱 (성명:담당분야 형식) ──────────
+  function parseFreePersonnel(raw) {
+    // 쉼표 또는 줄바꿈으로 구분
+    return raw.split(/[,\n]/).map(function(item) {
+      var parts = item.split(':')
+      var name = parts[0].trim()
+      var domain = parts.slice(1).join(':').trim()
+      return name ? { name: name, domain: domain } : null
+    }).filter(Boolean)
   }
 
-  function onFreePersonnelChange(pid, checked) {
-    freePersonnelChecked[pid] = checked
-    if (!checked) delete freePersonnelKwMap[pid]
-    else if (!freePersonnelKwMap[pid]) freePersonnelKwMap[pid] = []
-    renderFreePersonnelList(document.getElementById('freePersonnelSearch').value)
-    renderFreePersonnelKwRows()
-  }
-
-  function renderFreePersonnelKwRows() {
-    var section = document.getElementById('freePersonnelKwSection')
-    // 현재 DOM 값 저장
-    section.querySelectorAll('.free-per-block').forEach(function(block) {
-      var pid = Number(block.dataset.pid)
-      var rows = []
-      block.querySelectorAll('.free-per-row').forEach(function(row) {
-        rows.push({ key: row.querySelector('.free-kw-key').value, val: row.querySelector('.free-kw-val').value })
-      })
-      freePersonnelKwMap[pid] = rows
-    })
-
-    var selected = freeAllPersonnel.filter(function(p) { return freePersonnelChecked[p.id] })
-    if (!selected.length) { section.innerHTML = ''; return }
-    section.innerHTML = selected.map(function(p) {
-      var rows = freePersonnelKwMap[p.id] || []
-      var rowsHtml = rows.map(function(r) {
-        return '<div class="free-per-row flex gap-1 items-center">'
-          + '<input type="text" class="free-kw-key w-36 text-[11px] px-2 py-1 border border-slate-200 rounded focus:outline-none focus:ring-1 focus:ring-violet-300" placeholder="{{키워드}}" value="' + escapeHtml(r.key) + '">'
-          + '<span class="text-slate-300 text-xs flex-shrink-0">→</span>'
-          + '<input type="text" class="free-kw-val flex-1 text-[11px] px-2 py-1 border border-slate-200 rounded focus:outline-none focus:ring-1 focus:ring-violet-300" placeholder="변환 텍스트" value="' + escapeHtml(r.val) + '">'
-          + '<button type="button" class="text-slate-300 hover:text-red-400 px-0.5 text-xs flex-shrink-0 rm-row-btn" data-rm=".free-per-row"><i class="fas fa-times"></i></button>'
-          + '</div>'
-      }).join('')
-      return '<div class="free-per-block bg-violet-50 border border-violet-100 rounded-lg p-3" data-pid="' + p.id + '">'
-        + '<div class="flex items-center justify-between mb-2">'
-        + '<span class="text-xs font-bold text-violet-700">' + escapeHtml(p.name||'') + '</span>'
-        + '<button type="button" class="text-[11px] text-indigo-500 hover:text-indigo-700 flex items-center gap-1 add-free-per-kw-btn">'
-        + '<i class="fas fa-plus-circle text-[10px]"></i> 키워드 추가</button>'
-        + '</div>'
-        + '<div class="free-per-rows space-y-1">' + rowsHtml + '</div>'
-        + '</div>'
-    }).join('')
-  }
-
-  function addFreePerKwRow(block) {
-    var rowsEl = block.querySelector('.free-per-rows')
-    var div = document.createElement('div')
-    div.className = 'free-per-row flex gap-1 items-center'
-    div.innerHTML = '<input type="text" class="free-kw-key w-36 text-[11px] px-2 py-1 border border-slate-200 rounded focus:outline-none focus:ring-1 focus:ring-violet-300" placeholder="{{키워드}}">'
-      + '<span class="text-slate-300 text-xs flex-shrink-0">→</span>'
-      + '<input type="text" class="free-kw-val flex-1 text-[11px] px-2 py-1 border border-slate-200 rounded focus:outline-none focus:ring-1 focus:ring-violet-300" placeholder="변환 텍스트">'
-      + '<button type="button" class="text-slate-300 hover:text-red-400 px-0.5 text-xs flex-shrink-0 rm-row-btn" data-rm=".free-per-row"><i class="fas fa-times"></i></button>'
-    rowsEl.appendChild(div)
-    div.querySelector('.free-kw-key').focus()
+  // ── 자유생성: 인력 입력 실시간 검증 ──────────────────────────
+  var _freePersonnelTimer = null
+  function validateFreePersonnel() {
+    clearTimeout(_freePersonnelTimer)
+    _freePersonnelTimer = setTimeout(function() {
+      var raw = (document.getElementById('freePersonnelInput').value || '').trim()
+      var validEl = document.getElementById('freePersonnelValidation')
+      if (!raw) { validEl.innerHTML = ''; return }
+      var parsed = parseFreePersonnel(raw)
+      if (!freeAllPersonnelNames.length) { validEl.innerHTML = ''; return }
+      var html = parsed.map(function(p) {
+        var exists = freeAllPersonnelNames.indexOf(p.name) >= 0
+        if (exists) {
+          return '<span class="inline-flex items-center gap-1 text-emerald-600">'
+            + '<i class="fas fa-check-circle text-[10px]"></i>' + escapeHtml(p.name)
+            + (p.domain ? '<span class="text-slate-400">:' + escapeHtml(p.domain) + '</span>' : '')
+            + '</span>'
+        } else {
+          return '<span class="inline-flex items-center gap-1 text-red-500">'
+            + '<i class="fas fa-exclamation-circle text-[10px]"></i>' + escapeHtml(p.name)
+            + ' <span class="text-red-400">(없는 인력)</span>'
+            + '</span>'
+        }
+      }).join('<span class="text-slate-300 mx-1">·</span>')
+      validEl.innerHTML = html
+    }, 400)
   }
 
   // ── 자유생성: 공통 키워드 행 ──────────────────────────────────
@@ -2503,23 +2464,7 @@ app.get('/ppt-generate', (c) => {
   }
 
   function collectFreePersonnelKw() {
-    // DOM 갱신
-    document.querySelectorAll('#freePersonnelKwSection .free-per-block').forEach(function(block) {
-      var pid = Number(block.dataset.pid)
-      var rows = []
-      block.querySelectorAll('.free-per-row').forEach(function(row) {
-        rows.push({ key: row.querySelector('.free-kw-key').value.trim(), val: row.querySelector('.free-kw-val').value.trim() })
-      })
-      freePersonnelKwMap[pid] = rows
-    })
-    var result = {}
-    Object.keys(freePersonnelKwMap).forEach(function(pid) {
-      if (!freePersonnelChecked[pid]) return
-      var map = {}
-      ;(freePersonnelKwMap[pid]||[]).forEach(function(r) { if (r.key) map[r.key] = r.val })
-      if (Object.keys(map).length) result[pid] = map
-    })
-    return result
+    return {}
   }
 
   // ── 자유생성: 생성 실행 ───────────────────────────────────────
@@ -2580,9 +2525,10 @@ app.get('/ppt-generate', (c) => {
       }
       if (mappingList.length) fd.append('freeMappings', JSON.stringify(mappingList))
 
-      // 선택 인력 ID
-      var pids = Object.keys(freePersonnelChecked).filter(function(id) { return freePersonnelChecked[id] })
-      if (pids.length) fd.append('personnelIds', JSON.stringify(pids.map(Number)))
+      // 인력 목록 파싱 (성명:담당분야 형식)
+      var personnelRaw = (document.getElementById('freePersonnelInput').value || '').trim()
+      var personnelList = personnelRaw ? parseFreePersonnel(personnelRaw) : []
+      if (personnelList.length) fd.append('personnelNames', JSON.stringify(personnelList))
 
       order.forEach(function(o) {
         fd.append(o.key, b64ToFile(o.menu.templates[0].pptx_b64_key, o.key + '.pptx'))
@@ -2614,16 +2560,12 @@ app.get('/ppt-generate', (c) => {
   loadFreeItems()
   loadFreePersonnel()
 
-  document.getElementById('freePersonnelSearch').addEventListener('input', function(e) {
-    renderFreePersonnelList(e.target.value)
-  })
+  document.getElementById('freePersonnelInput').addEventListener('input', validateFreePersonnel)
 
   // ── 이벤트 위임: 인력별 키워드 추가 버튼 + 행 삭제 버튼 (onclick 따옴표 충돌 회피) ──
   document.addEventListener('click', function(e) {
     var btn = e.target.closest('.add-per-kw-btn')
     if (btn) { addPerKwRow(btn.closest('.per-kw-block')); return }
-    var btn2 = e.target.closest('.add-free-per-kw-btn')
-    if (btn2) { addFreePerKwRow(btn2.closest('.free-per-block')); return }
     var rmBtn = e.target.closest('.rm-row-btn')
     if (rmBtn) { var sel = rmBtn.getAttribute('data-rm'); if (sel) rmBtn.closest(sel).remove(); return }
   })

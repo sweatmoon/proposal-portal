@@ -300,8 +300,8 @@ export interface FreeCareerOptions {
   keywords: string[]
   /** 변환 규칙 (예: [{ keys: ['지방세', '국민비서'], value: '디지털서비스' }]) */
   mappings: { keys: string[]; value: string }[]
-  /** 선택된 인력 ID 목록 */
-  personnelIds: number[]
+  /** 성명:담당분야 로 입력한 인력 목록 */
+  personnelNames: { name: string; domain: string }[]
 }
 
 export async function buildCareerZip(
@@ -321,13 +321,9 @@ export async function buildCareerZip(
 
     if (projectId === 0 && freeOpts) {
       project = { project_name: '자유생성' }
-      // 선택된 personnel_id 목록을 DB에서 name만 꺼내 members로 구성
-      if (freeOpts.personnelIds.length) {
-        const pRows = await query<{ name: string }>(
-          `SELECT name FROM personnel WHERE id = ANY($1) ORDER BY id ASC`,
-          [freeOpts.personnelIds]
-        )
-        members = pRows.map(p => ({ person_name: p.name, domain: '' }))
+      // 성명:담당분야 로 입력한 인력 목록을 members로 구성
+      if (freeOpts.personnelNames.length) {
+        members = freeOpts.personnelNames.map(p => ({ person_name: p.name, domain: p.domain || '' }))
       }
       // 키워드: sort_order는 입력 순서
       keywords = freeOpts.keywords.map((kw, i) => ({ keyword: kw, sort_order: i }))
