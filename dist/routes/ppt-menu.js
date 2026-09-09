@@ -237,6 +237,8 @@ app.post('/migrate', async (c) => {
         await exec(`ALTER TABLE ppt_master_templates ADD COLUMN IF NOT EXISTS layouts JSONB NOT NULL DEFAULT '[]'`);
         // 9. ppt_generation_rules 에 target_layout_name 컬럼 추가 (구버전 호환)
         await exec(`ALTER TABLE ppt_generation_rules ADD COLUMN IF NOT EXISTS target_layout_name TEXT`);
+        // 10. ppt_menus 에 category 컬럼 추가 (proposal / attachment 구분, 구버전 호환)
+        await exec(`ALTER TABLE ppt_menus ADD COLUMN IF NOT EXISTS category TEXT NOT NULL DEFAULT 'proposal'`);
         return c.json({ ok: true, message: 'PPT 테이블 마이그레이션 완료 (8개 테이블 + 컬럼 업그레이드)' });
     }
     catch (e) {
@@ -712,10 +714,14 @@ app.post('/seed', async (c) => {
 // ═══════════════════════════════════════════════════════════════════
 // [3] 메뉴 CRUD
 // ═══════════════════════════════════════════════════════════════════
-/** GET /api/ppt-menus — 전체 메뉴 트리 (rule, templates 포함) */
+/** GET /api/ppt-menus — 전체 메뉴 트리 (rule, templates 포함)
+ *  ?category=proposal|attachment  (생략 시 전체) */
 app.get('/', async (c) => {
     try {
-        const menus = await query(`SELECT * FROM ppt_menus ORDER BY sort_order ASC, id ASC`);
+        const cat = c.req.query('category'); // 'proposal' | 'attachment' | undefined
+        const menus = await query(cat
+            ? `SELECT * FROM ppt_menus WHERE category=$1 ORDER BY sort_order ASC, id ASC`
+            : `SELECT * FROM ppt_menus ORDER BY sort_order ASC, id ASC`, cat ? [cat] : []);
         const rules = await query(`SELECT * FROM ppt_generation_rules`);
         // pptx_b64_key 포함 — ppt-engine.js 템플릿 fallback용
         const templates = await query(`SELECT id, menu_id, template_name, variant_code, capacity, is_default, is_active,
@@ -746,6 +752,55 @@ app.get('/', async (c) => {
                 roots.push(nodeMap[m.id]);
         });
         return c.json({ ok: true, data: roots });
+    }
+    catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        return c.json({ ok: false, error: msg }, 500);
+    }
+});
+// ═══════════════════════════════════════════════════════════════════
+// [A] 첨부 템플릿 시드 — BUNDLE_ITEM_DEFS 기반 메뉴 + 빈 템플릿 슬롯 생성
+// ═══════════════════════════════════════════════════════════════════
+/** POST /api/ppt-menus/attachment-seed
+ *  첨부PPT 항목(표지, 일정표, 실적경력, 동의서 … 9종)을
+ *  ppt_menus(category='attachment') + ppt_templates(빈 슬롯)로 등록.
+ *  멱등(ON CONFLICT DO UPDATE)이므로 반복 실행 안전. */
+app.post('/attachment-seed', async (c) => {
+    try {
+        // 첨부PPT 항목 정의 (attachment-bundle-widget.ts 의 BUNDLE_ITEM_DEFS 와 동일 순서)
+        const ITEMS = [
+            { code: 'ATT_COVER', name: '0. 정성제안서 첨부 표지', sort: 0 },
+            { code: 'ATT_SCHEDULE', name: '감리원 일정 현황표', sort: 10 },
+            { code: 'ATT_CAREER', name: '투입 감리원별 실적 및 경력', sort: 20 },
+            { code: 'ATT_CONSENT', name: '비상근 감리원 참여 동의서', sort: 30 },
+            { code: 'ATT_STAMP_NO', name: '범용 템플릿(도장X)', sort: 40 },
+            { code: 'ATT_STAMP_YES', name: '범용 템플릿(도장O)', sort: 50 },
+            { code: 'ATT_EMPLOYMENT', name: '재직증명서', sort: 60 },
+            { code: 'ATT_CAREER_CERT', name: '경력증명서', sort: 70 },
+            { code: 'ATT_STAFFING', name: '상근감리원인력현황', sort: 80 },
+        ];
+        const created = [];
+        for (const item of ITEMS) {
+            // 1. 메뉴 upsert
+            const menu = await queryOne(`
+        INSERT INTO ppt_menus (menu_code, menu_name, sort_order, is_enabled, category)
+        VALUES ($1, $2, $3, 1, 'attachment')
+        ON CONFLICT (menu_code) DO UPDATE
+          SET menu_name=$2, sort_order=$3, category='attachment', updated_at=NOW()
+        RETURNING id
+      `, [item.code, item.name, item.sort]);
+            if (!menu)
+                continue;
+            // 2. 빈 템플릿 슬롯 upsert (pptx_b64_key=NULL 인 채로 자리만 만들어 둠)
+            await exec(`
+        INSERT INTO ppt_templates (menu_id, template_name, variant_code, is_default, is_active)
+        VALUES ($1, $2, 'DEFAULT', 1, 1)
+        ON CONFLICT (menu_id, variant_code, version) DO UPDATE
+          SET template_name=$2, updated_at=NOW()
+      `, [menu.id, item.name]);
+            created.push(item.code);
+        }
+        return c.json({ ok: true, created });
     }
     catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
