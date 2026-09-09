@@ -1215,10 +1215,11 @@ app.get('/personnel/:id', async (c) => {
     const person = await queryOne('SELECT * FROM personnel WHERE id = $1', [id]);
     if (!person)
         return c.html(layout('없음', '<div class="p-8 text-center text-red-500">인력 정보를 찾을 수 없습니다</div>', 'personnel'));
-    const [certs, auditHistory, itCareer] = await Promise.all([
+    const [certs, auditHistory, itCareer, projectCareer] = await Promise.all([
         query('SELECT * FROM personnel_certifications WHERE personnel_id = $1 ORDER BY cert_year DESC', [id]),
         query('SELECT * FROM personnel_audit_history WHERE personnel_id = $1 ORDER BY audit_yearmonth ASC', [id]),
         query('SELECT * FROM personnel_it_career WHERE personnel_id = $1 ORDER BY period_start DESC', [id]),
+        query('SELECT * FROM personnel_project_career WHERE personnel_id = $1 ORDER BY year_range DESC', [id]),
     ]);
     // 감리 실적 표시용 정렬: 최신순(DESC)
     const auditHistoryDesc = [...auditHistory].reverse();
@@ -1268,6 +1269,19 @@ app.get('/personnel/:id', async (c) => {
       </td>
       <td class="px-4 py-2.5 text-sm text-slate-600 whitespace-pre-line">${c2.duty ?? '-'}</td>
       <td class="px-4 py-2.5 text-xs text-slate-400 whitespace-pre-line">${c2.basis ?? '-'}</td>
+    </tr>`).join('');
+    // 프로젝트 및 기타 경력 목록 (연도|프로젝트명|주관 기관|담당 분야|역할|소속 회사|비고)
+    const projectCareerRows = projectCareer.map(pc => `
+    <tr class="border-t border-slate-100 hover:bg-slate-50">
+      <td class="px-4 py-2.5 text-xs text-slate-500 whitespace-nowrap">${pc.year_range ?? '-'}</td>
+      <td class="px-4 py-2.5 text-sm font-medium text-slate-800 max-w-xs">
+        <div class="line-clamp-2">${pc.project_name}</div>
+      </td>
+      <td class="px-4 py-2.5 text-sm text-slate-600">${pc.client_org ?? '-'}</td>
+      <td class="px-4 py-2.5 text-sm text-slate-500">${pc.domain ?? '-'}</td>
+      <td class="px-4 py-2.5 text-sm text-slate-500 text-center">${pc.role ?? '-'}</td>
+      <td class="px-4 py-2.5 text-sm text-slate-500">${pc.company ?? '-'}</td>
+      <td class="px-4 py-2.5 text-xs text-slate-400">${pc.remarks ?? '-'}</td>
     </tr>`).join('');
     // 기본 정보 항목 헬퍼
     const infoItem = (label, value) => `<div class="flex gap-2 py-2 border-b border-slate-100 last:border-0">
@@ -1334,10 +1348,10 @@ app.get('/personnel/:id', async (c) => {
           <div class="px-4 py-8 text-center text-slate-400 text-sm">감리 실적이 없습니다</div>`}
         </div>
 
-        <!-- IT 경력 -->
+        <!-- 감리 이외의 IT 경력 -->
         <div class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
           <div class="px-5 py-3 bg-indigo-700 text-white font-semibold text-sm">
-            <i class="fas fa-laptop-code mr-2"></i>IT 경력 (${itCareer.length}건)
+            <i class="fas fa-laptop-code mr-2"></i>감리 이외의 IT 경력 (${itCareer.length}건)
           </div>
           ${itCareer.length > 0 ? `
           <div class="overflow-x-auto">
@@ -1354,6 +1368,31 @@ app.get('/personnel/:id', async (c) => {
             </table>
           </div>` : `
           <div class="px-4 py-8 text-center text-slate-400 text-sm">IT 경력이 없습니다</div>`}
+        </div>
+
+        <!-- 프로젝트 및 기타 경력 -->
+        <div class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+          <div class="px-5 py-3 bg-teal-700 text-white font-semibold text-sm">
+            <i class="fas fa-project-diagram mr-2"></i>프로젝트 및 기타 경력 (${projectCareer.length}건)
+          </div>
+          ${projectCareer.length > 0 ? `
+          <div class="overflow-x-auto">
+            <table class="w-full text-sm">
+              <thead>
+                <tr class="bg-slate-50 text-xs text-slate-500 border-b border-slate-200">
+                  <th class="px-4 py-2.5 text-center whitespace-nowrap">연도</th>
+                  <th class="px-4 py-2.5 text-left">프로젝트명</th>
+                  <th class="px-4 py-2.5 text-left">주관 기관</th>
+                  <th class="px-4 py-2.5 text-left">담당 분야</th>
+                  <th class="px-4 py-2.5 text-center">역할</th>
+                  <th class="px-4 py-2.5 text-left">소속 회사</th>
+                  <th class="px-4 py-2.5 text-left">비고</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-slate-100">${projectCareerRows}</tbody>
+            </table>
+          </div>` : `
+          <div class="px-4 py-8 text-center text-slate-400 text-sm">프로젝트 및 기타 경력이 없습니다</div>`}
         </div>
 
         <!-- 경력 요약 (career_summary가 있을 경우) -->
