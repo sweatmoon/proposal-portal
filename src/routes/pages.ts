@@ -2652,7 +2652,7 @@ app.get('/ppt-generate', (c) => {
       // ── 키워드 목록 파싱 (쉼표/줄바꿈 구분) ──────────────────
       var kwRaw = (document.getElementById('freeKwInput').value || '').trim()
       var kwList = kwRaw
-        ? kwRaw.split(/[\n,]/).map(function(s) { return s.trim() }).filter(Boolean)
+        ? kwRaw.split(/[\\n,]/).map(function(s) { return s.trim() }).filter(Boolean)
         : []
       if (kwList.length) fd.append('freeKeywords', JSON.stringify(kwList))
 
@@ -2660,7 +2660,7 @@ app.get('/ppt-generate', (c) => {
       var mappingRaw = (document.getElementById('freeKwMappingInput').value || '').trim()
       var mappingList = []
       if (mappingRaw) {
-        mappingRaw.split('\n').forEach(function(line) {
+        mappingRaw.split('\\n').forEach(function(line) {
           line = line.trim()
           if (!line) return
           var parts = line.split(/->/)
