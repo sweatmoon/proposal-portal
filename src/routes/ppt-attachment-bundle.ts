@@ -197,7 +197,7 @@ const ATTACHMENT_TYPES: Record<
 app.post('/:projectId', async (c) => {
   try {
     const projectId = Number(c.req.param('projectId'))
-    if (!projectId) return c.json({ ok: false, error: 'projectId가 필요합니다' }, 400)
+    if (isNaN(projectId) || projectId < 0) return c.json({ ok: false, error: 'projectId가 올바르지 않습니다' }, 400)
 
     const contentType = c.req.header('content-type') || ''
     if (!contentType.includes('multipart/form-data')) {
@@ -247,7 +247,7 @@ app.post('/:projectId', async (c) => {
     const merged = await mergeDecksSharingMaster([coverZip, ...sectionZips])
     const outBuffer = await merged.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE', compressionOptions: { level: 6 } })
 
-    const safeName = projectName.replace(/[\\/:*?"<>|]/g, '_').slice(0, 40)
+    const safeName = (projectName || '자유생성').replace(/[\\/:*?"<>|]/g, '_').slice(0, 40)
     c.header('Content-Type', 'application/vnd.openxmlformats-officedocument.presentationml.presentation')
     c.header('Content-Disposition', `attachment; filename="${encodeURIComponent('A_첨부_' + safeName)}.pptx"`)
     return c.body(new Uint8Array(outBuffer))

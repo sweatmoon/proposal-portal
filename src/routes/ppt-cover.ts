@@ -31,14 +31,18 @@ export interface CoverZipResult {
 
 /** 이 파일의 핵심 로직 — 단독 다운로드 라우트와 첨부 묶음 라우트 양쪽에서 호출한다. */
 export async function buildCoverZip(templateBuf: Buffer, projectId: number, labels: string[]): Promise<CoverZipResult> {
-  const project = await queryOne<{ project_name: string }>(
-    `SELECT project_name FROM audit_projects WHERE id = $1`,
-    [projectId]
-  )
-  if (!project) throw new Error('사업을 찾을 수 없습니다')
+  // projectId=0 이면 사업과 무관한 자유 생성 — 사업명 조회 없이 빈 문자열로 대체
+  let projectName = ''
+  const commonMap: Record<string, string> = {}
 
-  const commonMap: Record<string, string> = {
-    '[감리사업명]': project.project_name,
+  if (projectId > 0) {
+    const project = await queryOne<{ project_name: string }>(
+      `SELECT project_name FROM audit_projects WHERE id = $1`,
+      [projectId]
+    )
+    if (!project) throw new Error('사업을 찾을 수 없습니다')
+    projectName = project.project_name
+    commonMap['[감리사업명]'] = project.project_name
   }
 
   const zip = await JSZip.loadAsync(templateBuf)
@@ -66,7 +70,7 @@ export async function buildCoverZip(templateBuf: Buffer, projectId: number, labe
   }
   if (!handled) throw new Error('표지 템플릿에서 번호 매긴 목차 텍스트를 찾지 못했습니다')
 
-  return { zip, projectName: project.project_name }
+  return { zip, projectName }
 }
 
 app.post('/:projectId', async (c) => {

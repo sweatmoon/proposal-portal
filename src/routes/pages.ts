@@ -1853,40 +1853,122 @@ app.get('/upload', (c) => {
 // ── 첨부 및 서류 생성 페이지 ───────────────────────────────────────
 app.get('/ppt-generate', (c) => {
   const body = `
-  <div class="p-6 md:p-8 max-w-5xl" id="pptGenRoot">
-    <h1 class="text-2xl font-bold text-slate-800 flex items-center gap-2 mb-1">
-      <i class="fas fa-file-powerpoint text-indigo-500"></i> 첨부 및 서류 생성
-    </h1>
-    <p class="text-sm text-slate-500 mb-6">
-      DB에 적재된 사업 목록에서 사업을 선택해 첨부PPT를 생성합니다.
-      템플릿은 <a href="/ppt-templates" class="text-indigo-600 underline hover:text-indigo-800">PPT 템플릿 관리 → 첨부 탭</a>에서 미리 등록해주세요.
-    </p>
+  <div class="p-6 md:p-8 max-w-6xl space-y-8" id="pptGenRoot">
 
-    <!-- 검색 -->
-    <div class="mb-3">
-      <input id="searchInput" type="text" placeholder="사업명 / 발주처 검색"
-             class="w-full md:w-80 px-3 py-2 border border-slate-200 rounded-lg text-sm
-                    focus:outline-none focus:ring-2 focus:ring-indigo-300" />
+    <div>
+      <h1 class="text-2xl font-bold text-slate-800 flex items-center gap-2 mb-1">
+        <i class="fas fa-file-powerpoint text-indigo-500"></i> 첨부 및 서류 생성
+      </h1>
     </div>
 
-    <!-- 사업 목록 -->
-    <div class="bg-white rounded-xl border border-slate-200 overflow-hidden">
-      <table class="w-full text-sm">
-        <thead class="bg-slate-50 border-b border-slate-200">
-          <tr>
-            <th class="px-4 py-3 text-left font-semibold text-slate-500">사업명</th>
-            <th class="px-4 py-3 text-left font-semibold text-slate-500">발주처</th>
-            <th class="px-4 py-3 text-center font-semibold text-slate-500">등록연월</th>
-            <th class="px-4 py-3 text-center font-semibold text-slate-500">마감일</th>
-            <th class="px-4 py-3 text-center font-semibold text-slate-500">상태</th>
-            <th class="px-4 py-3 text-center font-semibold text-slate-500">첨부PPT 생성</th>
-          </tr>
-        </thead>
-        <tbody id="projectListBody">
-          <tr><td colspan="6" class="px-4 py-10 text-center text-slate-400">불러오는 중...</td></tr>
-        </tbody>
-      </table>
-    </div>
+    <!-- ══════════════════════════════════════════════════
+         위 섹션 — 사업 기반 첨부 생성 (제안작업표)
+    ══════════════════════════════════════════════════ -->
+    <section class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+      <div class="px-6 py-4 bg-slate-50 border-b border-slate-200 flex items-center gap-3">
+        <div class="w-7 h-7 rounded-lg bg-indigo-500 flex items-center justify-center flex-shrink-0">
+          <i class="fas fa-briefcase text-white text-xs"></i>
+        </div>
+        <div>
+          <div class="font-bold text-slate-800 text-sm">사업 기반 첨부 생성</div>
+          <div class="text-xs text-slate-400">제안작업표(사업)를 선택해 등록된 인력·키워드로 첨부PPT를 생성합니다</div>
+        </div>
+        <div class="ml-auto">
+          <input id="searchInput" type="text" placeholder="사업명 / 발주처 검색"
+                 class="w-56 px-3 py-1.5 border border-slate-200 rounded-lg text-sm
+                        focus:outline-none focus:ring-2 focus:ring-indigo-300" />
+        </div>
+      </div>
+      <div class="overflow-x-auto">
+        <table class="w-full text-sm">
+          <thead class="bg-slate-50 border-b border-slate-200">
+            <tr>
+              <th class="px-4 py-3 text-left font-semibold text-slate-500">사업명</th>
+              <th class="px-4 py-3 text-left font-semibold text-slate-500">발주처</th>
+              <th class="px-4 py-3 text-center font-semibold text-slate-500">등록연월</th>
+              <th class="px-4 py-3 text-center font-semibold text-slate-500">마감일</th>
+              <th class="px-4 py-3 text-center font-semibold text-slate-500">상태</th>
+              <th class="px-4 py-3 text-center font-semibold text-slate-500">첨부PPT 생성</th>
+            </tr>
+          </thead>
+          <tbody id="projectListBody">
+            <tr><td colspan="6" class="px-4 py-10 text-center text-slate-400">불러오는 중...</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- ══════════════════════════════════════════════════
+         아래 섹션 — 자유 첨부 생성 (사업 무관)
+    ══════════════════════════════════════════════════ -->
+    <section class="bg-white rounded-2xl border border-violet-200 shadow-sm overflow-hidden">
+      <div class="px-6 py-4 bg-violet-50 border-b border-violet-100 flex items-center gap-3">
+        <div class="w-7 h-7 rounded-lg bg-violet-600 flex items-center justify-center flex-shrink-0">
+          <i class="fas fa-magic text-white text-xs"></i>
+        </div>
+        <div>
+          <div class="font-bold text-slate-800 text-sm">자유 첨부 생성</div>
+          <div class="text-xs text-slate-400">사업과 무관하게 — 원하는 인력을 선택하고 키워드를 직접 입력해 첨부PPT를 생성합니다</div>
+        </div>
+      </div>
+
+      <div class="p-6">
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+
+          <!-- 열1: 첨부 항목 선택 -->
+          <div>
+            <div class="text-xs font-bold text-slate-500 uppercase tracking-wide mb-3">
+              <i class="fas fa-list-check mr-1 text-indigo-400"></i>① 첨부 항목 선택
+            </div>
+            <div id="freeItemList" class="space-y-1.5 min-h-16">
+              <div class="text-slate-400 text-xs text-center py-4"><i class="fas fa-spinner fa-spin mr-1"></i>불러오는 중...</div>
+            </div>
+          </div>
+
+          <!-- 열2: 인력 선택 -->
+          <div>
+            <div class="text-xs font-bold text-slate-500 uppercase tracking-wide mb-3">
+              <i class="fas fa-users mr-1 text-violet-500"></i>② 인력 선택
+            </div>
+            <input id="freePersonnelSearch" type="text" placeholder="이름 검색..."
+              class="w-full mb-2 text-xs px-3 py-1.5 border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-violet-300" />
+            <div id="freePersonnelList" class="space-y-1 max-h-64 overflow-y-auto border border-slate-100 rounded-lg p-2 bg-slate-50">
+              <div class="text-slate-400 text-xs text-center py-4"><i class="fas fa-spinner fa-spin mr-1"></i>불러오는 중...</div>
+            </div>
+          </div>
+
+          <!-- 열3: 키워드→변환 입력 -->
+          <div class="flex flex-col">
+            <div class="text-xs font-bold text-slate-500 uppercase tracking-wide mb-3">
+              <i class="fas fa-exchange-alt mr-1 text-emerald-500"></i>③ 키워드 → 변환 텍스트
+            </div>
+
+            <!-- 선택된 인력별 키워드 -->
+            <div id="freePersonnelKwSection" class="space-y-3 mb-3"></div>
+
+            <!-- 공통 키워드 -->
+            <div class="bg-slate-50 rounded-lg p-3 flex-1">
+              <div class="text-xs font-semibold text-slate-500 mb-2">공통 키워드</div>
+              <div id="freeGlobalKwRows" class="space-y-1.5"></div>
+              <button type="button" onclick="addFreeGlobalKwRow()"
+                class="mt-2 text-xs text-indigo-500 hover:text-indigo-700 flex items-center gap-1 font-medium">
+                <i class="fas fa-plus-circle"></i> 키워드 추가
+              </button>
+            </div>
+          </div>
+
+        </div>
+
+        <!-- 생성 버튼 -->
+        <div class="mt-6 flex justify-end">
+          <button onclick="confirmFreeBundle()" id="freeBundleBtn"
+            class="px-6 py-2.5 rounded-xl bg-violet-600 hover:bg-violet-700 text-white text-sm font-bold shadow transition">
+            <i class="fas fa-magic mr-2"></i>첨부PPT 생성
+          </button>
+        </div>
+      </div>
+    </section>
+
   </div>
 
   <!-- ── 첨부PPT 생성 모달 ── -->
@@ -2373,6 +2455,274 @@ app.get('/ppt-generate', (c) => {
       btn.innerHTML = '<i class="fas fa-magic mr-1"></i>생성'
     }
   }
+
+  // ══════════════════════════════════════════════════════════════
+  //  아래 섹션 — 자유 첨부 생성 로직
+  // ══════════════════════════════════════════════════════════════
+
+  var freeAllMenus      = []    // 전체 attachment 메뉴
+  var freeItemChecked   = {}    // { menuId: true/false }
+  var freeAllPersonnel  = []    // 전체 인력 캐시
+  var freePersonnelChecked = {} // { personnelId: true/false }
+  var freePersonnelKwMap   = {} // { personnelId: [{key,val},...] }
+
+  // ── 자유생성: 첨부 항목 로드 ──────────────────────────────────
+  async function loadFreeItems() {
+    var el = document.getElementById('freeItemList')
+    try {
+      var r = await fetch('/api/ppt-menus?category=attachment')
+      var j = await r.json()
+      if (!j.ok) throw new Error(j.error || '항목 조회 실패')
+      var raw = j.data || []
+      freeAllMenus = []
+      raw.forEach(function(m) {
+        if (m.children && m.children.length) { m.children.forEach(function(c) { freeAllMenus.push(c) }) }
+        else { freeAllMenus.push(m) }
+      })
+      renderFreeItemList()
+    } catch(e) {
+      el.innerHTML = '<div class="text-red-500 text-xs py-2">' + escapeHtml(e.message) + '</div>'
+    }
+  }
+
+  function renderFreeItemList() {
+    var el = document.getElementById('freeItemList')
+    var GRADE_BG = { cover:'bg-slate-400', schedule:'bg-blue-500', career:'bg-blue-600', consent:'bg-amber-500',
+      financial:'bg-green-600', bizreg:'bg-orange-500', taxcert:'bg-orange-600', localtaxcert:'bg-orange-700',
+      corpregistry:'bg-red-600', insurance:'bg-teal-600', employmentCert:'bg-cyan-600', careerCert:'bg-indigo-500', staffingStatus:'bg-violet-600' }
+    el.innerHTML = freeAllMenus.map(function(m) {
+      var checked = !!freeItemChecked[m.id]
+      var hasT = m.templates && m.templates.length > 0 && !!m.templates[0].pptx_b64_key
+      return '<label class="flex items-center gap-2 px-3 py-2 rounded-lg border cursor-pointer transition text-xs select-none '
+        + (checked ? 'border-violet-300 bg-violet-50' : 'border-slate-200 hover:bg-slate-50') + '">'
+        + '<input type="checkbox" class="w-3.5 h-3.5 accent-violet-600 flex-shrink-0" '
+        + (checked ? 'checked' : '') + ' onchange="onFreeItemChange(' + m.id + ', this.checked)">'
+        + '<span class="flex-1 font-medium text-slate-700">' + escapeHtml(m.menu_name) + '</span>'
+        + (hasT ? '<i class="fas fa-check-circle text-emerald-500 text-[11px]"></i>'
+                : '<i class="fas fa-exclamation-circle text-amber-400 text-[11px]" title="템플릿 미등록"></i>')
+        + '</label>'
+    }).join('')
+  }
+
+  function onFreeItemChange(menuId, checked) {
+    freeItemChecked[menuId] = checked
+    renderFreeItemList()
+  }
+
+  // ── 자유생성: 인력 목록 로드 ──────────────────────────────────
+  async function loadFreePersonnel() {
+    var el = document.getElementById('freePersonnelList')
+    if (freeAllPersonnel.length) { renderFreePersonnelList(''); return }
+    try {
+      var r = await fetch('/api/personnel')
+      var j = await r.json()
+      if (!j.ok) throw new Error(j.error || '인력 조회 실패')
+      freeAllPersonnel = j.data || []
+      renderFreePersonnelList('')
+    } catch(e) {
+      el.innerHTML = '<div class="text-red-500 text-xs py-2">' + escapeHtml(e.message) + '</div>'
+    }
+  }
+
+  function renderFreePersonnelList(search) {
+    var el = document.getElementById('freePersonnelList')
+    var filtered = freeAllPersonnel.filter(function(p) {
+      return !search || (p.name||'').toLowerCase().includes(search.toLowerCase())
+    })
+    if (!filtered.length) { el.innerHTML = '<div class="text-slate-400 text-xs text-center py-3">검색 결과 없음</div>'; return }
+    var GC = { '수석감리원':'bg-blue-900 text-white','감리원':'bg-blue-500 text-white','전문가':'bg-purple-600 text-white','테스터':'bg-purple-900 text-white' }
+    el.innerHTML = filtered.map(function(p) {
+      var checked = !!freePersonnelChecked[p.id]
+      var gc = GC[p.auditor_grade||''] || 'bg-slate-400 text-white'
+      return '<label class="flex items-center gap-2 px-2 py-1.5 rounded-md cursor-pointer transition text-xs select-none '
+        + (checked ? 'bg-violet-100' : 'hover:bg-white') + '">'
+        + '<input type="checkbox" class="w-3.5 h-3.5 accent-violet-600 flex-shrink-0 free-per-cb" data-pid="' + p.id + '" '
+        + (checked ? 'checked' : '') + ' onchange="onFreePersonnelChange(' + p.id + ', this.checked)">'
+        + '<span class="font-semibold text-slate-800 flex-shrink-0">' + escapeHtml(p.name||'') + '</span>'
+        + (p.auditor_grade ? '<span class="px-1.5 py-0.5 rounded text-[10px] font-bold flex-shrink-0 ' + gc + '">' + escapeHtml(p.auditor_grade) + '</span>' : '')
+        + (p.position ? '<span class="text-slate-400 truncate text-[10px]">' + escapeHtml(p.position) + '</span>' : '')
+        + '</label>'
+    }).join('')
+  }
+
+  function onFreePersonnelChange(pid, checked) {
+    freePersonnelChecked[pid] = checked
+    if (!checked) delete freePersonnelKwMap[pid]
+    else if (!freePersonnelKwMap[pid]) freePersonnelKwMap[pid] = []
+    renderFreePersonnelList(document.getElementById('freePersonnelSearch').value)
+    renderFreePersonnelKwRows()
+  }
+
+  function renderFreePersonnelKwRows() {
+    var section = document.getElementById('freePersonnelKwSection')
+    // 현재 DOM 값 저장
+    section.querySelectorAll('.free-per-block').forEach(function(block) {
+      var pid = Number(block.dataset.pid)
+      var rows = []
+      block.querySelectorAll('.free-per-row').forEach(function(row) {
+        rows.push({ key: row.querySelector('.free-kw-key').value, val: row.querySelector('.free-kw-val').value })
+      })
+      freePersonnelKwMap[pid] = rows
+    })
+
+    var selected = freeAllPersonnel.filter(function(p) { return freePersonnelChecked[p.id] })
+    if (!selected.length) { section.innerHTML = ''; return }
+    section.innerHTML = selected.map(function(p) {
+      var rows = freePersonnelKwMap[p.id] || []
+      var rowsHtml = rows.map(function(r) {
+        return '<div class="free-per-row flex gap-1 items-center">'
+          + '<input type="text" class="free-kw-key w-36 text-[11px] px-2 py-1 border border-slate-200 rounded focus:outline-none focus:ring-1 focus:ring-violet-300" placeholder="{{키워드}}" value="' + escapeHtml(r.key) + '">'
+          + '<span class="text-slate-300 text-xs flex-shrink-0">→</span>'
+          + '<input type="text" class="free-kw-val flex-1 text-[11px] px-2 py-1 border border-slate-200 rounded focus:outline-none focus:ring-1 focus:ring-violet-300" placeholder="변환 텍스트" value="' + escapeHtml(r.val) + '">'
+          + '<button type="button" class="text-slate-300 hover:text-red-400 px-0.5 text-xs flex-shrink-0" onclick="this.closest(\'.free-per-row\').remove()"><i class="fas fa-times"></i></button>'
+          + '</div>'
+      }).join('')
+      return '<div class="free-per-block bg-violet-50 border border-violet-100 rounded-lg p-3" data-pid="' + p.id + '">'
+        + '<div class="flex items-center justify-between mb-2">'
+        + '<span class="text-xs font-bold text-violet-700">' + escapeHtml(p.name||'') + '</span>'
+        + '<button type="button" class="text-[11px] text-indigo-500 hover:text-indigo-700 flex items-center gap-1" onclick="addFreePerKwRow(this.closest(\'.free-per-block\'))">'
+        + '<i class="fas fa-plus-circle text-[10px]"></i> 키워드 추가</button>'
+        + '</div>'
+        + '<div class="free-per-rows space-y-1">' + rowsHtml + '</div>'
+        + '</div>'
+    }).join('')
+  }
+
+  function addFreePerKwRow(block) {
+    var rowsEl = block.querySelector('.free-per-rows')
+    var div = document.createElement('div')
+    div.className = 'free-per-row flex gap-1 items-center'
+    div.innerHTML = '<input type="text" class="free-kw-key w-36 text-[11px] px-2 py-1 border border-slate-200 rounded focus:outline-none focus:ring-1 focus:ring-violet-300" placeholder="{{키워드}}">'
+      + '<span class="text-slate-300 text-xs flex-shrink-0">→</span>'
+      + '<input type="text" class="free-kw-val flex-1 text-[11px] px-2 py-1 border border-slate-200 rounded focus:outline-none focus:ring-1 focus:ring-violet-300" placeholder="변환 텍스트">'
+      + '<button type="button" class="text-slate-300 hover:text-red-400 px-0.5 text-xs flex-shrink-0" onclick="this.closest(\'.free-per-row\').remove()"><i class="fas fa-times"></i></button>'
+    rowsEl.appendChild(div)
+    div.querySelector('.free-kw-key').focus()
+  }
+
+  // ── 자유생성: 공통 키워드 행 ──────────────────────────────────
+  function addFreeGlobalKwRow() {
+    var container = document.getElementById('freeGlobalKwRows')
+    var div = document.createElement('div')
+    div.className = 'free-gkw-row flex gap-1.5 items-center'
+    div.innerHTML = '<input type="text" class="free-gkw-key w-36 text-xs px-2 py-1.5 border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-300" placeholder="{{키워드}}">'
+      + '<span class="text-slate-300 text-xs flex-shrink-0">→</span>'
+      + '<input type="text" class="free-gkw-val flex-1 text-xs px-2 py-1.5 border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-300" placeholder="변환 텍스트">'
+      + '<button type="button" class="text-slate-300 hover:text-red-400 text-sm px-0.5 flex-shrink-0" onclick="this.closest(\'.free-gkw-row\').remove()"><i class="fas fa-times"></i></button>'
+    container.appendChild(div)
+    div.querySelector('.free-gkw-key').focus()
+  }
+
+  function collectFreeGlobalKw() {
+    var result = {}
+    document.querySelectorAll('#freeGlobalKwRows .free-gkw-row').forEach(function(row) {
+      var k = row.querySelector('.free-gkw-key').value.trim()
+      var v = row.querySelector('.free-gkw-val').value.trim()
+      if (k) result[k] = v
+    })
+    return result
+  }
+
+  function collectFreePersonnelKw() {
+    // DOM 갱신
+    document.querySelectorAll('#freePersonnelKwSection .free-per-block').forEach(function(block) {
+      var pid = Number(block.dataset.pid)
+      var rows = []
+      block.querySelectorAll('.free-per-row').forEach(function(row) {
+        rows.push({ key: row.querySelector('.free-kw-key').value.trim(), val: row.querySelector('.free-kw-val').value.trim() })
+      })
+      freePersonnelKwMap[pid] = rows
+    })
+    var result = {}
+    Object.keys(freePersonnelKwMap).forEach(function(pid) {
+      if (!freePersonnelChecked[pid]) return
+      var map = {}
+      ;(freePersonnelKwMap[pid]||[]).forEach(function(r) { if (r.key) map[r.key] = r.val })
+      if (Object.keys(map).length) result[pid] = map
+    })
+    return result
+  }
+
+  // ── 자유생성: 생성 실행 ───────────────────────────────────────
+  async function confirmFreeBundle() {
+    var selected = freeAllMenus.filter(function(m) { return freeItemChecked[m.id] })
+    if (!selected.length) { alert('생성할 항목을 하나 이상 선택해주세요.'); return }
+
+    var coverMenu = freeAllMenus.find(function(m) { return m.menu_code === 'ATT_COVER' })
+    if (!coverMenu || !coverMenu.templates || !coverMenu.templates[0] || !coverMenu.templates[0].pptx_b64_key) {
+      alert('표지(ATT_COVER) 템플릿이 등록되지 않았습니다.\nPPT 템플릿 관리 → 첨부 탭에서 먼저 등록해주세요.')
+      return
+    }
+
+    var MENU_TO_TYPE = {
+      'ATT_COVER':'cover','ATT_SCHEDULE':'schedule','ATT_CAREER':'career','ATT_CONSENT':'consent',
+      'ATT_EMPLOYMENT':'employmentCert','ATT_CAREER_CERT':'careerCert','ATT_STAFFING':'staffingStatus'
+    }
+    var order = [], missing = [], unsupported = []
+    selected.forEach(function(m) {
+      if (m.menu_code === 'ATT_COVER') return
+      var typeKey = MENU_TO_TYPE[m.menu_code]
+      if (!typeKey) { unsupported.push(m.menu_name); return }
+      if (!m.templates || !m.templates[0] || !m.templates[0].pptx_b64_key) { missing.push(m.menu_name); return }
+      order.push({ key: typeKey, menu: m })
+    })
+    if (missing.length) { alert('템플릿 미등록:\n' + missing.join('\n') + '\n\nPPT 템플릿 관리 → 첨부 탭에서 등록해주세요.'); return }
+    if (!order.length) { alert('생성 가능한 항목이 없습니다.'); return }
+
+    var btn = document.getElementById('freeBundleBtn')
+    btn.disabled = true
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>생성 중...'
+
+    try {
+      var fd = new FormData()
+      fd.append('cover', b64ToFile(coverMenu.templates[0].pptx_b64_key, 'cover.pptx'))
+      fd.append('order', JSON.stringify(order.map(function(o) { return o.key })))
+
+      // 공통 키워드
+      var gwMap = collectFreeGlobalKw()
+      if (Object.keys(gwMap).length) fd.append('keywords', JSON.stringify(gwMap))
+
+      // 인력별 키워드
+      var perKw = collectFreePersonnelKw()
+      if (Object.keys(perKw).length) fd.append('personnelKeywords', JSON.stringify(perKw))
+
+      // 선택 인력 ID
+      var pids = Object.keys(freePersonnelChecked).filter(function(id) { return freePersonnelChecked[id] })
+      if (pids.length) fd.append('personnelIds', JSON.stringify(pids.map(Number)))
+
+      order.forEach(function(o) {
+        fd.append(o.key, b64ToFile(o.menu.templates[0].pptx_b64_key, o.key + '.pptx'))
+      })
+
+      // 자유생성은 projectId=0 (서버에서 별도 처리 또는 무시)
+      var r = await fetch('/api/ppt-attachment-bundle/0', { method: 'POST', body: fd })
+      if (!r.ok) {
+        var ej = await r.json().catch(function(){return{}})
+        throw new Error(ej.error || ('생성 실패 (' + r.status + ')'))
+      }
+      var blob = await r.blob()
+      var cd = r.headers.get('Content-Disposition') || ''
+      var m2 = cd.match(/filename\*?=["']?(?:UTF-8'')?([^"';]+)/i)
+      var filename = m2 ? decodeURIComponent(m2[1]) : '자유첨부PPT.pptx'
+      var url = URL.createObjectURL(blob)
+      var a = document.createElement('a'); a.href = url; a.download = filename
+      document.body.appendChild(a); a.click(); a.remove()
+      URL.revokeObjectURL(url)
+    } catch(e) {
+      alert('첨부PPT 생성 실패: ' + e.message)
+    } finally {
+      btn.disabled = false
+      btn.innerHTML = '<i class="fas fa-magic mr-2"></i>첨부PPT 생성'
+    }
+  }
+
+  // ── 자유생성 초기 로드 ────────────────────────────────────────
+  loadFreeItems()
+  loadFreePersonnel()
+
+  document.getElementById('freePersonnelSearch').addEventListener('input', function(e) {
+    renderFreePersonnelList(e.target.value)
+  })
   </script>
   `
   return c.html(layout('첨부 및 서류 생성', body, 'ppt-generate'))
