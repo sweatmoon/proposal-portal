@@ -89,6 +89,7 @@ interface HistoryRow {
   sector: string | null
   domain: string | null
   role: string | null
+  phase: string | null
   participation_rate: string | null
 }
 interface ItCareerRow {
@@ -332,7 +333,7 @@ export async function buildCareerZip(
     const [allHistory, allItCareer, allProjectCareer, allCerts] = foundIds.length
       ? await Promise.all([
           query<HistoryRow & { personnel_id: number }>(
-            `SELECT personnel_id, audit_yearmonth, project_name, client_org, sector, domain, role, participation_rate
+            `SELECT personnel_id, audit_yearmonth, project_name, client_org, sector, domain, role, phase, participation_rate
              FROM personnel_audit_history WHERE personnel_id = ANY($1)`,
             [foundIds]
           ),
@@ -409,7 +410,7 @@ export async function buildCareerZip(
         sector: entry.h.sector ?? '',
         domain: entry.h.domain ?? '',
         role: entry.h.role ?? '',
-        participation: fmtParticipation(entry.h.participation_rate),
+        participation: entry.h.phase ?? '',
       })
 
       // 실제 건수가 cap을 넘을 때만 "총 건수" 요약 행(가장 오래된 이력, 번호=전체 건수)을
