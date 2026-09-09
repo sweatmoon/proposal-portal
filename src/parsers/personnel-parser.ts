@@ -313,7 +313,8 @@ export function parsePersonnelHtml(html: string): ParsedPersonnel {
     personnel.education_org   = dr[2] ?? ''
   }
 
-  // ── 3. 감리실적 (헤더: 연월|사업명|주관기관|공공/민간|담당분야|역할|참여단계|참여율) ──
+  // ── 3. 감리실적 (헤더: 연월|사업명|주관기관|공공/민간|담당분야|역할|참여율) ──
+  // ※ 참여율은 7번째 열(index 6). 비어있으면 null 유지(기본값 100 채우지 않음).
   const auditTable =
     findTableByHeaders(tables, ['사업명', '참여율']) ??
     findTableByHeaders(tables, ['사업명', '참여 단계']) ??
@@ -331,8 +332,8 @@ export function parsePersonnelHtml(html: string): ParsedPersonnel {
       sector:             r[3] ?? '',
       domain:             r[4] ?? '',
       role:               r[5] ?? '',
-      phase:              r[6] ?? '',
-      participation_rate: extractNumber(r[7] ?? '') ?? 100,
+      phase:              '',
+      participation_rate: extractNumber(r[6] ?? '') ?? null,
     })
   }
 
