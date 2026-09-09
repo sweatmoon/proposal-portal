@@ -2217,11 +2217,6 @@ app.get('/ppt-generate', (c) => {
     personnelKwMap = {}
     document.getElementById('bundleModalProjectName').textContent = projectName
     document.getElementById('bundleModal').classList.remove('hidden')
-    // 키워드 행 초기화
-    document.getElementById('kwGlobalRows').innerHTML = ''
-    document.getElementById('personnelKwSection').classList.add('hidden')
-    document.getElementById('personnelKwRows').innerHTML = ''
-
     var listEl = document.getElementById('bundleItemList')
     listEl.innerHTML = '<div class="text-slate-400 text-xs text-center py-4"><i class="fas fa-spinner fa-spin mr-1"></i>항목 불러오는 중...</div>'
     try {
