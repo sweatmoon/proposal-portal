@@ -19,6 +19,11 @@ const NAS_BASE_URL = process.env.NAS_BASE_URL
 const NAS_USERNAME = process.env.NAS_USERNAME
 const NAS_PASSWORD = process.env.NAS_PASSWORD
 
+// Synology 자체 서명 인증서 대응 — Railway 등 외부 서버에서 호출 시 필요
+if (process.env.NODE_ENV !== 'production' || NAS_BASE_URL?.includes('synology.me')) {
+  process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0'
+}
+
 // 인력별 개인도장 이미지가 있는 폴더. 사람은 "상근"(회사 소속 정규 인력)과 "비상근"(외부
 // 인력)으로 나뉘어 각각 다른 하위 폴더에 저장되어 있고, 이 사업에서의 참여 형태(상근/비상근)와
 // 무관하게 그 "사람"이 어느 쪽으로 분류돼 있는지에 따라 파일이 있는 폴더가 정해집니다.
