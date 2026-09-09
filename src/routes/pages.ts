@@ -1976,8 +1976,14 @@ app.get('/ppt-generate', (c) => {
         + '<td class="px-4 py-3 text-center text-slate-600">' + escapeHtml(p.registered_yearmonth || '-') + '</td>'
         + '<td class="px-4 py-3 text-center text-slate-600">' + escapeHtml(p.bid_deadline || '-') + '</td>'
         + '<td class="px-4 py-3 text-center"><span class="inline-block px-2 py-0.5 rounded-full text-xs font-medium bg-slate-100 text-slate-600">' + escapeHtml(p.proposal_status || '-') + '</span></td>'
-        + '<td class="px-4 py-3 text-center"><button onclick="openBundleModal(' + p.id + ', \'' + escapeHtml(p.project_name || '') + '\', this)" class="bg-violet-600 hover:bg-violet-700 text-white text-xs font-semibold px-3 py-1.5 rounded-lg transition"><i class="fas fa-paperclip"></i> 첨부PPT 생성</button></td>'
+        + '<td class="px-4 py-3 text-center"><button class="bundle-open-btn bg-violet-600 hover:bg-violet-700 text-white text-xs font-semibold px-3 py-1.5 rounded-lg transition" data-pid="' + p.id + '" data-pname="' + escapeHtml(p.project_name || '') + '"><i class="fas fa-paperclip"></i> 첨부PPT 생성</button></td>'
         + '</tr>').join('')
+      // data-* 속성으로 이벤트 위임 (onclick 속성 내 따옴표 충돌 방지)
+      document.querySelectorAll('.bundle-open-btn').forEach(function(btn) {
+        btn.addEventListener('click', function() {
+          openBundleModal(Number(btn.dataset.pid), btn.dataset.pname, btn)
+        })
+      })
     } catch (e) {
       tbody.innerHTML = '<tr><td colspan="6" class="px-4 py-10 text-center text-red-500">' + escapeHtml(e.message) + '</td></tr>'
     }
@@ -2023,12 +2029,13 @@ app.get('/ppt-generate', (c) => {
       if (!j.ok) throw new Error(j.error || '항목 조회 실패')
       var allMenus = j.data || []
       // 최상위 섹션 제외, 실제 항목(child)만 추출
+      // attachment 항목은 parent_id 없이 최상위로 등록됨 — 모두 직접 포함
       bundleMenus = []
       allMenus.forEach(function(m) {
         if (m.children && m.children.length) {
           m.children.forEach(function(c) { bundleMenus.push(c) })
-        } else if (m.parent_id) {
-          bundleMenus.push(m)
+        } else {
+          bundleMenus.push(m)  // parent_id 유무 관계없이 포함
         }
       })
       if (!bundleMenus.length) {
@@ -2409,17 +2416,30 @@ app.get('/ppt-templates', async (c) => {
     if (depth === 0) document.getElementById('menuTree').innerHTML = ''
     const container = depth === 0 ? document.getElementById('menuTree') : null
     let html = ''
+    const isAttachmentTab = (_activeTab === 'attachment')
     nodes.forEach(n => {
-      const isSection = !n.parent_id
+      // attachment 탭은 parent_id 관계없이 모두 직접 클릭 가능한 항목으로 취급
+      const isSection = isAttachmentTab ? false : !n.parent_id
+      const hasTemplate = isAttachmentTab && n.templates && n.templates[0] && !!n.templates[0].pptx_b64_key
       const hasRule = !!n.rule
-      const badgeColor = n.is_enabled ? (hasRule ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-600') : 'bg-slate-100 text-slate-400'
-      const badge = hasRule ? '규칙' : (isSection ? '섹션' : '미설정')
+      const badgeColor = isAttachmentTab
+        ? (hasTemplate ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-400')
+        : (n.is_enabled ? (hasRule ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-600') : 'bg-slate-100 text-slate-400')
+      const badge = isAttachmentTab
+        ? (hasTemplate ? '등록' : '미등록')
+        : (hasRule ? '규칙' : (isSection ? '섹션' : '미설정'))
+      const iconCls = isAttachmentTab
+        ? (hasTemplate ? 'fa-file-powerpoint text-teal-400' : 'fa-file text-slate-300')
+        : (isSection ? 'fa-folder text-amber-400' : (hasRule ? 'fa-file-powerpoint text-indigo-400' : 'fa-file text-slate-300'))
+      const selectedCls = _selectedMenuId === n.id
+        ? (isAttachmentTab ? 'bg-teal-50 border border-teal-200' : 'bg-indigo-50 border border-indigo-200')
+        : 'hover:bg-slate-50 border border-transparent'
       html += \`
-        <div class="menu-item rounded-lg mb-0.5 \${_selectedMenuId === n.id ? 'bg-indigo-50 border border-indigo-200' : 'hover:bg-slate-50 border border-transparent'} cursor-pointer transition-all"
+        <div class="menu-item rounded-lg mb-0.5 \${selectedCls} cursor-pointer transition-all"
              style="padding-left:\${depth * 14 + 8}px"
              onclick="selectMenu(\${n.id})">
           <div class="flex items-center gap-1.5 py-1.5 pr-2">
-            <i class="fas \${isSection ? 'fa-folder text-amber-400' : (hasRule ? 'fa-file-powerpoint text-indigo-400' : 'fa-file text-slate-300')} text-xs flex-shrink-0"></i>
+            <i class="fas \${iconCls} text-xs flex-shrink-0"></i>
             <span class="text-xs \${n.is_enabled ? 'text-slate-700' : 'text-slate-400 line-through'} flex-1 min-w-0 truncate" title="\${n.menu_name}">
               \${n.menu_number ? '<span class=\\"text-slate-400\\">' + n.menu_number + '</span> ' : ''}\${n.menu_name}
             </span>
@@ -2480,6 +2500,10 @@ app.get('/ppt-templates', async (c) => {
       if (j.ok) templates = j.data
     } catch (_) {}
 
+    if (_activeTab === 'attachment') {
+      renderAttachmentDetail(menu, templates)
+      return
+    }
     renderDetail(menu, templates)
   }
 
