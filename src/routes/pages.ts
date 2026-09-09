@@ -2493,7 +2493,7 @@ app.get('/ppt-templates', async (c) => {
         <div class="p-6 h-full flex items-center justify-center text-slate-400">
           <div class="text-center">
             <i class="fas fa-folder-open text-4xl mb-3 text-amber-300"></i>
-            <p class="text-sm font-medium text-slate-600">\${menu.menu_number} \${menu.menu_name}</p>
+            <p class="text-sm font-medium text-slate-600">\${menu.menu_number || ''} \${menu.menu_name}</p>
             <p class="text-xs mt-1">하위 메뉴를 선택하세요</p>
           </div>
         </div>
@@ -2501,6 +2501,13 @@ app.get('/ppt-templates', async (c) => {
       return
     }
 
+    // ── 첨부 탭: 템플릿 업로드/관리만 간소하게 표시 ─────────────
+    if (_activeTab === 'attachment') {
+      renderAttachmentDetail(menu, templates)
+      return
+    }
+
+    // ── 제안서 탭: 기존 규칙 + 템플릿 상세 패널 ─────────────────
     // variant별로 슬롯 고정 여부 판단 (PERSON_N 패턴이 있으면 슬롯별 개별 업로드)
     const PERSON_SLOT_RE = new RegExp('^PERSON_[0-9]+$', 'i')
     const hasVariantSlots = templates.some(t => PERSON_SLOT_RE.test(t.variant_code))
@@ -2622,6 +2629,147 @@ app.get('/ppt-templates', async (c) => {
 
       </div>
     \`
+  }
+
+  // ── 첨부 탭 전용 상세 패널: 템플릿 파일 업로드/관리만 ──────────
+  function renderAttachmentDetail(menu, templates) {
+    const hasFile = templates.length > 0 && !!templates[0].pptx_b64_key
+    const tpl     = templates[0] || null
+    const fileName = tpl ? (tpl.pptx_file_path || (tpl.pptx_b64_key ? '업로드됨' : null)) : null
+
+    document.getElementById('detailPanel').innerHTML = \`
+      <div class="p-6 h-full overflow-y-auto">
+
+        <!-- 항목 이름 -->
+        <div class="flex items-center gap-2 mb-5">
+          <i class="fas fa-paperclip text-teal-400 text-lg"></i>
+          <h2 class="text-base font-bold text-slate-800">\${menu.menu_name}</h2>
+          <code class="text-xs bg-teal-50 text-teal-500 px-2 py-0.5 rounded ml-auto">\${menu.menu_code}</code>
+        </div>
+
+        <!-- 현재 템플릿 상태 -->
+        <div class="mb-5 p-4 rounded-xl border \${hasFile ? 'bg-emerald-50 border-emerald-200' : 'bg-slate-50 border-slate-200'}">
+          <div class="flex items-center gap-2">
+            <i class="fas \${hasFile ? 'fa-check-circle text-emerald-500' : 'fa-exclamation-circle text-slate-400'} text-lg"></i>
+            <div class="flex-1">
+              <div class="text-sm font-semibold \${hasFile ? 'text-emerald-700' : 'text-slate-500'}">
+                \${hasFile ? '템플릿 등록됨' : '템플릿 없음'}
+              </div>
+              <div class="text-xs \${hasFile ? 'text-emerald-600' : 'text-slate-400'} mt-0.5 truncate">
+                \${hasFile ? (fileName || '파일 업로드됨') : '아래에서 .pptx 파일을 업로드하세요'}
+              </div>
+            </div>
+            \${hasFile && tpl ? \`
+            <button onclick="deleteAttachmentTemplate(\${tpl.id}, \${menu.id})"
+              class="text-xs px-2.5 py-1.5 rounded-lg bg-red-50 hover:bg-red-100 text-red-500 hover:text-red-700 border border-red-200 transition flex-shrink-0">
+              <i class="fas fa-trash mr-1"></i>삭제
+            </button>
+            \` : ''}
+          </div>
+        </div>
+
+        <!-- 업로드 폼 -->
+        <div class="bg-teal-50 rounded-xl p-4 border border-teal-200">
+          <div class="text-xs font-semibold text-teal-700 mb-2 flex items-center gap-1.5">
+            <i class="fas fa-upload"></i>
+            \${hasFile ? '템플릿 교체' : '템플릿 업로드'}
+          </div>
+          <div id="attTplDropZone"
+            class="flex items-center gap-3 border-2 border-dashed border-teal-300 rounded-lg px-4 py-4 cursor-pointer hover:border-teal-500 hover:bg-teal-100 transition mb-2"
+            onclick="document.getElementById('attNewTplFile').click()"
+            ondragover="attTplDzOver(event)" ondragleave="attTplDzLeave(event)" ondrop="attTplDzDrop(event, \${menu.id})">
+            <i class="fas fa-file-powerpoint text-teal-400 text-2xl flex-shrink-0"></i>
+            <div>
+              <span id="attTplFileLabel" class="text-sm text-slate-600 font-medium">
+                클릭하거나 파일을 여기에 끌어다 놓으세요
+              </span>
+              <div class="text-xs text-slate-400 mt-0.5">.pptx 파일</div>
+            </div>
+          </div>
+          <input id="attNewTplFile" type="file"
+            accept=".pptx,application/vnd.openxmlformats-officedocument.presentationml.presentation"
+            class="hidden" onchange="onAttTplFileChange(this, \${menu.id})">
+          <button id="attTplUploadBtn" onclick="uploadAttachmentTemplate(\${menu.id})"
+            class="w-full py-2 text-sm rounded-lg bg-teal-600 text-white hover:bg-teal-700 font-medium transition disabled:opacity-50"
+            disabled>
+            <i class="fas fa-cloud-upload-alt mr-1"></i>업로드 & 저장
+          </button>
+        </div>
+
+      </div>
+    \`
+  }
+
+  // ── 첨부 탭 템플릿 업로드 함수들 ────────────────────────────────
+  var _attTplFile = null
+
+  function onAttTplFileChange(input, menuId) {
+    _attTplFile = input.files && input.files[0] ? input.files[0] : null
+    const label = document.getElementById('attTplFileLabel')
+    const btn   = document.getElementById('attTplUploadBtn')
+    if (label) label.textContent = _attTplFile ? _attTplFile.name : '클릭하거나 파일을 여기에 끌어다 놓으세요'
+    if (btn)   btn.disabled = !_attTplFile
+  }
+
+  function attTplDzOver(ev) {
+    ev.preventDefault()
+    document.getElementById('attTplDropZone').classList.add('ring-2','ring-teal-400','bg-teal-100')
+  }
+  function attTplDzLeave(ev) {
+    document.getElementById('attTplDropZone').classList.remove('ring-2','ring-teal-400','bg-teal-100')
+  }
+  function attTplDzDrop(ev, menuId) {
+    ev.preventDefault()
+    document.getElementById('attTplDropZone').classList.remove('ring-2','ring-teal-400','bg-teal-100')
+    const f = ev.dataTransfer.files && ev.dataTransfer.files[0]
+    if (f) {
+      _attTplFile = f
+      const label = document.getElementById('attTplFileLabel')
+      const btn   = document.getElementById('attTplUploadBtn')
+      if (label) label.textContent = f.name
+      if (btn)   btn.disabled = false
+    }
+  }
+
+  async function uploadAttachmentTemplate(menuId) {
+    if (!_attTplFile) return
+    const btn = document.getElementById('attTplUploadBtn')
+    btn.disabled = true
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-1"></i>업로드 중...'
+    try {
+      const fd = new FormData()
+      fd.append('file', _attTplFile)
+      fd.append('template_name', _attTplFile.name.replace(/\\.pptx$/i,''))
+      fd.append('variant_code', 'DEFAULT')
+      const r = await fetch('/api/ppt-menus/' + menuId + '/templates', { method: 'POST', body: fd })
+      const j = await r.json()
+      if (!j.ok) throw new Error(j.error || '업로드 실패')
+      showAlert('✅ 템플릿 저장 완료', true)
+      _attTplFile = null
+      // 갱신
+      const tr = await fetch('/api/ppt-menus/' + menuId + '/templates')
+      const tj = await tr.json()
+      const menu = findMenuById(_treeData, menuId)
+      if (menu) renderAttachmentDetail(menu, tj.ok ? tj.data : [])
+      loadTree()
+    } catch(e) {
+      showAlert('❌ ' + e.message, false)
+      btn.disabled = false
+      btn.innerHTML = '<i class="fas fa-cloud-upload-alt mr-1"></i>업로드 & 저장'
+    }
+  }
+
+  async function deleteAttachmentTemplate(tplId, menuId) {
+    if (!confirm('이 템플릿 파일을 삭제할까요?')) return
+    const r = await fetch('/api/ppt-menus/templates/' + tplId, { method: 'DELETE' })
+    const j = await r.json()
+    if (!j.ok) { showAlert('❌ ' + j.error, false); return }
+    showAlert('✅ 삭제 완료', true)
+    const tr = await fetch('/api/ppt-menus/' + menuId + '/templates')
+    const tj = await tr.json()
+    const menu = findMenuById(_treeData, menuId)
+    if (menu) renderAttachmentDetail(menu, tj.ok ? tj.data : [])
+    loadTree()
   }
 
   // ── mode 변경 시 관련 필드 활성/비활성 처리 ───────────────────
