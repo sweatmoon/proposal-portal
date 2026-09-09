@@ -294,22 +294,65 @@ export interface CareerZipResult {
 /** 이 파일의 핵심 로직 — 단독 다운로드 라우트와 첨부 묶음 라우트 양쪽에서 호출한다.
  *  titlePrefix: 첨부PPT 묶음에서 이 항목이 몇 번째로 선택됐는지("2. " 등)를 제목 앞에 붙인다
  *  (단독 다운로드일 때는 생략되어 빈 문자열 — 기존과 동일하게 번호 없이 나온다). */
+/** 자유 생성용 키워드 옵션 타입 */
+export interface FreeCareerOptions {
+  /** 매칭 키워드 목록 (예: ['지방세', 'LLM']) */
+  keywords: string[]
+  /** 변환 규칙 (예: [{ keys: ['지방세', '국민비서'], value: '디지털서비스' }]) */
+  mappings: { keys: string[]; value: string }[]
+  /** 선택된 인력 ID 목록 */
+  personnelIds: number[]
+}
+
 export async function buildCareerZip(
   templateBuf: Buffer,
   projectId: number,
   titlePrefix = '',
-  onePage = false
+  onePage = false,
+  freeOpts?: FreeCareerOptions
 ): Promise<CareerZipResult> {
-    // project/members/keywords/mapping은 서로 의존하는 값이 없는 독립 조회인데도 순서대로
-    // await하면 원격 DB 환경에서는 라운드트립 지연이 그대로 4번 쌓인다(2026-09-02 실측: 이
-    // 서버 환경에서 단순 조회 1번도 지연이 커서, 쿼리를 줄이는 것 자체가 핵심). 서로 안
-    // 기다려도 되므로 한 번에 동시 요청한다.
-    const [project, members, keywords, mappingMap] = await Promise.all([
-      queryOne<{ project_name: string }>(`SELECT project_name FROM audit_projects WHERE id = $1`, [projectId]),
-      query<Member>(`SELECT person_name, domain FROM proposal_members WHERE project_id = $1 ORDER BY id ASC`, [projectId]),
-      loadKeywords(projectId),
-      loadKeywordMappingMap(projectId),
-    ])
+
+    // ── projectId=0: 자유 생성 모드 ──────────────────────────────
+    // DB에서 사업/인력/키워드를 가져오는 대신, 호출자가 넘긴 값을 사용한다.
+    let project: { project_name: string } | null = null
+    let members: Member[] = []
+    let keywords: KeywordRow[] = []
+    let mappingMap = new Map<string, string>()
+
+    if (projectId === 0 && freeOpts) {
+      project = { project_name: '자유생성' }
+      // 선택된 personnel_id 목록을 DB에서 name만 꺼내 members로 구성
+      if (freeOpts.personnelIds.length) {
+        const pRows = await query<{ name: string }>(
+          `SELECT name FROM personnel WHERE id = ANY($1) ORDER BY id ASC`,
+          [freeOpts.personnelIds]
+        )
+        members = pRows.map(p => ({ person_name: p.name, domain: '' }))
+      }
+      // 키워드: sort_order는 입력 순서
+      keywords = freeOpts.keywords.map((kw, i) => ({ keyword: kw, sort_order: i }))
+      // 변환 맵: 각 키 → value
+      for (const rule of freeOpts.mappings) {
+        for (const k of rule.keys) mappingMap.set(k, rule.value)
+      }
+    } else {
+      // ── 사업 기반: 기존 DB 조회 ───────────────────────────────
+      // project/members/keywords/mapping은 서로 의존하는 값이 없는 독립 조회인데도 순서대로
+      // await하면 원격 DB 환경에서는 라운드트립 지연이 그대로 4번 쌓인다(2026-09-02 실측: 이
+      // 서버 환경에서 단순 조회 1번도 지연이 커서, 쿼리를 줄이는 것 자체가 핵심). 서로 안
+      // 기다려도 되므로 한 번에 동시 요청한다.
+      const results = await Promise.all([
+        queryOne<{ project_name: string }>(`SELECT project_name FROM audit_projects WHERE id = $1`, [projectId]),
+        query<Member>(`SELECT person_name, domain FROM proposal_members WHERE project_id = $1 ORDER BY id ASC`, [projectId]),
+        loadKeywords(projectId),
+        loadKeywordMappingMap(projectId),
+      ])
+      project   = results[0]
+      members   = results[1]
+      keywords  = results[2]
+      mappingMap = results[3]
+    }
+
     if (!project) throw new Error('사업을 찾을 수 없습니다')
     if (!members.length) throw new Error('이 사업에 투입된 인력이 없습니다')
 

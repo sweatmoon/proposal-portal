@@ -74,7 +74,7 @@
 import { Hono } from 'hono'
 import type JSZip from 'jszip'
 import { buildScheduleZip } from './ppt-schedule.js'
-import { buildCareerZip } from './ppt-career.js'
+import { buildCareerZip, type FreeCareerOptions } from './ppt-career.js'
 import { buildConsentZip } from './ppt-consent.js'
 import { buildFinancialStatementZip } from './ppt-financial-statement.js'
 import { buildBusinessRegistrationZip } from './ppt-business-registration.js'
@@ -125,7 +125,18 @@ const ATTACHMENT_TYPES: Record<
     label: '투입 감리원별 실적 및 경력',
     build: async (buf, projectId, form, titlePrefix) => {
       const onePage = form.get('careerOnePage') === 'true'
-      return (await buildCareerZip(buf, projectId, titlePrefix, onePage)).zip
+      let freeOpts: FreeCareerOptions | undefined
+      if (projectId === 0) {
+        const kwRaw = form.get('freeKeywords')
+        const mapRaw = form.get('freeMappings')
+        const pidRaw = form.get('personnelIds')
+        freeOpts = {
+          keywords: kwRaw ? JSON.parse(kwRaw as string) : [],
+          mappings: mapRaw ? JSON.parse(mapRaw as string) : [],
+          personnelIds: pidRaw ? JSON.parse(pidRaw as string) : [],
+        }
+      }
+      return (await buildCareerZip(buf, projectId, titlePrefix, onePage, freeOpts)).zip
     },
   },
   consent: {

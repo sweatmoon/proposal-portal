@@ -1938,22 +1938,31 @@ app.get('/ppt-generate', (c) => {
           </div>
 
           <!-- 열3: 키워드→변환 입력 -->
-          <div class="flex flex-col">
-            <div class="text-xs font-bold text-slate-500 uppercase tracking-wide mb-3">
+          <div class="flex flex-col gap-3">
+            <div class="text-xs font-bold text-slate-500 uppercase tracking-wide">
               <i class="fas fa-exchange-alt mr-1 text-emerald-500"></i>③ 키워드 → 변환 텍스트
             </div>
 
-            <!-- 선택된 인력별 키워드 -->
-            <div id="freePersonnelKwSection" class="space-y-3 mb-3"></div>
+            <!-- 키워드 목록 -->
+            <div>
+              <div class="text-xs font-semibold text-slate-500 mb-1">
+                매칭 키워드
+                <span class="font-normal text-slate-400 ml-1">쉼표 또는 줄바꿈으로 구분</span>
+              </div>
+              <textarea id="freeKwInput" rows="4"
+                class="w-full text-xs px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-emerald-300 resize-none"
+                placeholder="지방세, 국민비서, 챗봇&#10;LLM, 생성형AI"></textarea>
+            </div>
 
-            <!-- 공통 키워드 -->
-            <div class="bg-slate-50 rounded-lg p-3 flex-1">
-              <div class="text-xs font-semibold text-slate-500 mb-2">공통 키워드</div>
-              <div id="freeGlobalKwRows" class="space-y-1.5"></div>
-              <button type="button" onclick="addFreeGlobalKwRow()"
-                class="mt-2 text-xs text-indigo-500 hover:text-indigo-700 flex items-center gap-1 font-medium">
-                <i class="fas fa-plus-circle"></i> 키워드 추가
-              </button>
+            <!-- 변환 규칙 -->
+            <div class="flex-1">
+              <div class="text-xs font-semibold text-slate-500 mb-1">
+                키워드 변환 규칙
+                <span class="font-normal text-slate-400 ml-1">키워드1, 키워드2 -&gt; 변환텍스트</span>
+              </div>
+              <textarea id="freeKwMappingInput" rows="6"
+                class="w-full h-40 text-xs px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-emerald-300 resize-none"
+                placeholder="공공데이터포털, 개방, 데이터바우처 -> 데이터개방&#10;건강정보, 의료데이터 -> 의료정보&#10;빅데이터 플랫폼 -> 데이터관리"></textarea>
             </div>
           </div>
 
@@ -2640,13 +2649,28 @@ app.get('/ppt-generate', (c) => {
       fd.append('cover', b64ToFile(coverMenu.templates[0].pptx_b64_key, 'cover.pptx'))
       fd.append('order', JSON.stringify(order.map(function(o) { return o.key })))
 
-      // 공통 키워드
-      var gwMap = collectFreeGlobalKw()
-      if (Object.keys(gwMap).length) fd.append('keywords', JSON.stringify(gwMap))
+      // ── 키워드 목록 파싱 (쉼표/줄바꿈 구분) ──────────────────
+      var kwRaw = (document.getElementById('freeKwInput').value || '').trim()
+      var kwList = kwRaw
+        ? kwRaw.split(/[\n,]/).map(function(s) { return s.trim() }).filter(Boolean)
+        : []
+      if (kwList.length) fd.append('freeKeywords', JSON.stringify(kwList))
 
-      // 인력별 키워드
-      var perKw = collectFreePersonnelKw()
-      if (Object.keys(perKw).length) fd.append('personnelKeywords', JSON.stringify(perKw))
+      // ── 변환 규칙 파싱 ("키워드1, 키워드2 -> 변환텍스트" 한 줄씩) ──
+      var mappingRaw = (document.getElementById('freeKwMappingInput').value || '').trim()
+      var mappingList = []
+      if (mappingRaw) {
+        mappingRaw.split('\n').forEach(function(line) {
+          line = line.trim()
+          if (!line) return
+          var parts = line.split(/->/)
+          if (parts.length < 2) return
+          var keys = parts[0].split(',').map(function(s) { return s.trim() }).filter(Boolean)
+          var val = parts.slice(1).join('->').trim()
+          if (keys.length && val) mappingList.push({ keys: keys, value: val })
+        })
+      }
+      if (mappingList.length) fd.append('freeMappings', JSON.stringify(mappingList))
 
       // 선택 인력 ID
       var pids = Object.keys(freePersonnelChecked).filter(function(id) { return freePersonnelChecked[id] })
