@@ -238,13 +238,16 @@ const ATTACHMENT_TYPES: Record<
     label: '경력증명서',
     isPersonBased: true,
     build: async (buf, projectId, form, titlePrefix) => {
-      // 도장 옵션: pages.ts 번들 모달에서 careerCertWithStamp / careerCertStampType 으로 전달
       const withStamp = form.get('careerCertWithStamp') === 'true'
       const rawStampType = form.get('careerCertStampType')
       const stampType: CompanyStampType =
         rawStampType === '사실과상위없음' ? '사실과상위없음' : '원본대조필'
+      // 자유 생성(projectId=0)일 때는 personnelNames 에서 이름 목록을 직접 읽는다
+      const freeNames: string[] = projectId === 0
+        ? (() => { try { return JSON.parse(form.get('personnelNames') as string || '[]') } catch { return [] } })()
+        : []
       const { zip, personCount, skipped } =
-        await buildCareerCertificateZip(buf, projectId, withStamp, stampType, titlePrefix)
+        await buildCareerCertificateZip(buf, projectId, withStamp, stampType, titlePrefix, freeNames)
       const stampLabel = withStamp ? ` · ${stampType}` : ''
       return {
         zip,

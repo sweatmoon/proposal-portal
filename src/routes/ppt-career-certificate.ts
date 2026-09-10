@@ -45,27 +45,39 @@ export interface CareerCertificateZipResult {
 /**
  * 이 파일의 핵심 로직 — 단독 다운로드 라우트와 첨부 묶음 라우트 양쪽에서 호출한다.
  *
- * @param templateBuf  범용 템플릿 pptx 바이트 (큰 이미지 자리 + 작은 이미지 자리 2개)
- * @param projectId    사업 ID
- * @param withStamp    도장 이미지를 작은 자리에 삽입할지 여부
- * @param stampType    withStamp=true 일 때 사용할 도장 종류
- * @param titlePrefix  첨부PPT 묶음에서 이 항목이 몇 번째인지 앞 번호 ("3. " 등), 단독이면 ""
+ * @param templateBuf        범용 템플릿 pptx 바이트 (큰 이미지 자리 + 작은 이미지 자리 2개)
+ * @param projectId          사업 ID (0이면 자유 생성 — freePersonnelNames 필수)
+ * @param withStamp          도장 이미지를 작은 자리에 삽입할지 여부
+ * @param stampType          withStamp=true 일 때 사용할 도장 종류
+ * @param titlePrefix        첨부PPT 묶음에서 이 항목이 몇 번째인지 앞 번호 ("3. " 등), 단독이면 ""
+ * @param freePersonnelNames projectId=0(자유 생성) 시 직접 전달하는 인력 이름 배열
  */
 export async function buildCareerCertificateZip(
   templateBuf: Buffer,
   projectId: number,
   withStamp = false,
   stampType: CompanyStampType = '원본대조필',
-  titlePrefix = ''
+  titlePrefix = '',
+  freePersonnelNames: string[] = []
 ): Promise<CareerCertificateZipResult> {
-  const [project, members] = await Promise.all([
-    queryOne<{ project_name: string }>(`SELECT project_name FROM audit_projects WHERE id = $1`, [projectId]),
-    query<{ person_name: string }>(`SELECT person_name FROM proposal_members WHERE project_id = $1 ORDER BY id ASC`, [projectId]),
-  ])
-  if (!project) throw new Error('사업을 찾을 수 없습니다')
-  if (!members.length) throw new Error('이 사업에 투입된 인력이 없습니다')
+  let names: string[]
+  let projectName: string
 
-  const names = members.map(m => m.person_name)
+  if (projectId === 0) {
+    // 자유 생성 — DB 조회 없이 전달받은 이름 목록 사용
+    if (!freePersonnelNames.length) throw new Error('자유 생성 시 인력 이름 목록(personnelNames)이 필요합니다')
+    names = freePersonnelNames
+    projectName = '자유생성'
+  } else {
+    const [project, members] = await Promise.all([
+      queryOne<{ project_name: string }>(`SELECT project_name FROM audit_projects WHERE id = $1`, [projectId]),
+      query<{ person_name: string }>(`SELECT person_name FROM proposal_members WHERE project_id = $1 ORDER BY id ASC`, [projectId]),
+    ])
+    if (!project) throw new Error('사업을 찾을 수 없습니다')
+    if (!members.length) throw new Error('이 사업에 투입된 인력이 없습니다')
+    names = members.map(m => m.person_name)
+    projectName = project.project_name
+  }
 
   // NAS에서 이름별 PDF + 도장 이미지 병렬 취득
   const [pdfMap, stampPng] = await Promise.all([
@@ -85,7 +97,7 @@ export async function buildCareerCertificateZip(
   // 공통 플레이스홀더 맵 (제목·사업명)
   const commonMap: Record<string, string> = {
     '[제목]': `${titlePrefix}${PAGE_TITLE}`,
-    '[감리사업명]': project.project_name,
+    '[감리사업명]': projectName,
   }
 
   // 인원별 PNG 배열 수집 (순서 유지)
@@ -109,7 +121,7 @@ export async function buildCareerCertificateZip(
     'careercert'
   )
 
-  return { zip, personCount, skipped, projectName: project.project_name }
+  return { zip, personCount, skipped, projectName }
 }
 
 app.post('/:projectId', async (c) => {
