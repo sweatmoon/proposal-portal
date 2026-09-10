@@ -415,7 +415,14 @@ export async function fetchCareerCertPdfs(personNames: string[]): Promise<Map<st
 
   try {
     // 폴더 목록은 1회만 조회 — 이름별로 재사용
-    const files = await listFolder(sid, CAREER_CERT_FOLDER).catch(() => [] as { name: string; isdir: boolean }[])
+    // .catch로 삼키지 않고 실패 시 warn 로그 후 빈 배열로 계속 진행
+    let files: { name: string; isdir: boolean }[] = []
+    try {
+      files = await listFolder(sid, CAREER_CERT_FOLDER)
+    } catch (e) {
+      console.warn('[nas-client] 경력증명서 폴더 목록 조회 실패:', (e as Error).message, '| 폴더:', CAREER_CERT_FOLDER)
+    }
+    console.log(`[nas-client] 경력증명서 폴더 파일 수: ${files.length}개, 검색 이름: ${personNames.join(', ')}`)
 
     await Promise.all(
       personNames.map(async name => {
