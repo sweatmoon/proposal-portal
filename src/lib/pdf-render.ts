@@ -8,6 +8,21 @@
  * @napi-rs/canvas(사전빌드된 canvas 구현체, DOMMatrix 등 pdfjs가 요구하는 브라우저 전역을
  * 대신 제공)만 쓴다.
  */
+
+// Promise.withResolvers 폴리필 — pdfjs-dist v6이 Node.js 22+에서 추가된 이 API를 내부적으로
+// 사용하므로, 구버전 Node.js(Railway 환경 등)에서도 동작하도록 import보다 먼저 주입한다.
+if (typeof (Promise as unknown as Record<string, unknown>).withResolvers === 'undefined') {
+  ;(Promise as unknown as Record<string, unknown>).withResolvers = function <T>() {
+    let resolve!: (value: T | PromiseLike<T>) => void
+    let reject!: (reason?: unknown) => void
+    const promise = new Promise<T>((res, rej) => {
+      resolve = res
+      reject = rej
+    })
+    return { promise, resolve, reject }
+  }
+}
+
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { DOMMatrix, ImageData, Path2D, createCanvas } from '@napi-rs/canvas'
