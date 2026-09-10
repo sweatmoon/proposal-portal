@@ -99,17 +99,18 @@ async function buildOneSlide(params: {
   const srcRelsPath = srcSlidePath.replace('ppt/slides/', 'ppt/slides/_rels/') + '.rels'
   const srcRelsXml  = (await srcZip.file(srcRelsPath)!.async('string'))
 
-  // ── 2. 소스 rels에서 이미지 rId → Target 맵 ──────────────────────────────
-  // 속성 순서가 파일마다 다를 수 있으므로 <Relationship> 요소 전체를 먼저 추출한 뒤
-  // 각 요소 내에서 Id / Type / Target 을 독립적으로 파싱
+  // ── 2. 소스 rels에서 미디어 rId → Target 맵 ─────────────────────────────
+  // Type 필터 대신 Target 기반 필터 사용:
+  //   Target이 '../media/' 로 시작하는 rel은 모두 수집
+  // 이유: 소스 pptx에 따라 Type이 표준 '/image'가 아닌 경우가 있고,
+  //       슬라이드 rels에서 미디어는 항상 '../media/' 상대경로를 사용함
   const srcRidToTarget = new Map<string, string>()
   for (const relM of srcRelsXml.matchAll(/<Relationship\s[^/]*/g)) {
     const attrs = relM[0]
-    const idM   = attrs.match(/Id="([^"]+)"/)
-    const typeM = attrs.match(/Type="([^"]+)"/)
-    const tgtM  = attrs.match(/Target="([^"]+)"/)
-    if (idM && typeM && tgtM && typeM[1].endsWith('/image')) {
-      srcRidToTarget.set(idM[1], tgtM[1]) // e.g. rId2 → ../media/image1.png
+    const idM  = attrs.match(/Id="([^"]+)"/)
+    const tgtM = attrs.match(/Target="([^"]+)"/)
+    if (idM && tgtM && tgtM[1].startsWith('../media/')) {
+      srcRidToTarget.set(idM[1], tgtM[1]) // e.g. rId3 → ../media/merged_1.png
     }
   }
 
