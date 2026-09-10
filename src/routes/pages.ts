@@ -1996,6 +1996,27 @@ app.get('/ppt-generate', (c) => {
 
         </div>
 
+        <!-- 경력증명서 도장 옵션 패널 (자유 생성 전용) -->
+        <div id="freeCareerCertStampPanel" class="hidden mt-4 px-5 py-3 rounded-xl border border-indigo-200 bg-indigo-50">
+          <div class="flex items-center gap-4 flex-wrap">
+            <span class="text-xs font-semibold text-indigo-700 flex items-center gap-1.5">
+              <i class="fas fa-stamp"></i>경력증명서 도장
+            </span>
+            <label class="flex items-center gap-1.5 text-xs text-slate-600 cursor-pointer">
+              <input type="radio" name="freeCareerCertStampOpt" value="none" checked>
+              도장 없음
+            </label>
+            <label class="flex items-center gap-1.5 text-xs text-slate-600 cursor-pointer">
+              <input type="radio" name="freeCareerCertStampOpt" value="원본대조필">
+              원본대조필
+            </label>
+            <label class="flex items-center gap-1.5 text-xs text-slate-600 cursor-pointer">
+              <input type="radio" name="freeCareerCertStampOpt" value="사실과상위없음">
+              사실과상위없음
+            </label>
+          </div>
+        </div>
+
         <!-- 생성 버튼 -->
         <div class="mt-6 flex justify-end">
           <button onclick="confirmFreeBundle()" id="freeBundleBtn"
@@ -2696,6 +2717,23 @@ app.get('/ppt-generate', (c) => {
   function onFreeItemChange(menuId, checked) {
     freeItemChecked[menuId] = checked
     renderFreeItemList()
+    updateFreeCareerCertStampPanel()
+  }
+
+  function updateFreeCareerCertStampPanel() {
+    var hasCareerCert = freeAllMenus.some(function(m) {
+      return m.menu_code === 'ATT_CAREER_CERT' && !!freeItemChecked[m.id]
+    })
+    var panel = document.getElementById('freeCareerCertStampPanel')
+    if (!panel) return
+    if (hasCareerCert) {
+      panel.classList.remove('hidden')
+    } else {
+      panel.classList.add('hidden')
+      // 경력증명서 해제 시 라디오 초기화
+      var noneRadio = document.querySelector('input[name="freeCareerCertStampOpt"][value="none"]')
+      if (noneRadio) noneRadio.checked = true
+    }
   }
 
   // ── 자유생성: 인력 목록 로드 ──────────────────────────────────
@@ -2846,7 +2884,7 @@ app.get('/ppt-generate', (c) => {
       })
 
       // 경력증명서 도장 옵션 전달 (자유 생성도 동일 패널 공유)
-      var freeCareerStampRadio = document.querySelector('input[name="careerCertStampOpt"]:checked')
+      var freeCareerStampRadio = document.querySelector('input[name="freeCareerCertStampOpt"]:checked')
       var freeCareerStampVal = freeCareerStampRadio ? freeCareerStampRadio.value : 'none'
       fd.append('careerCertWithStamp', freeCareerStampVal !== 'none' ? 'true' : 'false')
       if (freeCareerStampVal !== 'none') fd.append('careerCertStampType', freeCareerStampVal)
