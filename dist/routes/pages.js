@@ -2111,6 +2111,7 @@ app.get('/ppt-generate', (c) => {
     }).join('')
     document.querySelectorAll('.bundle-open-btn').forEach(function(btn) {
       btn.addEventListener('click', function() {
+        activeBundleBtn = btn
         openBundleModal(Number(btn.dataset.pid), btn.dataset.pname)
       })
     })
@@ -2168,6 +2169,7 @@ app.get('/ppt-generate', (c) => {
 
   // ── 모달 상태 ──────────────────────────────────────────────────
   var bundleProjectId = null
+  var activeBundleBtn = null   // 현재 생성 중인 테이블 행의 bundle-open-btn 참조
   var bundleMenus     = []
   var bundleItemChecked = {}
 
@@ -2486,6 +2488,11 @@ app.get('/ppt-generate', (c) => {
     var btn = document.getElementById('bundleConfirmBtn')
     btn.disabled = true
     btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-1"></i>생성 중...'
+    // 테이블 행의 버튼도 생성 중 상태로 변경
+    if (activeBundleBtn) {
+      activeBundleBtn.disabled = true
+      activeBundleBtn.innerHTML = '<i class="fas fa-spinner fa-spin mr-1"></i>생성 중...'
+    }
     closeBundleModal()
 
     try {
@@ -2546,6 +2553,12 @@ app.get('/ppt-generate', (c) => {
     } finally {
       btn.disabled = false
       btn.innerHTML = '<i class="fas fa-magic mr-1"></i>생성'
+      // 테이블 행의 버튼 원상 복원
+      if (activeBundleBtn) {
+        activeBundleBtn.disabled = false
+        activeBundleBtn.innerHTML = '<i class="fas fa-paperclip"></i> 첨부PPT 생성'
+        activeBundleBtn = null
+      }
     }
   }
 
