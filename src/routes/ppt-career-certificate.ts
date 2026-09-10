@@ -89,8 +89,9 @@ export async function buildCareerCertificateZip(
   const personCount = names.filter(n => !!pdfMap.get(n)).length
 
   if (personCount === 0) {
+    const nameList = Array.isArray(names) ? names.join(', ') : String(names)
     throw new Error(
-      `NAS 경력증명서 폴더에서 투입 인력 중 매칭되는 PDF가 한 개도 없습니다 (${names.join(', ')})`
+      `NAS 경력증명서 폴더에서 투입 인력 중 매칭되는 PDF가 한 개도 없습니다 (${nameList})`
     )
   }
 

@@ -423,6 +423,14 @@ export async function fetchCareerCertPdfs(personNames: string[]): Promise<Map<st
       console.warn('[nas-client] 경력증명서 폴더 목록 조회 실패:', (e as Error).message, '| 폴더:', CAREER_CERT_FOLDER)
     }
     console.log(`[nas-client] 경력증명서 폴더 파일 수: ${files.length}개, 검색 이름: ${personNames.join(', ')}`)
+    if (files.length > 0) {
+      // 이름 매칭 디버그: 첫 5개 파일명 + 각 검색 이름별 후보 수 출력
+      console.log('[nas-client] 경력증명서 폴더 샘플 파일명:', files.slice(0, 5).map(f => f.name).join(' | '))
+      for (const name of personNames) {
+        const matched = files.filter(f => !f.isdir && /\.pdf$/i.test(f.name) && f.name.includes(name))
+        console.log(`[nas-client] "${name}" 매칭 후보: ${matched.length}개 ${matched.map(f => f.name).join(', ')}`)
+      }
+    }
 
     await Promise.all(
       personNames.map(async name => {
