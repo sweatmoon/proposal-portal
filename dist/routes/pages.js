@@ -1949,6 +1949,27 @@ app.get('/ppt-generate', (c) => {
 
       </div>
 
+      <!-- 경력증명서 도장 옵션 패널 (careerCert 선택 시 표시) -->
+      <div id="careerCertStampPanel" class="hidden px-6 py-3 border-t border-indigo-100 bg-indigo-50 flex-shrink-0">
+        <div class="flex items-center gap-2 flex-wrap">
+          <span class="text-xs font-semibold text-indigo-700 flex items-center gap-1 mr-1">
+            <i class="fas fa-stamp text-indigo-400"></i>경력증명서 도장
+          </span>
+          <label class="flex items-center gap-1.5 cursor-pointer text-xs text-slate-600">
+            <input type="radio" name="careerCertStampOpt" value="none" checked onchange="onCareerCertStampChange(this)">
+            도장 없음
+          </label>
+          <label class="flex items-center gap-1.5 cursor-pointer text-xs text-slate-600">
+            <input type="radio" name="careerCertStampOpt" value="원본대조필" onchange="onCareerCertStampChange(this)">
+            원본대조필
+          </label>
+          <label class="flex items-center gap-1.5 cursor-pointer text-xs text-slate-600">
+            <input type="radio" name="careerCertStampOpt" value="사실과상위없음" onchange="onCareerCertStampChange(this)">
+            사실과상위없음
+          </label>
+        </div>
+      </div>
+
       <!-- 하단 버튼 -->
       <div class="px-6 py-3 border-t border-slate-100 flex justify-end gap-2 flex-shrink-0">
         <button onclick="closeBundleModal()" class="px-4 py-2 text-sm rounded-lg border border-slate-300 text-slate-600 hover:bg-slate-50">취소</button>
@@ -2309,6 +2330,11 @@ app.get('/ppt-generate', (c) => {
     personnelKwMap = {}
     document.getElementById('bundleModalProjectName').textContent = projectName
     document.getElementById('bundleModal').classList.remove('hidden')
+    // 도장 패널 숨기고 라디오 초기화
+    var panel = document.getElementById('careerCertStampPanel')
+    if (panel) panel.classList.add('hidden')
+    var noneRadio = document.querySelector('input[name="careerCertStampOpt"][value="none"]')
+    if (noneRadio) noneRadio.checked = true
     var listEl = document.getElementById('bundleItemList')
     listEl.innerHTML = '<div class="text-slate-400 text-xs text-center py-4"><i class="fas fa-spinner fa-spin mr-1"></i>항목 불러오는 중...</div>'
     try {
@@ -2347,6 +2373,23 @@ app.get('/ppt-generate', (c) => {
   function onBundleItemChange(menuId, checked) {
     bundleItemChecked[menuId] = checked
     renderBundleItemList()
+    updateCareerCertStampPanel()
+  }
+
+  // 경력증명서(careerCert)가 선택됐을 때만 도장 옵션 패널 표시
+  function updateCareerCertStampPanel() {
+    var hasCareerCert = bundleMenus.some(function(m) {
+      return m.menu_code === 'ATT_CAREER_CERT' && !!bundleItemChecked[m.id]
+    })
+    var panel = document.getElementById('careerCertStampPanel')
+    if (panel) {
+      if (hasCareerCert) { panel.classList.remove('hidden') }
+      else               { panel.classList.add('hidden') }
+    }
+  }
+
+  function onCareerCertStampChange(radio) {
+    // 선택 값은 confirmGenerateBundle() 에서 직접 읽음 — 상태 변수 불필요
   }
 
   // ── 키워드 행 추가/수집 ────────────────────────────────────────
@@ -2471,6 +2514,12 @@ app.get('/ppt-generate', (c) => {
       order.forEach(function(o) {
         fd.append(o.key, b64ToFile(o.menu.templates[0].pptx_b64_key, o.key + '.pptx'))
       })
+
+      // 경력증명서 도장 옵션 전달
+      var careerCertStampRadio = document.querySelector('input[name="careerCertStampOpt"]:checked')
+      var careerCertStampVal = careerCertStampRadio ? careerCertStampRadio.value : 'none'
+      fd.append('careerCertWithStamp', careerCertStampVal !== 'none' ? 'true' : 'false')
+      if (careerCertStampVal !== 'none') fd.append('careerCertStampType', careerCertStampVal)
 
       var r = await fetch('/api/ppt-attachment-bundle/' + bundleProjectId, { method: 'POST', body: fd })
       if (!r.ok) {
@@ -2697,6 +2746,12 @@ app.get('/ppt-generate', (c) => {
       order.forEach(function(o) {
         fd.append(o.key, b64ToFile(o.menu.templates[0].pptx_b64_key, o.key + '.pptx'))
       })
+
+      // 경력증명서 도장 옵션 전달 (자유 생성도 동일 패널 공유)
+      var freeCareerStampRadio = document.querySelector('input[name="careerCertStampOpt"]:checked')
+      var freeCareerStampVal = freeCareerStampRadio ? freeCareerStampRadio.value : 'none'
+      fd.append('careerCertWithStamp', freeCareerStampVal !== 'none' ? 'true' : 'false')
+      if (freeCareerStampVal !== 'none') fd.append('careerCertStampType', freeCareerStampVal)
 
       // 자유생성은 projectId=0 (서버에서 별도 처리 또는 무시)
       var r = await fetch('/api/ppt-attachment-bundle/0', { method: 'POST', body: fd })
@@ -3304,7 +3359,9 @@ app.get('/ppt-templates', async (c) => {
           ? '비상근 인력 1명당 슬라이드 1장씩 복제됩니다.'
           : menu.menu_code === 'ATT_SCHEDULE' || menu.menu_code === 'ATT_STAFFING'
             ? '인력 데이터를 표 행으로 채우며, 인원이 많으면 슬라이드가 분할됩니다.'
-            : '투입 인력 전원에 대해 슬라이드가 복제됩니다.')
+            : menu.menu_code === 'ATT_CAREER_CERT'
+              ? 'NAS 경력증명서(감리협회) 폴더에서 이름이 포함된 PDF를 찾아 슬라이드로 삽입합니다. 도장 첨부 여부는 생성 시 선택합니다.'
+              : '투입 인력 전원에 대해 슬라이드가 복제됩니다.')
       : '인원 수와 무관하게 단일 문서로 첨부됩니다.'
     const typeBgCls  = isRepeat ? 'bg-violet-50 border-violet-200' : 'bg-sky-50 border-sky-200'
     const typeIconCls = isRepeat ? 'fa-users text-violet-400' : 'fa-file-alt text-sky-400'
