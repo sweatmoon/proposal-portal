@@ -2854,6 +2854,7 @@ app.get('/ppt-templates', async (c) => {
   let _selectedMenuId = null
   let _treeData = []
   let _activeTab = 'proposal'
+  let _loadTreeSeq = 0  // race condition 방지용 시퀀스 번호
 
   const TAB_ACTIVE   = 'px-5 py-2.5 text-sm font-semibold rounded-t-lg transition border border-b-0 -mb-px bg-white text-indigo-600 border-slate-200'
   const TAB_INACTIVE = 'px-5 py-2.5 text-sm font-semibold rounded-t-lg transition border border-b-0 -mb-px bg-slate-50 text-slate-500 border-transparent hover:text-slate-700'
@@ -2913,16 +2914,21 @@ app.get('/ppt-templates', async (c) => {
 
   // ── 트리 로드 ─────────────────────────────────────────────────
   async function loadTree() {
+    const seq = ++_loadTreeSeq          // 이 요청의 고유 번호
+    const tabAtRequest = _activeTab     // 요청 시점의 탭 고정
     document.getElementById('menuTree').innerHTML =
       '<div class="text-center text-slate-400 text-sm py-6"><i class="fas fa-spinner fa-spin mr-1"></i>로딩 중...</div>'
     try {
-      const catParam = '?category=' + _activeTab
+      const catParam = '?category=' + tabAtRequest
       const r = await fetch('/api/ppt-menus' + catParam)
       const j = await r.json()
+      // 응답이 도착했을 때 탭이 바뀌었거나 더 최신 요청이 있으면 무시
+      if (seq !== _loadTreeSeq || tabAtRequest !== _activeTab) return
       if (!j.ok) throw new Error(j.error)
       _treeData = j.data
       renderTree(j.data)
     } catch (e) {
+      if (seq !== _loadTreeSeq || tabAtRequest !== _activeTab) return
       document.getElementById('menuTree').innerHTML =
         '<div class="text-center text-red-400 text-xs py-6">' + e.message + '</div>'
     }
