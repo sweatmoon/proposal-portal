@@ -243,8 +243,14 @@ const ATTACHMENT_TYPES: Record<
       const stampType: CompanyStampType =
         rawStampType === '사실과상위없음' ? '사실과상위없음' : '원본대조필'
       // 자유 생성(projectId=0)일 때는 personnelNames 에서 이름 목록을 직접 읽는다
+      // parseFreePersonnel이 { name, domain } 객체 배열을 반환하므로 .name만 추출
       const freeNames: string[] = projectId === 0
-        ? (() => { try { return JSON.parse(form.get('personnelNames') as string || '[]') } catch { return [] } })()
+        ? (() => {
+            try {
+              const parsed = JSON.parse(form.get('personnelNames') as string || '[]')
+              return (parsed as { name: string; domain: string }[]).map(p => p.name).filter(Boolean)
+            } catch { return [] }
+          })()
         : []
       const { zip, personCount, skipped } =
         await buildCareerCertificateZip(buf, projectId, withStamp, stampType, titlePrefix, freeNames)
