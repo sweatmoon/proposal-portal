@@ -105,13 +105,15 @@ async function buildOneSlide(params: {
   console.log(`[DEBUG][slide${slideNum}] srcRelsXml=\n${srcRelsXml}`)
 
   // ── 2. 소스 rels에서 미디어 rId → Target 맵 ─────────────────────────────
-  // Target 기반 필터: '../media/' 로 시작하는 rel은 모두 수집
-  // (Type 필터 제거 — 소스 pptx 제작 도구에 따라 Type 값이 다를 수 있음)
+  // <Relationship ... /> 전체를 따옴표 인식 방식으로 파싱
+  // [^/]* 패턴은 Target="../media/..." 안의 '/'에서 잘려서 사용 불가
+  // → 대신 태그 끝(/> 또는 >)을 따옴표 밖에서만 인식하도록 수동 파싱
   const srcRidToTarget = new Map<string, string>()
-  for (const relM of srcRelsXml.matchAll(/<Relationship\s[^/]*/g)) {
-    const attrs = relM[0]
-    const idM  = attrs.match(/Id="([^"]+)"/)
-    const tgtM = attrs.match(/Target="([^"]+)"/)
+  // 각 Relationship 요소를 "/>", ">" 단위로 추출 (따옴표 내부 / 무시)
+  for (const relM of srcRelsXml.matchAll(/<Relationship\b([^>]*(?:"[^"]*"[^>]*)*)\/>/g)) {
+    const attrs = relM[1]
+    const idM  = attrs.match(/\bId="([^"]+)"/)
+    const tgtM = attrs.match(/\bTarget="([^"]+)"/)
     if (idM && tgtM && tgtM[1].startsWith('../media/')) {
       srcRidToTarget.set(idM[1], tgtM[1])
     }
@@ -324,10 +326,10 @@ export async function buildLicenseCertificateZip(
   // 도장 미디어: withStamp=true이면 템플릿 것 유지, false이면 제거
   // 템플릿 rels에서 stampRid 에 해당하는 Target 추출 (속성 순서 무관)
   function extractTargetForRid(relsXml: string, rid: string): string | null {
-    for (const relM of relsXml.matchAll(/<Relationship\s[^/]*/g)) {
-      const attrs = relM[0]
-      const idM  = attrs.match(/Id="([^"]+)"/)
-      const tgtM = attrs.match(/Target="([^"]+)"/)
+    for (const relM of relsXml.matchAll(/<Relationship\b([^>]*(?:"[^"]*"[^>]*)*)\/>/g)) {
+      const attrs = relM[1]
+      const idM  = attrs.match(/\bId="([^"]+)"/)
+      const tgtM = attrs.match(/\bTarget="([^"]+)"/)
       if (idM && tgtM && idM[1] === rid) return tgtM[1]
     }
     return null
