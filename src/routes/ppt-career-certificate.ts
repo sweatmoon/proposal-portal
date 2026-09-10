@@ -1,22 +1,39 @@
 /**
- * [ppt-portal 추가 기능 — 첨부PPT 생성 세트] "경력증명서" PPT 생성
- * (새로 추가된 파일 — 기존 파일을 수정한 곳은 없습니다. 세트 전체 설명은
- * src/routes/ppt-attachment-bundle.ts 상단 주석 참고.)
+ * [ppt-portal 추가 기능 — 첨부PPT 생성 세트] "경력증명서(감리협회)" PPT 생성
  *
- * 재직증명서와 필드 구성이 거의 같아 실제 조립 로직을 공유한다 —
- * src/lib/employee-certificate-doc.ts 참고. 담당업무(원본 엑셀의 "주요업무")도
- * 재직증명서와 마찬가지로 템플릿에 고정 텍스트로 이미 박혀있어 별도 처리하지 않는다.
+ * 기존 방식(재직증명서 엑셀 기반 텍스트 플레이스홀더)에서 변경됨(2026-09-10):
+ *   NAS "99.악티보포털참조용/02.제안/06.경력증명서(감리협회)" 폴더에서
+ *   파일명에 인력 이름이 포함된 PDF를 찾아 → pdfAllPagesToPng()로 렌더링 →
+ *   범용 템플릿(도장O/도장X 선택 가능)의 큰 이미지 자리에 슬라이드로 삽입한다.
+ *
+ * 동작 흐름:
+ *   1. proposal_members 에서 이 사업 투입 인력 이름 목록 조회
+ *   2. fetchCareerCertPdfs(names) — NAS 폴더에서 이름별 최신 PDF 일괄 취득
+ *   3. 이름 순서대로 각 PDF → pdfAllPagesToPng() → PNG 배열
+ *   4. buildStampedDeckZip() 으로 슬라이드 조립
+ *      - withStamp=true  → fetchCompanyStampPng() 결과를 작은 자리에 삽입
+ *      - withStamp=false → 작은 자리 비움(null 전달)
+ *   5. 인원별 슬라이드를 하나의 PPTX에 순서대로 합산
+ *   6. PDF를 찾지 못한 인력은 skipped 배열에 수집
  *
  * POST /api/ppt-career-certificate/:projectId
- *   multipart/form-data: template (.pptx, 1슬라이드)
+ *   multipart/form-data:
+ *     - template  : File (.pptx, 범용 템플릿 — 큰 이미지 자리 + 작은 이미지 자리)
+ *     - withStamp : "true" | "false"  (도장 첨부 여부, 기본 "false")
+ *     - stampType : "원본대조필" | "사실과상위없음"  (withStamp=true일 때만 사용)
  */
 import { Hono } from 'hono'
 import type JSZip from 'jszip'
-import { buildEmployeeCertificateZip } from '../lib/employee-certificate-doc.js'
+import type { CompanyStampType } from '../lib/nas-client.js'
+import { fetchCareerCertPdfs, fetchCompanyStampPng } from '../lib/nas-client.js'
+import { pdfAllPagesToPng } from '../lib/pdf-render.js'
+import { buildStampedDeckZip } from '../lib/pptx-stamped-doc.js'
+import { query, queryOne } from '../db/client.js'
 
 const app = new Hono()
 
 const PAGE_TITLE = '경력증명서'
+const STAMP_TYPES: CompanyStampType[] = ['원본대조필', '사실과상위없음']
 
 export interface CareerCertificateZipResult {
   zip: JSZip
@@ -25,15 +42,74 @@ export interface CareerCertificateZipResult {
   projectName: string
 }
 
-/** 이 파일의 핵심 로직 — 단독 다운로드 라우트와 첨부 묶음 라우트 양쪽에서 호출한다.
- *  titlePrefix: 첨부PPT 묶음에서 이 항목이 몇 번째로 선택됐는지("7. " 등)를 제목 앞에 붙인다
- *  (단독 다운로드일 때는 생략되어 빈 문자열 — 기존과 동일하게 번호 없이 나온다). */
+/**
+ * 이 파일의 핵심 로직 — 단독 다운로드 라우트와 첨부 묶음 라우트 양쪽에서 호출한다.
+ *
+ * @param templateBuf  범용 템플릿 pptx 바이트 (큰 이미지 자리 + 작은 이미지 자리 2개)
+ * @param projectId    사업 ID
+ * @param withStamp    도장 이미지를 작은 자리에 삽입할지 여부
+ * @param stampType    withStamp=true 일 때 사용할 도장 종류
+ * @param titlePrefix  첨부PPT 묶음에서 이 항목이 몇 번째인지 앞 번호 ("3. " 등), 단독이면 ""
+ */
 export async function buildCareerCertificateZip(
   templateBuf: Buffer,
   projectId: number,
+  withStamp = false,
+  stampType: CompanyStampType = '원본대조필',
   titlePrefix = ''
 ): Promise<CareerCertificateZipResult> {
-  return buildEmployeeCertificateZip(templateBuf, projectId, PAGE_TITLE, titlePrefix)
+  const [project, members] = await Promise.all([
+    queryOne<{ project_name: string }>(`SELECT project_name FROM audit_projects WHERE id = $1`, [projectId]),
+    query<{ person_name: string }>(`SELECT person_name FROM proposal_members WHERE project_id = $1 ORDER BY id ASC`, [projectId]),
+  ])
+  if (!project) throw new Error('사업을 찾을 수 없습니다')
+  if (!members.length) throw new Error('이 사업에 투입된 인력이 없습니다')
+
+  const names = members.map(m => m.person_name)
+
+  // NAS에서 이름별 PDF + 도장 이미지 병렬 취득
+  const [pdfMap, stampPng] = await Promise.all([
+    fetchCareerCertPdfs(names),
+    withStamp ? fetchCompanyStampPng(stampType) : Promise.resolve(null),
+  ])
+
+  const skipped: string[] = []
+  const personCount = names.filter(n => !!pdfMap.get(n)).length
+
+  if (personCount === 0) {
+    throw new Error(
+      `NAS 경력증명서 폴더에서 투입 인력 중 매칭되는 PDF가 한 개도 없습니다 (${names.join(', ')})`
+    )
+  }
+
+  // 공통 플레이스홀더 맵 (제목·사업명)
+  const commonMap: Record<string, string> = {
+    '[제목]': `${titlePrefix}${PAGE_TITLE}`,
+    '[감리사업명]': project.project_name,
+  }
+
+  // 인원별 PNG 배열 수집 (순서 유지)
+  const allBigImages: Buffer[] = []
+  for (const name of names) {
+    const pdfBuf = pdfMap.get(name) ?? null
+    if (!pdfBuf) {
+      skipped.push(name)
+      continue
+    }
+    const pages = await pdfAllPagesToPng(pdfBuf)
+    allBigImages.push(...pages)
+  }
+
+  // buildStampedDeckZip 활용 — 전원 슬라이드를 한 PPTX에 조립
+  const zip = await buildStampedDeckZip(
+    templateBuf,
+    commonMap,
+    allBigImages,
+    stampPng,
+    'careercert'
+  )
+
+  return { zip, personCount, skipped, projectName: project.project_name }
 }
 
 app.post('/:projectId', async (c) => {
@@ -51,8 +127,19 @@ app.post('/:projectId', async (c) => {
       return c.json({ ok: false, error: '첨부 템플릿(.pptx) 파일이 필요합니다' }, 400)
     }
 
+    const withStamp = form.get('withStamp') === 'true'
+    let stampType: CompanyStampType = '원본대조필'
+    if (withStamp) {
+      const raw = form.get('stampType')
+      if (typeof raw !== 'string' || !STAMP_TYPES.includes(raw as CompanyStampType)) {
+        return c.json({ ok: false, error: 'stampType은 "원본대조필" 또는 "사실과상위없음"이어야 합니다' }, 400)
+      }
+      stampType = raw as CompanyStampType
+    }
+
     const templateBuf = Buffer.from(await file.arrayBuffer())
-    const { zip, personCount, skipped, projectName } = await buildCareerCertificateZip(templateBuf, projectId)
+    const { zip, personCount, skipped, projectName } =
+      await buildCareerCertificateZip(templateBuf, projectId, withStamp, stampType)
 
     const outBuffer = await zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE', compressionOptions: { level: 6 } })
     const safeName = projectName.replace(/[\\/:*?"<>|]/g, '_').slice(0, 40)

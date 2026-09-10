@@ -237,9 +237,24 @@ const ATTACHMENT_TYPES: Record<
   careerCert: {
     label: '경력증명서',
     isPersonBased: true,
-    build: async (buf, projectId, _form, titlePrefix) => {
-      const { zip, personCount, skipped } = await buildCareerCertificateZip(buf, projectId, titlePrefix)
-      return { zip, summary: { slideCount: personCount, personCount, skipped, detail: `${personCount}명` + (skipped.length ? ` (${skipped.length}명 제외)` : '') } }
+    build: async (buf, projectId, form, titlePrefix) => {
+      // 도장 옵션: pages.ts 번들 모달에서 careerCertWithStamp / careerCertStampType 으로 전달
+      const withStamp = form.get('careerCertWithStamp') === 'true'
+      const rawStampType = form.get('careerCertStampType')
+      const stampType: CompanyStampType =
+        rawStampType === '사실과상위없음' ? '사실과상위없음' : '원본대조필'
+      const { zip, personCount, skipped } =
+        await buildCareerCertificateZip(buf, projectId, withStamp, stampType, titlePrefix)
+      const stampLabel = withStamp ? ` · ${stampType}` : ''
+      return {
+        zip,
+        summary: {
+          slideCount: personCount,
+          personCount,
+          skipped,
+          detail: `${personCount}명${stampLabel}` + (skipped.length ? ` (${skipped.length}명 제외)` : ''),
+        },
+      }
     },
   },
   staffingStatus: {

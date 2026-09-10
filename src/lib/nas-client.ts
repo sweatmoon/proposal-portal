@@ -382,6 +382,61 @@ export async function fetchPersonalStampPngs(personNames: string[]): Promise<Map
 const AUDITOR_CAREER_REQUEST_TEMPLATE_FILE =
   '/activo/04.제안팀/99.악티보포털참조용/감리원 경력 확인서 발급요청(악티보)_yymmdd_n명(양식_변경X).xlsx'
 
+// 경력증명서(감리협회) PDF가 인력 이름별로 모여있는 폴더.
+// 파일명 패턴: "감리원 경력확인서(이름)_YYMMDD.pdf" — 이름이 파일명에 포함되어 있고,
+// 동일 인물의 파일이 여러 개 있을 수 있으므로 날짜 숫자(파일이름 기준 문자열 내림차순)로
+// 가장 최신 파일 하나만 쓴다(2026-09-10 사용자 확인).
+const CAREER_CERT_FOLDER = '/activo/04.제안팀/99.악티보포털참조용/02.제안/06.경력증명서(감리협회)'
+
+/**
+ * 인력 이름 목록으로 경력증명서(감리협회) PDF를 NAS에서 한 번에 찾아 반환합니다.
+ * (이름 → Buffer | null, 못 찾은 사람은 null)
+ *
+ * 매칭 규칙: 파일명에 이름이 포함된 .pdf 파일 중 파일이름 문자열 기준 가장 최신 것 1개.
+ * 예) "감리원 경력확인서(손정순)_260108.pdf" → "손정순" 이름으로 매칭.
+ *
+ * 로그인/로그아웃은 전체 목록에 대해 1회만 수행하고, 폴더 목록도 1회만 조회해서
+ * 이름별로 필터링한다(fetchAuditorCertificatePptxs와 동일한 세션 공유 패턴).
+ */
+export async function fetchCareerCertPdfs(personNames: string[]): Promise<Map<string, Buffer | null>> {
+  const result = new Map<string, Buffer | null>(personNames.map(name => [name, null]))
+  if (!NAS_BASE_URL || !NAS_USERNAME || !NAS_PASSWORD) {
+    console.warn('[nas-client] NAS_BASE_URL/NAS_USERNAME/NAS_PASSWORD 환경변수가 없어 경력증명서 PDF 조회를 건너뜁니다.')
+    return result
+  }
+
+  let sid: string
+  try {
+    sid = await login()
+  } catch (e) {
+    console.warn('[nas-client] NAS 로그인 실패:', (e as Error).message)
+    return result
+  }
+
+  try {
+    // 폴더 목록은 1회만 조회 — 이름별로 재사용
+    const files = await listFolder(sid, CAREER_CERT_FOLDER).catch(() => [] as { name: string; isdir: boolean }[])
+
+    await Promise.all(
+      personNames.map(async name => {
+        // 이름이 파일명에 포함된 .pdf 파일만 추려서 파일이름 문자열 기준 가장 최신 것 선택
+        const candidates = files
+          .filter(f => !f.isdir && /\.pdf$/i.test(f.name) && f.name.includes(name))
+          .sort((a, b) => a.name.localeCompare(b.name, 'ko'))
+        const latest = candidates[candidates.length - 1]
+        if (!latest) return // 해당 이름의 파일 없음 → null 유지
+
+        const buf = await downloadFile(sid, `${CAREER_CERT_FOLDER}/${latest.name}`)
+        if (buf) result.set(name, buf)
+      })
+    )
+  } finally {
+    await logout(sid)
+  }
+
+  return result
+}
+
 /** NAS에서 감리원 경력 확인서 발급요청 엑셀 템플릿 원본을 통째로 받아옵니다. 못 찾으면 null. */
 export async function fetchAuditorCareerRequestTemplateXlsx(): Promise<Buffer | null> {
   if (!NAS_BASE_URL || !NAS_USERNAME || !NAS_PASSWORD) {
