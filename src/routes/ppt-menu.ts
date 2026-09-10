@@ -842,8 +842,6 @@ app.post('/attachment-seed', async (c) => {
       { code: 'ATT_SCHEDULE',     name: '감리원 일정 현황표',             sort: 10, repeat: true },
       { code: 'ATT_CAREER',       name: '투입 감리원별 실적 및 경력',     sort: 20, repeat: true },
       { code: 'ATT_CONSENT',      name: '비상근 감리원 참여 동의서',      sort: 30, repeat: true },
-      { code: 'ATT_STAMP_NO',     name: '범용 템플릿(도장X)',             sort: 40 },
-      { code: 'ATT_STAMP_YES',    name: '범용 템플릿(도장O)',             sort: 50 },
       { code: 'ATT_EMPLOYMENT',   name: '재직증명서',                     sort: 60, repeat: true },
       { code: 'ATT_CAREER_CERT',  name: '경력증명서',                     sort: 70, repeat: true },
       { code: 'ATT_STAFFING',     name: '상근감리원인력현황',             sort: 80, repeat: true },
