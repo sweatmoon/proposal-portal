@@ -781,7 +781,7 @@ app.post('/attachment-seed', async (c) => {
         //   ATT_STAFFING     — NAS 상근감리원 전원, 표 행 확장 + 슬라이드 분할
         // repeat_per_person=false (기본): 인력과 무관한 단일 문서
         const ITEMS = [
-            { code: 'ATT_COVER', name: '0. 정성제안서 첨부 표지', sort: 0 },
+            { code: 'ATT_COVER', name: '정성제안서 첨부 표지', sort: 0 },
             { code: 'ATT_SCHEDULE', name: '감리원 일정 현황표', sort: 10, repeat: true },
             { code: 'ATT_CAREER', name: '투입 감리원별 실적 및 경력', sort: 20, repeat: true },
             { code: 'ATT_CONSENT', name: '비상근 감리원 참여 동의서', sort: 30, repeat: true },
