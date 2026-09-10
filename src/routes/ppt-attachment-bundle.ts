@@ -292,16 +292,16 @@ const ATTACHMENT_TYPES: Record<
             } catch { return [] }
           })()
         : []
-      const { zip, personCount, skipped } =
+      const { zip, personCount, slideCount, skipped } =
         await buildLicenseCertificateZip(buf, projectId, withStamp, stampType, titlePrefix, freeNames)
       const stampLabel = withStamp ? ` · ${stampType}` : ''
       return {
         zip,
         summary: {
-          slideCount: personCount,
+          slideCount,
           personCount,
           skipped,
-          detail: `${personCount}명${stampLabel}` + (skipped.length ? ` (${skipped.length}명 제외)` : ''),
+          detail: `${personCount}명 ${slideCount}슬라이드${stampLabel}` + (skipped.length ? ` (${skipped.length}명 제외)` : ''),
         },
       }
     },
