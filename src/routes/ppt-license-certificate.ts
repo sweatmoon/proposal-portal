@@ -366,9 +366,13 @@ export async function buildLicenseCertificateZip(
 
     if (!srcSlides.length) { skipped.push(name); continue }
 
-    const titleText = `${titlePrefix}${PAGE_TITLE}`
+    const totalPages = srcSlides.length
 
-    for (const srcSlidePath of srcSlides) {
+    for (let pi = 0; pi < srcSlides.length; pi++) {
+      const srcSlidePath = srcSlides[pi]
+      // 1장이면 "자격증사본 – 김현호", 2장 이상이면 "자격증사본 – 김현호 (1/2)" 형식
+      const pageSuffix = totalPages > 1 ? ` (${pi + 1}/${totalPages})` : ''
+      const titleText = `${titlePrefix}${PAGE_TITLE} – ${name}${pageSuffix}`
       await buildOneSlide({
         outZip,
         templateSlideXml,

@@ -121,8 +121,10 @@ async function _buildWithDirectory(
   await buildMultiSlideDeck(
     zip,
     (templateSlideXml, person: PersonChunk) => {
+      // 제목: "재직증명서 – 김현호" (총인원이 1명이든 N명이든 페이지 번호 없음)
       const personMap: Record<string, string> = {
         ...commonMap,
+        '[제목]': `${titlePrefix}${pageTitle} – ${person.name}`,
         '[이름]': person.name,
         '[입사일자]': person.hireDateWithDot,
         '[생년월일]': person.birthdate,
