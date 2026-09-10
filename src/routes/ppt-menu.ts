@@ -829,20 +829,24 @@ app.get('/', async (c) => {
 app.post('/attachment-seed', async (c) => {
   try {
     // 첨부PPT 항목 정의 (attachment-bundle-widget.ts 의 BUNDLE_ITEM_DEFS 와 동일 순서)
-    // repeat_per_person=true: 인력 수만큼 슬라이드를 복제하는 서류
-    //   ATT_CAREER  — proposal_members 전원 대상 (투입 인력 1명당 2슬라이드)
-    //   ATT_CONSENT — 비상근 인력 대상 (비상근 1명당 1슬라이드)
-    // repeat_per_person=false (기본): 단일 문서, 인력과 무관
+    // repeat_per_person=true: 인력 데이터를 참조하는 서류 (슬라이드 복제 또는 표 행 확장)
+    //   ATT_CAREER       — proposal_members 전원, 1명당 슬라이드 세트 복제
+    //   ATT_CONSENT      — 비상근 인력, 1명당 슬라이드 1장 복제
+    //   ATT_EMPLOYMENT   — proposal_members 전원, 1명당 슬라이드 1장 복제 (NAS 엑셀 참조)
+    //   ATT_CAREER_CERT  — 위와 동일 (경력증명서)
+    //   ATT_SCHEDULE     — 감리원 전원, 표 행 확장 + 인원 많으면 슬라이드 분할
+    //   ATT_STAFFING     — NAS 상근감리원 전원, 표 행 확장 + 슬라이드 분할
+    // repeat_per_person=false (기본): 인력과 무관한 단일 문서
     const ITEMS: Array<{ code: string; name: string; sort: number; repeat?: boolean }> = [
       { code: 'ATT_COVER',        name: '0. 정성제안서 첨부 표지',       sort:  0 },
-      { code: 'ATT_SCHEDULE',     name: '감리원 일정 현황표',             sort: 10 },
+      { code: 'ATT_SCHEDULE',     name: '감리원 일정 현황표',             sort: 10, repeat: true },
       { code: 'ATT_CAREER',       name: '투입 감리원별 실적 및 경력',     sort: 20, repeat: true },
       { code: 'ATT_CONSENT',      name: '비상근 감리원 참여 동의서',      sort: 30, repeat: true },
       { code: 'ATT_STAMP_NO',     name: '범용 템플릿(도장X)',             sort: 40 },
       { code: 'ATT_STAMP_YES',    name: '범용 템플릿(도장O)',             sort: 50 },
-      { code: 'ATT_EMPLOYMENT',   name: '재직증명서',                     sort: 60 },
-      { code: 'ATT_CAREER_CERT',  name: '경력증명서',                     sort: 70 },
-      { code: 'ATT_STAFFING',     name: '상근감리원인력현황',             sort: 80 },
+      { code: 'ATT_EMPLOYMENT',   name: '재직증명서',                     sort: 60, repeat: true },
+      { code: 'ATT_CAREER_CERT',  name: '경력증명서',                     sort: 70, repeat: true },
+      { code: 'ATT_STAFFING',     name: '상근감리원인력현황',             sort: 80, repeat: true },
     ]
     const created: string[] = []
     for (const item of ITEMS) {
