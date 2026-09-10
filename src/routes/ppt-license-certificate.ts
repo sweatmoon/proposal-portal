@@ -100,9 +100,17 @@ async function buildOneSlide(params: {
   const srcRelsXml  = (await srcZip.file(srcRelsPath)!.async('string'))
 
   // ── 2. 소스 rels에서 이미지 rId → Target 맵 ──────────────────────────────
+  // 속성 순서가 파일마다 다를 수 있으므로 <Relationship> 요소 전체를 먼저 추출한 뒤
+  // 각 요소 내에서 Id / Type / Target 을 독립적으로 파싱
   const srcRidToTarget = new Map<string, string>()
-  for (const m of srcRelsXml.matchAll(/<Relationship\s+Id="([^"]+)"[^>]+Type="[^"]*\/image"[^>]+Target="([^"]+)"/g)) {
-    srcRidToTarget.set(m[1], m[2]) // e.g. rId2 → ../media/image1.png
+  for (const relM of srcRelsXml.matchAll(/<Relationship\s[^/]*/g)) {
+    const attrs = relM[0]
+    const idM   = attrs.match(/Id="([^"]+)"/)
+    const typeM = attrs.match(/Type="([^"]+)"/)
+    const tgtM  = attrs.match(/Target="([^"]+)"/)
+    if (idM && typeM && tgtM && typeM[1].endsWith('/image')) {
+      srcRidToTarget.set(idM[1], tgtM[1]) // e.g. rId2 → ../media/image1.png
+    }
   }
 
   // ── 3. 소스 미디어를 outZip에 복사, rId 리매핑 ───────────────────────────
@@ -169,7 +177,7 @@ async function buildOneSlide(params: {
   // 5b. 템플릿의 도장 p:pic 추출 (맨 마지막 레이어로 올리기 위해 분리)
   let stampPicXml = ''
   if (stampPng && stampRid) {
-    const stampMatch = slideXml.match(/<p:pic>[\s\S]*?r:embed="rId2"[\s\S]*?<\/p:pic>/)
+    const stampMatch = slideXml.match(new RegExp(`<p:pic>[\\s\\S]*?r:embed="${stampRid}"[\\s\\S]*?<\/p:pic>`))
     if (stampMatch) {
       stampPicXml = stampMatch[0]
       // 템플릿에서 도장 pic 제거 (나중에 맨 마지막에 재삽입)
@@ -303,20 +311,31 @@ export async function buildLicenseCertificateZip(
   const outZip = await JSZip.loadAsync(templateBuf)
 
   // 도장 미디어: withStamp=true이면 템플릿 것 유지, false이면 제거
+  // 템플릿 rels에서 stampRid 에 해당하는 Target 추출 (속성 순서 무관)
+  function extractTargetForRid(relsXml: string, rid: string): string | null {
+    for (const relM of relsXml.matchAll(/<Relationship\s[^/]*/g)) {
+      const attrs = relM[0]
+      const idM  = attrs.match(/Id="([^"]+)"/)
+      const tgtM = attrs.match(/Target="([^"]+)"/)
+      if (idM && tgtM && idM[1] === rid) return tgtM[1]
+    }
+    return null
+  }
+
   if (!stampPng) {
     // 도장 없음 — 템플릿 미디어 중 도장 파일 제거 (slide rels에서 참조하는 이미지)
     if (stampRid) {
-      const stampTargetMatch = templateRelsXml.match(new RegExp(`Id="${stampRid}"[^>]+Target="([^"]+)"`))
-      if (stampTargetMatch) {
-        const stampMediaPath = 'ppt/' + stampTargetMatch[1].replace('../', '')
+      const target = extractTargetForRid(templateRelsXml, stampRid)
+      if (target) {
+        const stampMediaPath = 'ppt/' + target.replace('../', '')
         outZip.remove(stampMediaPath)
       }
     }
   } else if (stampPng && stampRid) {
     // 도장 있음 — 템플릿에 있는 도장 미디어 파일을 새 도장 png로 교체
-    const stampTargetMatch = templateRelsXml.match(new RegExp(`Id="${stampRid}"[^>]+Target="([^"]+)"`))
-    if (stampTargetMatch) {
-      const stampMediaPath = 'ppt/' + stampTargetMatch[1].replace('../', '')
+    const target = extractTargetForRid(templateRelsXml, stampRid)
+    if (target) {
+      const stampMediaPath = 'ppt/' + target.replace('../', '')
       outZip.file(stampMediaPath, stampPng)
     }
   }
