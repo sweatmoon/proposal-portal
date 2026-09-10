@@ -239,6 +239,10 @@ app.post('/migrate', async (c) => {
         await exec(`ALTER TABLE ppt_generation_rules ADD COLUMN IF NOT EXISTS target_layout_name TEXT`);
         // 10. ppt_menus 에 category 컬럼 추가 (proposal / attachment 구분, 구버전 호환)
         await exec(`ALTER TABLE ppt_menus ADD COLUMN IF NOT EXISTS category TEXT NOT NULL DEFAULT 'proposal'`);
+        // 11. ppt_menus 에 repeat_per_person 컬럼 추가 (인력별 반복 서류 여부, 구버전 호환)
+        //     ATT_CAREER(투입 감리원별 실적 및 경력), ATT_CONSENT(비상근 감리원 참여 동의서) = true
+        //     그 외 단순 첨부 서류 = false (default)
+        await exec(`ALTER TABLE ppt_menus ADD COLUMN IF NOT EXISTS repeat_per_person BOOLEAN NOT NULL DEFAULT FALSE`);
         return c.json({ ok: true, message: 'PPT 테이블 마이그레이션 완료 (8개 테이블 + 컬럼 업그레이드)' });
     }
     catch (e) {
@@ -768,11 +772,15 @@ app.get('/', async (c) => {
 app.post('/attachment-seed', async (c) => {
     try {
         // 첨부PPT 항목 정의 (attachment-bundle-widget.ts 의 BUNDLE_ITEM_DEFS 와 동일 순서)
+        // repeat_per_person=true: 인력 수만큼 슬라이드를 복제하는 서류
+        //   ATT_CAREER  — proposal_members 전원 대상 (투입 인력 1명당 2슬라이드)
+        //   ATT_CONSENT — 비상근 인력 대상 (비상근 1명당 1슬라이드)
+        // repeat_per_person=false (기본): 단일 문서, 인력과 무관
         const ITEMS = [
             { code: 'ATT_COVER', name: '0. 정성제안서 첨부 표지', sort: 0 },
             { code: 'ATT_SCHEDULE', name: '감리원 일정 현황표', sort: 10 },
-            { code: 'ATT_CAREER', name: '투입 감리원별 실적 및 경력', sort: 20 },
-            { code: 'ATT_CONSENT', name: '비상근 감리원 참여 동의서', sort: 30 },
+            { code: 'ATT_CAREER', name: '투입 감리원별 실적 및 경력', sort: 20, repeat: true },
+            { code: 'ATT_CONSENT', name: '비상근 감리원 참여 동의서', sort: 30, repeat: true },
             { code: 'ATT_STAMP_NO', name: '범용 템플릿(도장X)', sort: 40 },
             { code: 'ATT_STAMP_YES', name: '범용 템플릿(도장O)', sort: 50 },
             { code: 'ATT_EMPLOYMENT', name: '재직증명서', sort: 60 },
@@ -781,14 +789,16 @@ app.post('/attachment-seed', async (c) => {
         ];
         const created = [];
         for (const item of ITEMS) {
+            const repeatPerPerson = item.repeat === true;
             // 1. 메뉴 upsert
             const menu = await queryOne(`
-        INSERT INTO ppt_menus (menu_code, menu_name, sort_order, is_enabled, category)
-        VALUES ($1, $2, $3, 1, 'attachment')
+        INSERT INTO ppt_menus (menu_code, menu_name, sort_order, is_enabled, category, repeat_per_person)
+        VALUES ($1, $2, $3, 1, 'attachment', $4)
         ON CONFLICT (menu_code) DO UPDATE
-          SET menu_name=$2, sort_order=$3, category='attachment', updated_at=NOW()
+          SET menu_name=$2, sort_order=$3, category='attachment',
+              repeat_per_person=$4, updated_at=NOW()
         RETURNING id
-      `, [item.code, item.name, item.sort]);
+      `, [item.code, item.name, item.sort, repeatPerPerson]);
             if (!menu)
                 continue;
             // 2. 빈 템플릿 슬롯 upsert (pptx_b64_key=NULL 인 채로 자리만 만들어 둠)
