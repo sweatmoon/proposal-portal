@@ -28,6 +28,7 @@ import type { CompanyStampType } from '../lib/nas-client.js'
 import { fetchCareerCertPdfs, fetchCompanyStampPng } from '../lib/nas-client.js'
 import { pdfAllPagesToPng } from '../lib/pdf-render.js'
 import { buildStampedDeckZip } from '../lib/pptx-stamped-doc.js'
+import { applyPlaceholderMap } from '../lib/pptx-runtext.js'
 import { query, queryOne } from '../db/client.js'
 
 const app = new Hono()
@@ -96,13 +97,16 @@ export async function buildCareerCertificateZip(
     )
   }
 
-  // 공통 플레이스홀더 맵 (제목·사업명)
+  // 공통 플레이스홀더 맵 (제목·사업명) — [제목]은 슬라이드별로 이름 포함 버전으로 덮어쓸 예정
+  const baseTitle = `${titlePrefix}${PAGE_TITLE}`
   const commonMap: Record<string, string> = {
-    '[제목]': `${titlePrefix}${PAGE_TITLE}`,
+    '[제목]': baseTitle,
     '[감리사업명]': projectName,
   }
 
-  // 인원별 PNG 배열 수집 (순서 유지)
+  // 인원별 PNG 배열 수집 (이름·페이지수 정보 보존)
+  interface PersonPages { name: string; pages: Buffer[] }
+  const perPerson: PersonPages[] = []
   const allBigImages: Buffer[] = []
   for (const name of names) {
     const pdfBuf = pdfMap.get(name) ?? null
@@ -111,6 +115,7 @@ export async function buildCareerCertificateZip(
       continue
     }
     const pages = await pdfAllPagesToPng(pdfBuf)
+    perPerson.push({ name, pages })
     allBigImages.push(...pages)
   }
 
@@ -122,6 +127,24 @@ export async function buildCareerCertificateZip(
     stampPng,
     'careercert'
   )
+
+  // 슬라이드별 제목 패치 — "경력증명서 – 김현호" (1장) 또는 "경력증명서 – 김현호 (1/2)" (여러 장)
+  let slideIdx = 1
+  for (const { name, pages } of perPerson) {
+    const total = pages.length
+    for (let pi = 0; pi < total; pi++) {
+      const pageSuffix = total > 1 ? ` (${pi + 1}/${total})` : ''
+      const titleForSlide = `${baseTitle} – ${name}${pageSuffix}`
+      const slideFile = `ppt/slides/slide${slideIdx}.xml`
+      const slideXmlFile = zip.file(slideFile)
+      if (slideXmlFile) {
+        const xml = await slideXmlFile.async('string')
+        const patched = applyPlaceholderMap(xml, { '[제목]': titleForSlide })
+        if (patched !== xml) zip.file(slideFile, patched)
+      }
+      slideIdx++
+    }
+  }
 
   return { zip, personCount, skipped, projectName }
 }
