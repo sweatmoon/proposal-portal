@@ -1996,11 +1996,11 @@ app.get('/ppt-generate', (c) => {
 
         </div>
 
-        <!-- 경력증명서/자격증사본 도장 옵션 패널 (자유 생성 전용) -->
+        <!-- 경력증명서 도장 옵션 패널 (자유 생성 전용) -->
         <div id="freeCareerCertStampPanel" class="hidden mt-4 px-5 py-3 rounded-xl border border-indigo-200 bg-indigo-50">
           <div class="flex items-center gap-4 flex-wrap">
-            <span class="text-xs font-semibold text-indigo-700 flex items-center gap-1.5">
-              <i class="fas fa-stamp"></i>경력증명서/자격증사본 도장
+            <span class="text-xs font-semibold text-indigo-700 flex items-center gap-1.5 w-28">
+              <i class="fas fa-stamp"></i>경력증명서 도장
             </span>
             <label class="flex items-center gap-1.5 text-xs text-slate-600 cursor-pointer">
               <input type="radio" name="freeCareerCertStampOpt" value="none" checked>
@@ -2012,6 +2012,27 @@ app.get('/ppt-generate', (c) => {
             </label>
             <label class="flex items-center gap-1.5 text-xs text-slate-600 cursor-pointer">
               <input type="radio" name="freeCareerCertStampOpt" value="사실과상위없음">
+              사실과상위없음
+            </label>
+          </div>
+        </div>
+
+        <!-- 자격증사본 도장 옵션 패널 (자유 생성 전용) -->
+        <div id="freeLicenseCertStampPanel" class="hidden mt-2 px-5 py-3 rounded-xl border border-pink-200 bg-pink-50">
+          <div class="flex items-center gap-4 flex-wrap">
+            <span class="text-xs font-semibold text-pink-700 flex items-center gap-1.5 w-28">
+              <i class="fas fa-stamp"></i>자격증사본 도장
+            </span>
+            <label class="flex items-center gap-1.5 text-xs text-slate-600 cursor-pointer">
+              <input type="radio" name="freeLicenseCertStampOpt" value="none" checked>
+              도장 없음
+            </label>
+            <label class="flex items-center gap-1.5 text-xs text-slate-600 cursor-pointer">
+              <input type="radio" name="freeLicenseCertStampOpt" value="원본대조필">
+              원본대조필
+            </label>
+            <label class="flex items-center gap-1.5 text-xs text-slate-600 cursor-pointer">
+              <input type="radio" name="freeLicenseCertStampOpt" value="사실과상위없음">
               사실과상위없음
             </label>
           </div>
@@ -2055,11 +2076,11 @@ app.get('/ppt-generate', (c) => {
 
       </div>
 
-      <!-- 경력증명서/자격증사본 도장 옵션 패널 (careerCert 또는 licenseCert 선택 시 표시) -->
-      <div id="careerCertStampPanel" class="hidden px-6 py-3 border-t border-indigo-100 bg-indigo-50 flex-shrink-0">
+      <!-- 경력증명서 도장 옵션 패널 -->
+      <div id="careerCertStampPanel" class="hidden px-6 py-2.5 border-t border-indigo-100 bg-indigo-50 flex-shrink-0">
         <div class="flex items-center gap-2 flex-wrap">
-          <span class="text-xs font-semibold text-indigo-700 flex items-center gap-1 mr-1">
-            <i class="fas fa-stamp text-indigo-400"></i>경력증명서/자격증사본 도장
+          <span class="text-xs font-semibold text-indigo-700 flex items-center gap-1 w-28">
+            <i class="fas fa-stamp text-indigo-400"></i>경력증명서 도장
           </span>
           <label class="flex items-center gap-1.5 cursor-pointer text-xs text-slate-600">
             <input type="radio" name="careerCertStampOpt" value="none" checked onchange="onCareerCertStampChange(this)">
@@ -2071,6 +2092,27 @@ app.get('/ppt-generate', (c) => {
           </label>
           <label class="flex items-center gap-1.5 cursor-pointer text-xs text-slate-600">
             <input type="radio" name="careerCertStampOpt" value="사실과상위없음" onchange="onCareerCertStampChange(this)">
+            사실과상위없음
+          </label>
+        </div>
+      </div>
+
+      <!-- 자격증사본 도장 옵션 패널 -->
+      <div id="licenseCertStampPanel" class="hidden px-6 py-2.5 border-t border-pink-100 bg-pink-50 flex-shrink-0">
+        <div class="flex items-center gap-2 flex-wrap">
+          <span class="text-xs font-semibold text-pink-700 flex items-center gap-1 w-28">
+            <i class="fas fa-stamp text-pink-400"></i>자격증사본 도장
+          </span>
+          <label class="flex items-center gap-1.5 cursor-pointer text-xs text-slate-600">
+            <input type="radio" name="licenseCertStampOpt" value="none" checked>
+            도장 없음
+          </label>
+          <label class="flex items-center gap-1.5 cursor-pointer text-xs text-slate-600">
+            <input type="radio" name="licenseCertStampOpt" value="원본대조필">
+            원본대조필
+          </label>
+          <label class="flex items-center gap-1.5 cursor-pointer text-xs text-slate-600">
+            <input type="radio" name="licenseCertStampOpt" value="사실과상위없음">
             사실과상위없음
           </label>
         </div>
@@ -2443,6 +2485,10 @@ app.get('/ppt-generate', (c) => {
     if (panel) panel.classList.add('hidden')
     var noneRadio = document.querySelector('input[name="careerCertStampOpt"][value="none"]')
     if (noneRadio) noneRadio.checked = true
+    var licensePanel = document.getElementById('licenseCertStampPanel')
+    if (licensePanel) licensePanel.classList.add('hidden')
+    var licenseNoneRadio = document.querySelector('input[name="licenseCertStampOpt"][value="none"]')
+    if (licenseNoneRadio) licenseNoneRadio.checked = true
     var listEl = document.getElementById('bundleItemList')
     listEl.innerHTML = '<div class="text-slate-400 text-xs text-center py-4"><i class="fas fa-spinner fa-spin mr-1"></i>항목 불러오는 중...</div>'
     try {
@@ -2484,15 +2530,23 @@ app.get('/ppt-generate', (c) => {
     updateCareerCertStampPanel()
   }
 
-  // 경력증명서(careerCert) 또는 자격증사본(licenseCert)이 선택됐을 때 도장 옵션 패널 표시
+  // 경력증명서 / 자격증사본 도장 패널 각각 독립 표시
   function updateCareerCertStampPanel() {
     var hasCareerCert = bundleMenus.some(function(m) {
-      return (m.menu_code === 'ATT_CAREER_CERT' || m.menu_code === 'ATT_LICENSE_CERT') && !!bundleItemChecked[m.id]
+      return m.menu_code === 'ATT_CAREER_CERT' && !!bundleItemChecked[m.id]
     })
-    var panel = document.getElementById('careerCertStampPanel')
-    if (panel) {
-      if (hasCareerCert) { panel.classList.remove('hidden') }
-      else               { panel.classList.add('hidden') }
+    var hasLicenseCert = bundleMenus.some(function(m) {
+      return m.menu_code === 'ATT_LICENSE_CERT' && !!bundleItemChecked[m.id]
+    })
+    var careerPanel = document.getElementById('careerCertStampPanel')
+    if (careerPanel) {
+      if (hasCareerCert) { careerPanel.classList.remove('hidden') }
+      else { careerPanel.classList.add('hidden'); var r = document.querySelector('input[name="careerCertStampOpt"][value="none"]'); if (r) r.checked = true }
+    }
+    var licensePanel = document.getElementById('licenseCertStampPanel')
+    if (licensePanel) {
+      if (hasLicenseCert) { licensePanel.classList.remove('hidden') }
+      else { licensePanel.classList.add('hidden'); var r2 = document.querySelector('input[name="licenseCertStampOpt"][value="none"]'); if (r2) r2.checked = true }
     }
   }
 
@@ -2629,15 +2683,17 @@ app.get('/ppt-generate', (c) => {
         fd.append(o.key, b64ToFile(o.menu.templates[0].pptx_b64_key, o.key + '.pptx'))
       })
 
-      // 경력증명서 도장 옵션 전달
+      // 경력증명서 도장 옵션 전달 (독립)
       var careerCertStampRadio = document.querySelector('input[name="careerCertStampOpt"]:checked')
       var careerCertStampVal = careerCertStampRadio ? careerCertStampRadio.value : 'none'
       fd.append('careerCertWithStamp', careerCertStampVal !== 'none' ? 'true' : 'false')
       if (careerCertStampVal !== 'none') fd.append('careerCertStampType', careerCertStampVal)
 
-      // 자격증사본 도장 옵션 전달 (경력증명서와 동일 패널 공유 — careerCertStampOpt)
-      fd.append('licenseCertWithStamp', careerCertStampVal !== 'none' ? 'true' : 'false')
-      if (careerCertStampVal !== 'none') fd.append('licenseCertStampType', careerCertStampVal)
+      // 자격증사본 도장 옵션 전달 (독립)
+      var licenseCertStampRadio = document.querySelector('input[name="licenseCertStampOpt"]:checked')
+      var licenseCertStampVal = licenseCertStampRadio ? licenseCertStampRadio.value : 'none'
+      fd.append('licenseCertWithStamp', licenseCertStampVal !== 'none' ? 'true' : 'false')
+      if (licenseCertStampVal !== 'none') fd.append('licenseCertStampType', licenseCertStampVal)
 
       var r = await fetch('/api/ppt-attachment-bundle/' + bundleProjectId, { method: 'POST', body: fd })
       if (!r.ok) {
@@ -2727,17 +2783,30 @@ app.get('/ppt-generate', (c) => {
 
   function updateFreeCareerCertStampPanel() {
     var hasCareerCert = freeAllMenus.some(function(m) {
-      return (m.menu_code === 'ATT_CAREER_CERT' || m.menu_code === 'ATT_LICENSE_CERT') && !!freeItemChecked[m.id]
+      return m.menu_code === 'ATT_CAREER_CERT' && !!freeItemChecked[m.id]
     })
-    var panel = document.getElementById('freeCareerCertStampPanel')
-    if (!panel) return
-    if (hasCareerCert) {
-      panel.classList.remove('hidden')
-    } else {
-      panel.classList.add('hidden')
-      // 경력증명서 해제 시 라디오 초기화
-      var noneRadio = document.querySelector('input[name="freeCareerCertStampOpt"][value="none"]')
-      if (noneRadio) noneRadio.checked = true
+    var hasLicenseCert = freeAllMenus.some(function(m) {
+      return m.menu_code === 'ATT_LICENSE_CERT' && !!freeItemChecked[m.id]
+    })
+    var careerPanel = document.getElementById('freeCareerCertStampPanel')
+    if (careerPanel) {
+      if (hasCareerCert) {
+        careerPanel.classList.remove('hidden')
+      } else {
+        careerPanel.classList.add('hidden')
+        var r = document.querySelector('input[name="freeCareerCertStampOpt"][value="none"]')
+        if (r) r.checked = true
+      }
+    }
+    var licensePanel = document.getElementById('freeLicenseCertStampPanel')
+    if (licensePanel) {
+      if (hasLicenseCert) {
+        licensePanel.classList.remove('hidden')
+      } else {
+        licensePanel.classList.add('hidden')
+        var r2 = document.querySelector('input[name="freeLicenseCertStampOpt"][value="none"]')
+        if (r2) r2.checked = true
+      }
     }
   }
 
@@ -2889,15 +2958,17 @@ app.get('/ppt-generate', (c) => {
         fd.append(o.key, b64ToFile(o.menu.templates[0].pptx_b64_key, o.key + '.pptx'))
       })
 
-      // 경력증명서 도장 옵션 전달 (자유 생성도 동일 패널 공유)
+      // 경력증명서 도장 옵션 전달 (자유 생성, 독립)
       var freeCareerStampRadio = document.querySelector('input[name="freeCareerCertStampOpt"]:checked')
       var freeCareerStampVal = freeCareerStampRadio ? freeCareerStampRadio.value : 'none'
       fd.append('careerCertWithStamp', freeCareerStampVal !== 'none' ? 'true' : 'false')
       if (freeCareerStampVal !== 'none') fd.append('careerCertStampType', freeCareerStampVal)
 
-      // 자격증사본 도장 옵션 전달 (자유 생성 — 경력증명서와 동일 패널 공유)
-      fd.append('licenseCertWithStamp', freeCareerStampVal !== 'none' ? 'true' : 'false')
-      if (freeCareerStampVal !== 'none') fd.append('licenseCertStampType', freeCareerStampVal)
+      // 자격증사본 도장 옵션 전달 (자유 생성, 독립)
+      var freeLicenseStampRadio = document.querySelector('input[name="freeLicenseCertStampOpt"]:checked')
+      var freeLicenseStampVal = freeLicenseStampRadio ? freeLicenseStampRadio.value : 'none'
+      fd.append('licenseCertWithStamp', freeLicenseStampVal !== 'none' ? 'true' : 'false')
+      if (freeLicenseStampVal !== 'none') fd.append('licenseCertStampType', freeLicenseStampVal)
 
       // 자유생성은 projectId=0 (서버에서 별도 처리 또는 무시)
       var r = await fetch('/api/ppt-attachment-bundle/0', { method: 'POST', body: fd })
