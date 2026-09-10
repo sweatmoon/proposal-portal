@@ -100,9 +100,6 @@ async function buildOneSlide(params: {
   const srcRelsFile = srcZip.file(srcRelsPath)
   const srcRelsXml  = srcRelsFile ? (await srcRelsFile.async('string')) : ''
 
-  console.log(`[DEBUG][slide${slideNum}] srcSlidePath=${srcSlidePath}`)
-  console.log(`[DEBUG][slide${slideNum}] srcRelsPath=${srcRelsPath} exists=${!!srcRelsFile}`)
-  console.log(`[DEBUG][slide${slideNum}] srcRelsXml=\n${srcRelsXml}`)
 
   // ── 2. 소스 rels에서 미디어 rId → Target 맵 ─────────────────────────────
   // <Relationship ... /> 전체를 따옴표 인식 방식으로 파싱
@@ -118,7 +115,6 @@ async function buildOneSlide(params: {
       srcRidToTarget.set(idM[1], tgtM[1])
     }
   }
-  console.log(`[DEBUG][slide${slideNum}] srcRidToTarget=`, JSON.stringify([...srcRidToTarget]))
 
   // ── 3. 소스 미디어를 outZip에 복사, rId 리매핑 ───────────────────────────
   // 충돌 방지: 결과 pptx 내 media 파일명을 slide별로 고유하게 만든다
@@ -130,12 +126,6 @@ async function buildOneSlide(params: {
   for (const m of templateRelsXml.matchAll(/Id="([^"]+)"/g)) existingRids.add(m[1])
 
   let ridCounter = 100 + slideNum * 100 // 슬라이드별 고유 시작 번호
-
-  // ── 소스 XML에서 실제 사용 중인 r:embed 목록 수집 (디버그용) ──────────────
-  const usedEmbeds = new Set<string>()
-  for (const m of srcXml.matchAll(/r:embed="([^"]+)"/g)) usedEmbeds.add(m[1])
-  console.log(`[DEBUG][slide${slideNum}] XML에서 사용 중인 r:embed=`, JSON.stringify([...usedEmbeds]))
-  console.log(`[DEBUG][slide${slideNum}] srcZip 전체 파일 목록:`, srcZip.files ? Object.keys(srcZip.files).filter(f => f.includes('media')).join(', ') : 'N/A')
 
   for (const [srcRid, srcTarget] of srcRidToTarget) {
     // '../media/image1.png' → 'ppt/media/image1.png'

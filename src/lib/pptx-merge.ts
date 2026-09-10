@@ -121,14 +121,18 @@ export async function mergeDecksSharingMaster(zips: JSZip[]): Promise<JSZip> {
     slideNum++
     const xml = entry.xml
     const relXml = entry.relXml ?? DEFAULT_RELS_XML
+    // ⚠️ 속성 순서 고정 정규식은 절대 사용 불가.
+    // ppt-license-certificate.ts 가 생성하는 rels 의 속성 순서가 다를 수 있고,
+    // Target="../media/..." 처럼 '/' 가 포함된 값도 있어 [^/]* 패턴은 잘림.
+    // → 따옴표 내부를 통째로 건너뛰는 패턴으로 각 속성을 독립적으로 파싱.
     const relEntries: { id: string; type: string; target: string }[] = []
-    relXml.replace(
-      /<Relationship\s+Id="([^"]+)"\s+Type="([^"]+)"\s+Target="([^"]+)"[^/]*\/>/g,
-      (_m, id, type, target) => {
-        relEntries.push({ id, type, target })
-        return _m
-      }
-    )
+    for (const relM of relXml.matchAll(/<Relationship\b([^>]*(?:"[^"]*"[^>]*)*)\/>/g)) {
+      const attrs = relM[1]
+      const idM   = attrs.match(/\bId="([^"]+)"/)
+      const typeM = attrs.match(/\bType="([^"]+)"/)
+      const tgtM  = attrs.match(/\bTarget="([^"]+)"/)
+      if (idM && typeM && tgtM) relEntries.push({ id: idM[1], type: typeM[1], target: tgtM[1] })
+    }
 
     const rIdMap: Record<string, string> = {}
     const relTags = relEntries.map(e => {
@@ -148,7 +152,9 @@ export async function mergeDecksSharingMaster(zips: JSZip[]): Promise<JSZip> {
       relTags.join('') +
       '</Relationships>'
 
-    const newSlideXml = xml.replace(/\br:(embed|link|id)="(rId\d+)"/g, (full, attr, oldId) =>
+    // ⚠️ rId\d+ 패턴은 숫자만 허용 → rId_s1_200 같은 커스텀 rId를 치환 못 함.
+    // → 따옴표 안의 임의 문자열 전체를 잡도록 [^"]+ 로 교체.
+    const newSlideXml = xml.replace(/\br:(embed|link|id)="([^"]+)"/g, (full, attr, oldId) =>
       rIdMap[oldId] ? `r:${attr}="${rIdMap[oldId]}"` : full
     )
 
