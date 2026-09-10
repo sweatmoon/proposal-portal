@@ -845,6 +845,7 @@ app.post('/attachment-seed', async (c) => {
       { code: 'ATT_EMPLOYMENT',   name: '재직증명서',                     sort: 60, repeat: true },
       { code: 'ATT_CAREER_CERT',  name: '경력증명서',                     sort: 70, repeat: true },
       { code: 'ATT_STAFFING',     name: '상근감리원인력현황',             sort: 80, repeat: true },
+      { code: 'ATT_LICENSE_CERT', name: '자격증사본',                      sort: 75, repeat: true },
     ]
     const created: string[] = []
     for (const item of ITEMS) {

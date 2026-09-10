@@ -85,6 +85,7 @@ import { buildInsuranceEnrollmentZip } from './ppt-insurance-enrollment.js'
 import { buildEmploymentCertificateZip } from './ppt-employment-certificate.js'
 import { buildCareerCertificateZip } from './ppt-career-certificate.js'
 import { buildStaffingStatusZip } from './ppt-staffing-status.js'
+import { buildLicenseCertificateZip } from './ppt-license-certificate.js'
 import type { CompanyStampType } from '../lib/nas-client.js'
 import { buildCoverZip } from './ppt-cover.js'
 import { mergeDecksSharingMaster } from '../lib/pptx-merge.js'
@@ -272,6 +273,37 @@ const ATTACHMENT_TYPES: Record<
     build: async (buf, projectId, _form, titlePrefix) => {
       const { zip, personCount, pageCount } = await buildStaffingStatusZip(buf, projectId, titlePrefix)
       return { zip, summary: { slideCount: pageCount, personCount, detail: `상근감리원 ${personCount}명` } }
+    },
+  },
+  licenseCert: {
+    label: '자격증사본',
+    isPersonBased: true,
+    build: async (buf, projectId, form, titlePrefix) => {
+      const withStamp = form.get('licenseCertWithStamp') === 'true'
+      const rawStampType = form.get('licenseCertStampType')
+      const stampType: CompanyStampType =
+        rawStampType === '사실과상위없음' ? '사실과상위없음' : '원본대조필'
+      // 자유 생성(projectId=0)일 때는 personnelNames 에서 이름 목록을 직접 읽는다
+      const freeNames: string[] = projectId === 0
+        ? (() => {
+            try {
+              const parsed = JSON.parse(form.get('personnelNames') as string || '[]')
+              return (parsed as { name: string; domain: string }[]).map(p => p.name).filter(Boolean)
+            } catch { return [] }
+          })()
+        : []
+      const { zip, personCount, skipped } =
+        await buildLicenseCertificateZip(buf, projectId, withStamp, stampType, titlePrefix, freeNames)
+      const stampLabel = withStamp ? ` · ${stampType}` : ''
+      return {
+        zip,
+        summary: {
+          slideCount: personCount,
+          personCount,
+          skipped,
+          detail: `${personCount}명${stampLabel}` + (skipped.length ? ` (${skipped.length}명 제외)` : ''),
+        },
+      }
     },
   },
 }

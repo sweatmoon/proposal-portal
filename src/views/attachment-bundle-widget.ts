@@ -240,6 +240,7 @@ export function renderAttachmentBundleWidget(): AttachmentBundleWidget {
     { id: 'employmentCert', label: '재직증명서', icon: 'fa-file-contract' },
     { id: 'careerCert',     label: '경력증명서', icon: 'fa-file-contract' },
     { id: 'staffingStatus', label: '상근감리원인력현황', icon: 'fa-users' },
+    { id: 'licenseCert',    label: '자격증사본', icon: 'fa-id-card' },
   ]
   // templateGroup으로 묶이는 항목들이 공유하는 템플릿 업로드 슬롯 정의.
   const TEMPLATE_GROUPS = [
