@@ -101,15 +101,35 @@ function validateStampType(form: FormData): CompanyStampType {
   return stampType
 }
 
+/** 각 항목 생성 결과 요약 */
+export interface AttachmentItemSummary {
+  key: string
+  label: string
+  /** 인력 데이터를 참조하는 서류 여부 (repeat_per_person과 동일한 기준) */
+  isPersonBased: boolean
+  slideCount: number
+  /** 인원 수 (인력반복 서류에서 채워짐) */
+  personCount?: number
+  /** 건너뛴 인원 목록 (이름 없음 등) */
+  skipped?: string[]
+  /** 추가 상세 메시지 */
+  detail?: string
+}
+
 /** 첨부 항목 레지스트리 — 나중에 새 첨부가 생기면 여기에 한 줄만 추가하면 된다.
  *  build()의 titlePrefix는 이 항목이 선택된 순서에서 몇 번째인지("1. " 등)이며, 각 항목의
  *  실제 슬라이드 제목([제목] 자리)에 그대로 반영된다 — 표지 목차 번호와 맞춰서. */
 const ATTACHMENT_TYPES: Record<
   string,
-  { label: string; build: (buf: Buffer, projectId: number, form: FormData, titlePrefix: string) => Promise<JSZip> }
+  {
+    label: string
+    isPersonBased: boolean
+    build: (buf: Buffer, projectId: number, form: FormData, titlePrefix: string) => Promise<{ zip: JSZip; summary: Omit<AttachmentItemSummary, 'key' | 'label' | 'isPersonBased'> }>
+  }
 > = {
   schedule: {
     label: '감리원 일정 현황표',
+    isPersonBased: true,
     build: async (buf, projectId, form, titlePrefix) => {
       let additionalPhaseIds: number[] = []
       const raw = form.get('additionalPhaseIds')
@@ -117,12 +137,13 @@ const ATTACHMENT_TYPES: Record<
         const parsed = JSON.parse(raw)
         if (Array.isArray(parsed)) additionalPhaseIds = parsed.map(Number).filter(n => !Number.isNaN(n))
       }
-      const { zip } = await buildScheduleZip(buf, projectId, additionalPhaseIds, titlePrefix)
-      return zip
+      const { zip, auditorCount, pageCount } = await buildScheduleZip(buf, projectId, additionalPhaseIds, titlePrefix)
+      return { zip, summary: { slideCount: pageCount, personCount: auditorCount, detail: `감리원 ${auditorCount}명` } }
     },
   },
   career: {
     label: '투입 감리원별 실적 및 경력',
+    isPersonBased: true,
     build: async (buf, projectId, form, titlePrefix) => {
       const onePage = form.get('careerOnePage') === 'true'
       let freeOpts: FreeCareerOptions | undefined
@@ -136,43 +157,56 @@ const ATTACHMENT_TYPES: Record<
           personnelNames: namesRaw ? JSON.parse(namesRaw as string) : [],
         }
       }
-      return (await buildCareerZip(buf, projectId, titlePrefix, onePage, freeOpts)).zip
+      const { zip, personCount } = await buildCareerZip(buf, projectId, titlePrefix, onePage, freeOpts)
+      return { zip, summary: { slideCount: personCount * 2, personCount, detail: `투입인력 ${personCount}명` } }
     },
   },
   consent: {
     label: '비상근 감리원 참여 동의서',
-    build: async (buf, projectId, _form, titlePrefix) => (await buildConsentZip(buf, projectId, titlePrefix)).zip,
+    isPersonBased: true,
+    build: async (buf, projectId, _form, titlePrefix) => {
+      const { zip, peopleCount } = await buildConsentZip(buf, projectId, titlePrefix)
+      return { zip, summary: { slideCount: peopleCount, personCount: peopleCount, detail: `비상근 ${peopleCount}명` } }
+    },
   },
   financial: {
     label: '표준재무제표',
-    build: async (buf, projectId, _form, titlePrefix) => (await buildFinancialStatementZip(buf, projectId, titlePrefix)).zip,
+    isPersonBased: false,
+    build: async (buf, projectId, _form, titlePrefix) => {
+      const { zip } = await buildFinancialStatementZip(buf, projectId, titlePrefix)
+      return { zip, summary: { slideCount: 1 } }
+    },
   },
   bizreg: {
     label: '사업자등록증',
+    isPersonBased: false,
     build: async (buf, projectId, form, titlePrefix) => {
       const stampType = validateStampType(form)
       const { zip } = await buildBusinessRegistrationZip(buf, projectId, stampType, titlePrefix)
-      return zip
+      return { zip, summary: { slideCount: 1 } }
     },
   },
   taxcert: {
     label: '국세 납세증명서',
+    isPersonBased: false,
     build: async (buf, projectId, form, titlePrefix) => {
       const stampType = validateStampType(form)
       const { zip } = await buildTaxCertificateZip(buf, projectId, stampType, titlePrefix)
-      return zip
+      return { zip, summary: { slideCount: 1 } }
     },
   },
   localtaxcert: {
     label: '지방세 납세증명서',
+    isPersonBased: false,
     build: async (buf, projectId, form, titlePrefix) => {
       const stampType = validateStampType(form)
       const { zip } = await buildLocalTaxCertificateZip(buf, projectId, stampType, titlePrefix)
-      return zip
+      return { zip, summary: { slideCount: 1 } }
     },
   },
   corpregistry: {
     label: '법인등기부등본',
+    isPersonBased: false,
     build: async (buf, projectId, form, titlePrefix) => {
       const stampType = validateStampType(form)
       const includeCancelledRaw = form.get('corpRegistryIncludeCancelled')
@@ -180,28 +214,41 @@ const ATTACHMENT_TYPES: Record<
         throw new Error('법인등기부등본 말소사항 포함 여부를 선택해주세요')
       }
       const { zip } = await buildCorporateRegistryZip(buf, projectId, includeCancelledRaw === 'true', stampType, titlePrefix)
-      return zip
+      return { zip, summary: { slideCount: 1 } }
     },
   },
   insurance: {
     label: '4대보험 가입확인서',
+    isPersonBased: false,
     build: async (buf, projectId, form, titlePrefix) => {
       const stampType = validateStampType(form)
       const { zip } = await buildInsuranceEnrollmentZip(buf, projectId, stampType, titlePrefix)
-      return zip
+      return { zip, summary: { slideCount: 1 } }
     },
   },
   employmentCert: {
     label: '재직증명서',
-    build: async (buf, projectId, _form, titlePrefix) => (await buildEmploymentCertificateZip(buf, projectId, titlePrefix)).zip,
+    isPersonBased: true,
+    build: async (buf, projectId, _form, titlePrefix) => {
+      const { zip, personCount, skipped } = await buildEmploymentCertificateZip(buf, projectId, titlePrefix)
+      return { zip, summary: { slideCount: personCount, personCount, skipped, detail: `${personCount}명` + (skipped.length ? ` (${skipped.length}명 제외)` : '') } }
+    },
   },
   careerCert: {
     label: '경력증명서',
-    build: async (buf, projectId, _form, titlePrefix) => (await buildCareerCertificateZip(buf, projectId, titlePrefix)).zip,
+    isPersonBased: true,
+    build: async (buf, projectId, _form, titlePrefix) => {
+      const { zip, personCount, skipped } = await buildCareerCertificateZip(buf, projectId, titlePrefix)
+      return { zip, summary: { slideCount: personCount, personCount, skipped, detail: `${personCount}명` + (skipped.length ? ` (${skipped.length}명 제외)` : '') } }
+    },
   },
   staffingStatus: {
     label: '상근감리원인력현황',
-    build: async (buf, projectId, _form, titlePrefix) => (await buildStaffingStatusZip(buf, projectId, titlePrefix)).zip,
+    isPersonBased: true,
+    build: async (buf, projectId, _form, titlePrefix) => {
+      const { zip, personCount, pageCount } = await buildStaffingStatusZip(buf, projectId, titlePrefix)
+      return { zip, summary: { slideCount: pageCount, personCount, detail: `상근감리원 ${personCount}명` } }
+    },
   },
 }
 
@@ -239,6 +286,7 @@ app.post('/:projectId', async (c) => {
 
     // ── 선택된 항목들을 순서대로 생성 (제목 앞 번호는 선택 순서 그대로: 1. 2. 3. ...) ────
     const sectionZips: JSZip[] = []
+    const summaries: AttachmentItemSummary[] = []
     for (let i = 0; i < order.length; i++) {
       const id = order[i]
       const file = form.get(id) as File | null
@@ -246,8 +294,14 @@ app.post('/:projectId', async (c) => {
         return c.json({ ok: false, error: `"${ATTACHMENT_TYPES[id].label}" 템플릿(.pptx) 파일이 필요합니다` }, 400)
       }
       const buf = Buffer.from(await file.arrayBuffer())
-      const zip = await ATTACHMENT_TYPES[id].build(buf, projectId, form, `${i + 1}. `)
+      const { zip, summary } = await ATTACHMENT_TYPES[id].build(buf, projectId, form, `${i + 1}. `)
       sectionZips.push(zip)
+      summaries.push({
+        key: id,
+        label: ATTACHMENT_TYPES[id].label,
+        isPersonBased: ATTACHMENT_TYPES[id].isPersonBased,
+        ...summary,
+      })
     }
 
     // ── 표지: 선택된 순서 그대로 라벨 목록을 만들어 번호를 새로 매긴다 ──────
@@ -261,6 +315,8 @@ app.post('/:projectId', async (c) => {
     const safeName = (projectName || '자유생성').replace(/[\\/:*?"<>|]/g, '_').slice(0, 40)
     c.header('Content-Type', 'application/vnd.openxmlformats-officedocument.presentationml.presentation')
     c.header('Content-Disposition', `attachment; filename="${encodeURIComponent('A_첨부_' + safeName)}.pptx"`)
+    // 항목별 생성 결과 요약 — 프론트에서 팝업으로 표시
+    c.header('X-Bundle-Summary', encodeURIComponent(JSON.stringify(summaries)))
     return c.body(new Uint8Array(outBuffer))
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : String(e)

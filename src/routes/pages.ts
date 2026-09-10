@@ -2045,11 +2045,103 @@ app.get('/ppt-generate', (c) => {
     </div>
   </div>
 
+  <!-- ── 첨부PPT 생성 결과 팝업 모달 ───────────────────────────── -->
+  <div id="bundleResultModal" class="hidden fixed inset-0 bg-black/50 z-[60] flex items-center justify-center p-4">
+    <div class="bg-white rounded-2xl shadow-2xl w-full max-w-lg flex flex-col max-h-[85vh]">
+      <!-- 헤더 -->
+      <div class="flex items-center gap-3 px-6 py-4 border-b border-slate-100 flex-shrink-0">
+        <div class="w-9 h-9 rounded-full bg-emerald-100 flex items-center justify-center flex-shrink-0">
+          <i class="fas fa-check text-emerald-600 text-sm"></i>
+        </div>
+        <div class="flex-1 min-w-0">
+          <h3 class="text-base font-bold text-slate-800">첨부PPT 생성 완료</h3>
+          <p class="text-xs text-slate-400 mt-0.5" id="brSubtitle"></p>
+        </div>
+        <button onclick="closeBundleResultModal()" class="text-slate-400 hover:text-slate-600 text-xl leading-none flex-shrink-0">&times;</button>
+      </div>
+      <!-- 본문 -->
+      <div class="overflow-y-auto flex-1 px-6 py-5 space-y-5" id="brBody">
+        <!-- 동적 렌더링 -->
+      </div>
+      <!-- 푸터 -->
+      <div class="px-6 py-4 border-t border-slate-100 flex-shrink-0">
+        <button onclick="closeBundleResultModal()"
+          class="w-full py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold transition">
+          <i class="fas fa-download mr-1.5"></i>확인 (파일 다운로드 완료)
+        </button>
+      </div>
+    </div>
+  </div>
+
   <script>
   function escapeHtml(s) {
     return String(s).replace(/[&<>"']/g, function(m) {
       return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]
     })
+  }
+
+  // ── 첨부PPT 생성 결과 팝업 ────────────────────────────────────
+  function showBundleResult(summaries, filename) {
+    var personBased = summaries.filter(function(s) { return s.isPersonBased })
+    var simple      = summaries.filter(function(s) { return !s.isPersonBased })
+    var totalSlides = summaries.reduce(function(acc, s) { return acc + (s.slideCount || 0) }, 0) + 1 // +1 표지
+
+    var makeRow = function(s) {
+      var skippedHtml = ''
+      if (s.skipped && s.skipped.length) {
+        skippedHtml = '<div class="mt-1.5 text-[10px] text-amber-600 bg-amber-50 rounded px-2 py-1">'
+          + '<i class="fas fa-exclamation-triangle mr-1"></i>제외: ' + s.skipped.map(escapeHtml).join(', ') + '</div>'
+      }
+      return '<div class="flex items-start gap-2.5 py-2 border-b border-slate-100 last:border-0">'
+        + '<i class="fas fa-file-powerpoint text-indigo-400 text-sm mt-0.5 flex-shrink-0"></i>'
+        + '<div class="flex-1 min-w-0">'
+        + '<div class="text-xs font-semibold text-slate-700">' + escapeHtml(s.label) + '</div>'
+        + (s.detail ? '<div class="text-[11px] text-slate-400 mt-0.5">' + escapeHtml(s.detail) + '</div>' : '')
+        + skippedHtml
+        + '</div>'
+        + '<span class="text-xs font-bold text-indigo-600 flex-shrink-0">' + (s.slideCount || 0) + '장</span>'
+        + '</div>'
+    }
+
+    var bodyHtml = ''
+
+    // ① 인력반복 섹션
+    if (personBased.length) {
+      bodyHtml += '<div>'
+        + '<div class="flex items-center gap-2 mb-2">'
+        + '<span class="text-[10px] px-2 py-0.5 rounded-full font-bold bg-violet-100 text-violet-700">인력반복</span>'
+        + '<span class="text-xs text-slate-500 font-medium">인력 데이터를 참조하는 서류</span>'
+        + '</div>'
+        + '<div class="bg-slate-50 rounded-xl px-3 py-1">'
+        + personBased.map(makeRow).join('')
+        + '</div></div>'
+    }
+
+    // ② 단순첨부 섹션
+    if (simple.length) {
+      bodyHtml += '<div>'
+        + '<div class="flex items-center gap-2 mb-2">'
+        + '<span class="text-[10px] px-2 py-0.5 rounded-full font-bold bg-sky-100 text-sky-600">단순첨부</span>'
+        + '<span class="text-xs text-slate-500 font-medium">인원 수와 무관한 단일 서류</span>'
+        + '</div>'
+        + '<div class="bg-slate-50 rounded-xl px-3 py-1">'
+        + simple.map(makeRow).join('')
+        + '</div></div>'
+    }
+
+    // ③ 합계
+    bodyHtml += '<div class="flex items-center justify-between bg-emerald-50 rounded-xl px-4 py-3 border border-emerald-200">'
+      + '<span class="text-sm font-semibold text-emerald-700">전체 슬라이드 합계</span>'
+      + '<span class="text-lg font-extrabold text-emerald-700">' + totalSlides + '장</span>'
+      + '</div>'
+
+    document.getElementById('brSubtitle').textContent = filename || '다운로드 완료'
+    document.getElementById('brBody').innerHTML = bodyHtml
+    document.getElementById('bundleResultModal').classList.remove('hidden')
+  }
+
+  function closeBundleResultModal() {
+    document.getElementById('bundleResultModal').classList.add('hidden')
   }
 
   // ── 사업 목록 로드 ─────────────────────────────────────────────
@@ -2470,6 +2562,11 @@ app.get('/ppt-generate', (c) => {
         var ej = await r.json().catch(function() { return {} })
         throw new Error(ej.error || ('생성 실패 (' + r.status + ')'))
       }
+      // 결과 요약 헤더 파싱
+      var summaryRaw = r.headers.get('X-Bundle-Summary')
+      var summaries = []
+      if (summaryRaw) { try { summaries = JSON.parse(decodeURIComponent(summaryRaw)) } catch(_) {} }
+
       var blob = await r.blob()
       var cd = r.headers.get('Content-Disposition') || ''
       var m2 = cd.match(/filename\*?=["']?(?:UTF-8'')?([^"';]+)/i)
@@ -2478,6 +2575,8 @@ app.get('/ppt-generate', (c) => {
       var a = document.createElement('a'); a.href = url; a.download = filename
       document.body.appendChild(a); a.click(); a.remove()
       URL.revokeObjectURL(url)
+      // 생성 결과 팝업
+      if (summaries.length) showBundleResult(summaries, filename)
     } catch(e) {
       alert('첨부PPT 생성 실패: ' + e.message)
     } finally {
@@ -2690,6 +2789,11 @@ app.get('/ppt-generate', (c) => {
         var ej = await r.json().catch(function(){return{}})
         throw new Error(ej.error || ('생성 실패 (' + r.status + ')'))
       }
+      // 결과 요약 헤더 파싱
+      var summaryRaw = r.headers.get('X-Bundle-Summary')
+      var summaries = []
+      if (summaryRaw) { try { summaries = JSON.parse(decodeURIComponent(summaryRaw)) } catch(_) {} }
+
       var blob = await r.blob()
       var cd = r.headers.get('Content-Disposition') || ''
       var m2 = cd.match(/filename\*?=["']?(?:UTF-8'')?([^"';]+)/i)
@@ -2698,6 +2802,8 @@ app.get('/ppt-generate', (c) => {
       var a = document.createElement('a'); a.href = url; a.download = filename
       document.body.appendChild(a); a.click(); a.remove()
       URL.revokeObjectURL(url)
+      // 생성 결과 팝업
+      if (summaries.length) showBundleResult(summaries, filename)
     } catch(e) {
       alert('첨부PPT 생성 실패: ' + e.message)
     } finally {
