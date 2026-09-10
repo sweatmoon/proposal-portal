@@ -306,26 +306,40 @@ export async function fetchStaffingStatusXlsx(): Promise<Buffer | null> {
 }
 
 // "원본대조필"/"사실과상위없음" 도장 이미지가 있는 폴더 — 같은 도장이 배경 제거 버전으로
-// 여러 장(_1~_5) 들어있는데, 어느 걸 골라도 상관없어서(2026-09-03 사용자 확인: "아무거나")
-// 이름순으로 첫 번째 것만 쓴다.
+// 여러 장(_1~_5) 들어있는데, 번호를 지정하지 않으면 이름순으로 첫 번째 것만 쓴다.
+// "사용인감" 도장은 같은 폴더에 사용인감01.png~사용인감05.png 로 들어있다.
 const COMPANY_STAMP_FOLDER = '/activo/04.제안팀/99.악티보포털참조용/04.도장/01.회사도장/원본대조필, 사실과상위없음도장'
 
-export type CompanyStampType = '원본대조필' | '사실과상위없음'
+export type CompanyStampType = '원본대조필' | '사실과상위없음' | '사용인감'
 
-/** NAS에서 "원본대조필" 또는 "사실과상위없음" 도장 이미지 중 하나를 받아옵니다.
- *  못 찾으면 null. */
-export async function fetchCompanyStampPng(stampType: CompanyStampType): Promise<Buffer | null> {
+/** NAS에서 회사 도장 이미지를 받아옵니다. 못 찾으면 null.
+ *  - 원본대조필 / 사실과상위없음: stampNumber(1~5)로 _1~_5 버전 지정. 생략 시 이름순 첫 번째.
+ *  - 사용인감: stampNumber(1~5)로 01~05 파일 지정. 생략 시 01. */
+export async function fetchCompanyStampPng(stampType: CompanyStampType, stampNumber = 1): Promise<Buffer | null> {
   if (!NAS_BASE_URL || !NAS_USERNAME || !NAS_PASSWORD) {
     console.warn('[nas-client] NAS_BASE_URL/NAS_USERNAME/NAS_PASSWORD 환경변수가 없어 도장 조회를 건너뜁니다.')
     return null
   }
-  return withNasRetry(`도장(${stampType}) 조회`, async sid => {
+  return withNasRetry(`도장(${stampType}${stampType === '사용인감' ? stampNumber : ''}) 조회`, async sid => {
     const files = await listFolder(sid, COMPANY_STAMP_FOLDER)
-    const prefix = `${stampType}_`
-    const matched = files
-      .filter(f => !f.isdir && f.name.startsWith(prefix))
-      .sort((a, b) => a.name.localeCompare(b.name))[0]
-    if (!matched) throw new Error('도장 파일을 찾지 못함: ' + prefix)
+    let matched: { name: string } | undefined
+
+    if (stampType === '사용인감') {
+      // 사용인감01.png ~ 사용인감05.png
+      const num = String(Math.max(1, Math.min(5, stampNumber))).padStart(2, '0')
+      matched = files.find(f => !f.isdir && f.name === `사용인감${num}.png`)
+      if (!matched) throw new Error(`도장 파일을 찾지 못함: 사용인감${num}.png`)
+    } else {
+      // 원본대조필_N_-removebg-preview.png / 사실과상위없음_N_-removebg-preview.png
+      const prefix = `${stampType}_`
+      const candidates = files
+        .filter(f => !f.isdir && f.name.startsWith(prefix))
+        .sort((a, b) => a.name.localeCompare(b.name))
+      const n = Math.max(1, Math.min(5, stampNumber)) - 1  // 0-based index
+      matched = candidates[n] ?? candidates[0]
+      if (!matched) throw new Error('도장 파일을 찾지 못함: ' + prefix)
+    }
+
     const buf = await downloadFile(sid, `${COMPANY_STAMP_FOLDER}/${matched.name}`)
     if (!buf) throw new Error('다운로드 실패: ' + matched.name)
     return buf

@@ -26,7 +26,7 @@ import { query, queryOne } from '../db/client.js'
 const app = new Hono()
 
 const PAGE_TITLE = '자격증사본'
-const STAMP_TYPES: CompanyStampType[] = ['원본대조필', '사실과상위없음']
+const STAMP_TYPES: CompanyStampType[] = ['원본대조필', '사실과상위없음', '사용인감']
 
 export interface LicenseCertificateZipResult {
   zip: JSZip
@@ -259,7 +259,8 @@ export async function buildLicenseCertificateZip(
   withStamp = false,
   stampType: CompanyStampType = '원본대조필',
   titlePrefix = '',
-  freePersonnelNames: string[] = []
+  freePersonnelNames: string[] = [],
+  stampNumber = 1
 ): Promise<LicenseCertificateZipResult> {
 
   // ── 인력 목록 / 사업명 조회 ──────────────────────────────────────────────
@@ -284,7 +285,7 @@ export async function buildLicenseCertificateZip(
   // ── NAS 병렬 취득 ────────────────────────────────────────────────────────
   const [pptxMap, stampPng] = await Promise.all([
     fetchAuditorCertificatePptxs(names),
-    withStamp ? fetchCompanyStampPng(stampType) : Promise.resolve(null),
+    withStamp ? fetchCompanyStampPng(stampType, stampNumber) : Promise.resolve(null),
   ])
 
   const skipped: string[] = []
@@ -428,7 +429,7 @@ app.post('/:projectId', async (c) => {
     if (withStamp) {
       const raw = form.get('stampType')
       if (typeof raw !== 'string' || !STAMP_TYPES.includes(raw as CompanyStampType)) {
-        return c.json({ ok: false, error: 'stampType은 "원본대조필" 또는 "사실과상위없음"이어야 합니다' }, 400)
+        return c.json({ ok: false, error: 'stampType은 "원본대조필" 또는 "사실과상위없음" 또는 "사용인감"이어야 합니다' }, 400)
       }
       stampType = raw as CompanyStampType
     }

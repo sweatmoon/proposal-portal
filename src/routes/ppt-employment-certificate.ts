@@ -26,14 +26,16 @@ export interface EmploymentCertificateZipResult {
 /** 이 파일의 핵심 로직 — 단독 다운로드 라우트와 첨부 묶음 라우트 양쪽에서 호출한다.
  *  titlePrefix: 첨부PPT 묶음에서 이 항목이 몇 번째로 선택됐는지("6. " 등)를 제목 앞에 붙인다
  *  (단독 다운로드일 때는 생략되어 빈 문자열 — 기존과 동일하게 번호 없이 나온다).
- *  freePersonnelNames: projectId=0(자유 생성) 시 직접 전달하는 인력 이름 배열. */
+ *  freePersonnelNames: projectId=0(자유 생성) 시 직접 전달하는 인력 이름 배열.
+ *  freeDeadlineDate: 자유 생성 시 [제출마감하루전]에 넣을 날짜(YYYY-MM-DD 또는 빈 문자열). */
 export async function buildEmploymentCertificateZip(
   templateBuf: Buffer,
   projectId: number,
   titlePrefix = '',
-  freePersonnelNames: string[] = []
+  freePersonnelNames: string[] = [],
+  freeDeadlineDate = ''
 ): Promise<EmploymentCertificateZipResult> {
-  return buildEmployeeCertificateZip(templateBuf, projectId, PAGE_TITLE, titlePrefix, freePersonnelNames)
+  return buildEmployeeCertificateZip(templateBuf, projectId, PAGE_TITLE, titlePrefix, freePersonnelNames, freeDeadlineDate)
 }
 
 app.post('/:projectId', async (c) => {

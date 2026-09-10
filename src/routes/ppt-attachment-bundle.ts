@@ -96,10 +96,16 @@ const app = new Hono()
  *  전부 같은 stampType 검증을 공유해서 뺐다(2026-09-03 — 이제 4곳에서 씀). */
 function validateStampType(form: FormData): CompanyStampType {
   const stampType = form.get('stampType')
-  if (stampType !== '원본대조필' && stampType !== '사실과상위없음') {
-    throw new Error('찍을 도장 종류(원본대조필/사실과상위없음)를 선택해주세요')
+  if (stampType !== '원본대조필' && stampType !== '사실과상위없음' && stampType !== '사용인감') {
+    throw new Error('찍을 도장 종류(원본대조필/사실과상위없음/사용인감)를 선택해주세요')
   }
   return stampType
+}
+
+/** form 에서 stampNumber(1~5)를 파싱. 범위 밖이거나 없으면 1. */
+function parseStampNumber(form: FormData, key = 'stampNumber'): number {
+  const raw = Number(form.get(key))
+  return Number.isFinite(raw) && raw >= 1 && raw <= 5 ? raw : 1
 }
 
 /** 각 항목 생성 결과 요약 */
@@ -240,7 +246,9 @@ const ATTACHMENT_TYPES: Record<
             } catch { return [] }
           })()
         : []
-      const { zip, personCount, skipped } = await buildEmploymentCertificateZip(buf, projectId, titlePrefix, freeNames)
+      // 자유 생성 시 사용자가 선택한 날짜(YYYY-MM-DD) — 비어있으면 오늘 날짜 fallback
+      const freeDeadlineDate = projectId === 0 ? (form.get('freeDeadlineDate') as string || '') : ''
+      const { zip, personCount, skipped } = await buildEmploymentCertificateZip(buf, projectId, titlePrefix, freeNames, freeDeadlineDate)
       return { zip, summary: { slideCount: personCount, personCount, skipped, detail: `${personCount}명` + (skipped.length ? ` (${skipped.length}명 제외)` : '') } }
     },
   },
@@ -251,7 +259,10 @@ const ATTACHMENT_TYPES: Record<
       const withStamp = form.get('careerCertWithStamp') === 'true'
       const rawStampType = form.get('careerCertStampType')
       const stampType: CompanyStampType =
-        rawStampType === '사실과상위없음' ? '사실과상위없음' : '원본대조필'
+        rawStampType === '사실과상위없음' ? '사실과상위없음'
+        : rawStampType === '사용인감' ? '사용인감'
+        : '원본대조필'
+      const stampNumber = parseStampNumber(form, 'careerCertStampNumber')
       // 자유 생성(projectId=0)일 때는 personnelNames 에서 이름 목록을 직접 읽는다
       // parseFreePersonnel이 { name, domain } 객체 배열을 반환하므로 .name만 추출
       const freeNames: string[] = projectId === 0
@@ -263,8 +274,8 @@ const ATTACHMENT_TYPES: Record<
           })()
         : []
       const { zip, personCount, skipped } =
-        await buildCareerCertificateZip(buf, projectId, withStamp, stampType, titlePrefix, freeNames)
-      const stampLabel = withStamp ? ` · ${stampType}` : ''
+        await buildCareerCertificateZip(buf, projectId, withStamp, stampType, titlePrefix, freeNames, stampNumber)
+      const stampLabel = withStamp ? ` · ${stampType}${stampType === '사용인감' ? stampNumber : ''}` : ''
       return {
         zip,
         summary: {
@@ -291,7 +302,10 @@ const ATTACHMENT_TYPES: Record<
       const withStamp = form.get('licenseCertWithStamp') === 'true'
       const rawStampType = form.get('licenseCertStampType')
       const stampType: CompanyStampType =
-        rawStampType === '사실과상위없음' ? '사실과상위없음' : '원본대조필'
+        rawStampType === '사실과상위없음' ? '사실과상위없음'
+        : rawStampType === '사용인감' ? '사용인감'
+        : '원본대조필'
+      const stampNumber = parseStampNumber(form, 'licenseCertStampNumber')
       // 자유 생성(projectId=0)일 때는 personnelNames 에서 이름 목록을 직접 읽는다
       const freeNames: string[] = projectId === 0
         ? (() => {
@@ -302,8 +316,8 @@ const ATTACHMENT_TYPES: Record<
           })()
         : []
       const { zip, personCount, slideCount, skipped } =
-        await buildLicenseCertificateZip(buf, projectId, withStamp, stampType, titlePrefix, freeNames)
-      const stampLabel = withStamp ? ` · ${stampType}` : ''
+        await buildLicenseCertificateZip(buf, projectId, withStamp, stampType, titlePrefix, freeNames, stampNumber)
+      const stampLabel = withStamp ? ` · ${stampType}${stampType === '사용인감' ? stampNumber : ''}` : ''
       return {
         zip,
         summary: {

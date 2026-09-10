@@ -33,7 +33,7 @@ import { query, queryOne } from '../db/client.js'
 const app = new Hono()
 
 const PAGE_TITLE = '경력증명서'
-const STAMP_TYPES: CompanyStampType[] = ['원본대조필', '사실과상위없음']
+const STAMP_TYPES: CompanyStampType[] = ['원본대조필', '사실과상위없음', '사용인감']
 
 export interface CareerCertificateZipResult {
   zip: JSZip
@@ -58,7 +58,8 @@ export async function buildCareerCertificateZip(
   withStamp = false,
   stampType: CompanyStampType = '원본대조필',
   titlePrefix = '',
-  freePersonnelNames: string[] = []
+  freePersonnelNames: string[] = [],
+  stampNumber = 1
 ): Promise<CareerCertificateZipResult> {
   let names: string[]
   let projectName: string
@@ -82,7 +83,7 @@ export async function buildCareerCertificateZip(
   // NAS에서 이름별 PDF + 도장 이미지 병렬 취득
   const [pdfMap, stampPng] = await Promise.all([
     fetchCareerCertPdfs(names),
-    withStamp ? fetchCompanyStampPng(stampType) : Promise.resolve(null),
+    withStamp ? fetchCompanyStampPng(stampType, stampNumber) : Promise.resolve(null),
   ])
 
   const skipped: string[] = []
@@ -145,7 +146,7 @@ app.post('/:projectId', async (c) => {
     if (withStamp) {
       const raw = form.get('stampType')
       if (typeof raw !== 'string' || !STAMP_TYPES.includes(raw as CompanyStampType)) {
-        return c.json({ ok: false, error: 'stampType은 "원본대조필" 또는 "사실과상위없음"이어야 합니다' }, 400)
+        return c.json({ ok: false, error: 'stampType은 "원본대조필" 또는 "사실과상위없음" 또는 "사용인감"이어야 합니다' }, 400)
       }
       stampType = raw as CompanyStampType
     }

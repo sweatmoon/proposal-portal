@@ -144,13 +144,16 @@ async function _buildWithDirectory(
 
 /** titlePrefix: 첨부PPT 묶음에서 이 항목이 몇 번째로 선택됐는지("6. " 등)를 제목 앞에 붙인다
  *  (단독 다운로드일 때는 생략되어 빈 문자열 — 기존과 동일하게 번호 없이 나온다).
- *  freePersonnelNames: projectId=0(자유 생성) 시 직접 전달하는 인력 이름 배열. */
+ *  freePersonnelNames: projectId=0(자유 생성) 시 직접 전달하는 인력 이름 배열.
+ *  freeDeadlineDate: 자유 생성 시 [제출마감하루전]에 넣을 날짜(YYYY-MM-DD 또는 빈 문자열).
+ *                   비어있으면 오늘 날짜 fallback. */
 export async function buildEmployeeCertificateZip(
   templateBuf: Buffer,
   projectId: number,
   pageTitle: string,
   titlePrefix = '',
-  freePersonnelNames: string[] = []
+  freePersonnelNames: string[] = [],
+  freeDeadlineDate = ''
 ): Promise<EmployeeCertificateZipResult> {
   if (projectId === 0) {
     // ── 자유 생성 — DB 조회 없이 전달받은 이름 목록 사용 ───────────────────
@@ -158,12 +161,18 @@ export async function buildEmployeeCertificateZip(
     const sourceXlsx = await fetchEmploymentCertificateSourceXlsx()
     if (!sourceXlsx) throw new Error('NAS에서 재직증명서 발행파일을 가져오지 못했습니다')
     const directory = await loadEmployeeDirectory(sourceXlsx)
-    // 사업 마감일 없음 → 오늘 날짜를 [제출마감하루전] 자리에 사용
-    const today = new Date()
-    const y = today.getFullYear()
-    const mo = String(today.getMonth() + 1).padStart(2, '0')
-    const da = String(today.getDate()).padStart(2, '0')
-    const deadlineMinusOne = `${y}년 ${mo}월 ${da}일`
+    // freeDeadlineDate(YYYY-MM-DD)가 있으면 변환, 없으면 오늘 날짜 fallback
+    let deadlineMinusOne: string
+    if (freeDeadlineDate && /^\d{4}-\d{2}-\d{2}$/.test(freeDeadlineDate)) {
+      const [y, mo, da] = freeDeadlineDate.split('-')
+      deadlineMinusOne = `${y}년 ${mo}월 ${da}일`
+    } else {
+      const today = new Date()
+      const y = today.getFullYear()
+      const mo = String(today.getMonth() + 1).padStart(2, '0')
+      const da = String(today.getDate()).padStart(2, '0')
+      deadlineMinusOne = `${y}년 ${mo}월 ${da}일`
+    }
     return _buildWithDirectory(templateBuf, freePersonnelNames, directory, deadlineMinusOne, '자유생성', pageTitle, titlePrefix)
   }
 
