@@ -16,7 +16,7 @@
  */
 import JSZip from 'jszip'
 import { applyPlaceholderMap } from './pptx-runtext.js'
-import { findPicPlaceholdersBySize, replaceOnePlaceholder } from './pptx-image-swap.js'
+import { findPicPlaceholdersBySize, replaceOnePlaceholder, removePicByTarget } from './pptx-image-swap.js'
 import { buildMultiSlideDeck } from './pptx-deck.js'
 
 export async function buildStampedDeckZip(
@@ -59,6 +59,9 @@ export async function buildStampedDeckZip(
     await replaceOnePlaceholder(zip, slideFile, bigTarget, bigImages[i], `${mediaPrefix}_big_${slideNum}.png`, false)
     if (smallImage) {
       await replaceOnePlaceholder(zip, slideFile, smallTarget, smallImage, `${mediaPrefix}_stamp_${slideNum}.png`, true)
+    } else {
+      // 도장 없음 — 작은 자리 더미 이미지가 출력물에 남지 않도록 XML 요소 자체를 제거
+      await removePicByTarget(zip, slideFile, smallTarget)
     }
   }
 

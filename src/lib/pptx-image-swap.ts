@@ -202,6 +202,44 @@ export async function findPicPlaceholdersBySize(
   return results
 }
 
+/**
+ * slideFile 안에서 target을 참조하는 <p:pic> 요소를 슬라이드 XML에서 완전히 제거하고,
+ * .rels 파일의 해당 Relationship도 삭제한다.
+ * "도장 없음" 선택 시 작은 자리 더미 이미지가 출력물에 남지 않도록 호출한다.
+ */
+export async function removePicByTarget(
+  zip: JSZip,
+  slideFile: string,
+  target: string
+): Promise<void> {
+  const relsFile = slideFile.replace('ppt/slides/', 'ppt/slides/_rels/') + '.rels'
+  const relsEntry = zip.file(relsFile)
+  const slideEntry = zip.file(slideFile)
+  if (!relsEntry || !slideEntry) return
+
+  const relsXml = await relsEntry.async('string')
+  if (!relsXml.includes(`Target="${target}"`)) return
+
+  // rels에서 해당 Relationship 행 제거 + rId 추출
+  const rId = findRelIdByTarget(relsXml, target)
+  const newRels = relsXml.replace(
+    new RegExp(`\\s*<Relationship[^>]*Id="${rId}"[^>]*/>`, 'g'),
+    ''
+  )
+  zip.file(relsFile, newRels)
+
+  // 슬라이드 XML에서 해당 rId를 embed하는 <p:pic>…</p:pic> 블록 전체 제거
+  if (rId) {
+    const slideXml = await slideEntry.async('string')
+    // <p:pic> 블록은 중첩 없이 평탄하므로 non-greedy 매칭으로 안전하게 제거
+    const cleaned = slideXml.replace(
+      new RegExp(`<p:pic>(?:(?!<p:pic>)[\\s\\S])*?r:embed="${rId}"[\\s\\S]*?<\\/p:pic>`, 'g'),
+      ''
+    )
+    zip.file(slideFile, cleaned)
+  }
+}
+
 /** findPicPlaceholdersBySize로 찾은 자리 하나(target)를 실제 이미지로 바꿔치기한다.
  *  슬라이드 복제가 없는 단일 슬라이드 전용 — replaceSlideImages와 달리 슬라이드 번호가
  *  없으므로 media 파일명을 mediaName으로 그대로 지정한다.
