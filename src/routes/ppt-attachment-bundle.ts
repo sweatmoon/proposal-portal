@@ -258,10 +258,9 @@ const ATTACHMENT_TYPES: Record<
     build: async (buf, projectId, form, titlePrefix) => {
       const withStamp = form.get('careerCertWithStamp') === 'true'
       const rawStampType = form.get('careerCertStampType')
+      // 서류 도장에는 사용인감 미사용 — 원본대조필/사실과상위없음만 허용
       const stampType: CompanyStampType =
-        rawStampType === '사실과상위없음' ? '사실과상위없음'
-        : rawStampType === '사용인감' ? '사용인감'
-        : '원본대조필'
+        rawStampType === '사실과상위없음' ? '사실과상위없음' : '원본대조필'
       const stampNumber = parseStampNumber(form, 'careerCertStampNumber')
       // 자유 생성(projectId=0)일 때는 personnelNames 에서 이름 목록을 직접 읽는다
       // parseFreePersonnel이 { name, domain } 객체 배열을 반환하므로 .name만 추출
@@ -275,7 +274,7 @@ const ATTACHMENT_TYPES: Record<
         : []
       const { zip, personCount, skipped } =
         await buildCareerCertificateZip(buf, projectId, withStamp, stampType, titlePrefix, freeNames, stampNumber)
-      const stampLabel = withStamp ? ` · ${stampType}${stampType === '사용인감' ? stampNumber : ''}` : ''
+      const stampLabel = withStamp ? ` · ${stampType}${stampNumber}` : ''
       return {
         zip,
         summary: {
@@ -301,10 +300,9 @@ const ATTACHMENT_TYPES: Record<
     build: async (buf, projectId, form, titlePrefix) => {
       const withStamp = form.get('licenseCertWithStamp') === 'true'
       const rawStampType = form.get('licenseCertStampType')
+      // 서류 도장에는 사용인감 미사용 — 원본대조필/사실과상위없음만 허용
       const stampType: CompanyStampType =
-        rawStampType === '사실과상위없음' ? '사실과상위없음'
-        : rawStampType === '사용인감' ? '사용인감'
-        : '원본대조필'
+        rawStampType === '사실과상위없음' ? '사실과상위없음' : '원본대조필'
       const stampNumber = parseStampNumber(form, 'licenseCertStampNumber')
       // 자유 생성(projectId=0)일 때는 personnelNames 에서 이름 목록을 직접 읽는다
       const freeNames: string[] = projectId === 0
@@ -317,7 +315,7 @@ const ATTACHMENT_TYPES: Record<
         : []
       const { zip, personCount, slideCount, skipped } =
         await buildLicenseCertificateZip(buf, projectId, withStamp, stampType, titlePrefix, freeNames, stampNumber)
-      const stampLabel = withStamp ? ` · ${stampType}${stampType === '사용인감' ? stampNumber : ''}` : ''
+      const stampLabel = withStamp ? ` · ${stampType}${stampNumber}` : ''
       return {
         zip,
         summary: {

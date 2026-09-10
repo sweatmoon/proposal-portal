@@ -2028,10 +2028,6 @@ app.get('/ppt-generate', (c) => {
               <input type="radio" name="freeCareerCertStampOpt" value="사실과상위없음" onchange="onFreeStampChange('career',this)">
               사실과상위없음
             </label>
-            <label class="flex items-center gap-1.5 text-xs text-slate-600 cursor-pointer">
-              <input type="radio" name="freeCareerCertStampOpt" value="사용인감" onchange="onFreeStampChange('career',this)">
-              사용인감
-            </label>
             <span id="freeCareerStampNumberWrap" class="hidden items-center gap-1 text-xs text-slate-600">
               <span class="text-slate-400">번호:</span>
               ${[1,2,3,4,5].map(n => `<label class="flex items-center gap-0.5 cursor-pointer"><input type="radio" name="freeCareerCertStampNumber" value="${n}" ${n===1?'checked':''}><span>${n}</span></label>`).join('')}
@@ -2056,10 +2052,6 @@ app.get('/ppt-generate', (c) => {
             <label class="flex items-center gap-1.5 text-xs text-slate-600 cursor-pointer">
               <input type="radio" name="freeLicenseCertStampOpt" value="사실과상위없음" onchange="onFreeStampChange('license',this)">
               사실과상위없음
-            </label>
-            <label class="flex items-center gap-1.5 text-xs text-slate-600 cursor-pointer">
-              <input type="radio" name="freeLicenseCertStampOpt" value="사용인감" onchange="onFreeStampChange('license',this)">
-              사용인감
             </label>
             <span id="freeLicenseStampNumberWrap" class="hidden items-center gap-1 text-xs text-slate-600">
               <span class="text-slate-400">번호:</span>
@@ -2124,10 +2116,6 @@ app.get('/ppt-generate', (c) => {
             <input type="radio" name="careerCertStampOpt" value="사실과상위없음" onchange="onCareerCertStampChange(this)">
             사실과상위없음
           </label>
-          <label class="flex items-center gap-1.5 cursor-pointer text-xs text-slate-600">
-            <input type="radio" name="careerCertStampOpt" value="사용인감" onchange="onCareerCertStampChange(this)">
-            사용인감
-          </label>
           <span id="careerCertStampNumberWrap" class="hidden items-center gap-1 text-xs text-slate-600">
             <span class="text-slate-400">번호:</span>
             ${[1,2,3,4,5].map(n => `<label class="flex items-center gap-0.5 cursor-pointer"><input type="radio" name="careerCertStampNumber" value="${n}" ${n===1?'checked':''}><span>${n}</span></label>`).join('')}
@@ -2142,7 +2130,7 @@ app.get('/ppt-generate', (c) => {
             <i class="fas fa-stamp text-pink-400"></i>자격증사본 도장
           </span>
           <label class="flex items-center gap-1.5 cursor-pointer text-xs text-slate-600">
-            <input type="radio" name="licenseCertStampOpt" value="none" checked>
+            <input type="radio" name="licenseCertStampOpt" value="none" checked onchange="onLicenseCertStampChange(this)">
             도장 없음
           </label>
           <label class="flex items-center gap-1.5 cursor-pointer text-xs text-slate-600">
@@ -2152,10 +2140,6 @@ app.get('/ppt-generate', (c) => {
           <label class="flex items-center gap-1.5 cursor-pointer text-xs text-slate-600">
             <input type="radio" name="licenseCertStampOpt" value="사실과상위없음" onchange="onLicenseCertStampChange(this)">
             사실과상위없음
-          </label>
-          <label class="flex items-center gap-1.5 cursor-pointer text-xs text-slate-600">
-            <input type="radio" name="licenseCertStampOpt" value="사용인감" onchange="onLicenseCertStampChange(this)">
-            사용인감
           </label>
           <span id="licenseCertStampNumberWrap" class="hidden items-center gap-1 text-xs text-slate-600">
             <span class="text-slate-400">번호:</span>
@@ -2603,16 +2587,17 @@ app.get('/ppt-generate', (c) => {
   function onCareerCertStampChange(radio) {
     var wrap = document.getElementById('careerCertStampNumberWrap')
     if (wrap) {
-      if (radio.value === '사용인감') { wrap.classList.remove('hidden'); wrap.classList.add('flex') }
-      else { wrap.classList.add('hidden'); wrap.classList.remove('flex') }
+      // 도장 없음 선택 시만 번호 wrap 숨김 — 원본대조필/사실과상위없음 모두 번호 선택 필요
+      if (radio.value === 'none') { wrap.classList.add('hidden'); wrap.classList.remove('flex') }
+      else { wrap.classList.remove('hidden'); wrap.classList.add('flex') }
     }
   }
 
   function onLicenseCertStampChange(radio) {
     var wrap = document.getElementById('licenseCertStampNumberWrap')
     if (wrap) {
-      if (radio.value === '사용인감') { wrap.classList.remove('hidden'); wrap.classList.add('flex') }
-      else { wrap.classList.add('hidden'); wrap.classList.remove('flex') }
+      if (radio.value === 'none') { wrap.classList.add('hidden'); wrap.classList.remove('flex') }
+      else { wrap.classList.remove('hidden'); wrap.classList.add('flex') }
     }
   }
 
@@ -2620,8 +2605,8 @@ app.get('/ppt-generate', (c) => {
     var wrapId = kind === 'career' ? 'freeCareerStampNumberWrap' : 'freeLicenseStampNumberWrap'
     var wrap = document.getElementById(wrapId)
     if (wrap) {
-      if (radio.value === '사용인감') { wrap.classList.remove('hidden'); wrap.classList.add('flex') }
-      else { wrap.classList.add('hidden'); wrap.classList.remove('flex') }
+      if (radio.value === 'none') { wrap.classList.add('hidden'); wrap.classList.remove('flex') }
+      else { wrap.classList.remove('hidden'); wrap.classList.add('flex') }
     }
   }
 
