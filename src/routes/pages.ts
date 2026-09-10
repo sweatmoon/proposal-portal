@@ -3036,6 +3036,12 @@ app.get('/ppt-templates', async (c) => {
       const badge = isAttachmentTab
         ? (hasTemplate ? '등록' : '미등록')
         : (hasRule ? '규칙' : (isSection ? '섹션' : '미설정'))
+      // attachment 탭 전용: 인력반복/단순첨부 유형 배지
+      const repeatBadge = isAttachmentTab
+        ? (n.repeat_per_person
+            ? \`<span class="text-[10px] px-1.5 py-0.5 rounded-full font-medium bg-violet-100 text-violet-600 flex-shrink-0">인력반복</span>\`
+            : \`<span class="text-[10px] px-1.5 py-0.5 rounded-full font-medium bg-sky-50 text-sky-500 flex-shrink-0">단순첨부</span>\`)
+        : ''
       const iconCls = isAttachmentTab
         ? (hasTemplate ? 'fa-file-powerpoint text-teal-400' : 'fa-file text-slate-300')
         : (isSection ? 'fa-folder text-amber-400' : (hasRule ? 'fa-file-powerpoint text-indigo-400' : 'fa-file text-slate-300'))
@@ -3051,6 +3057,7 @@ app.get('/ppt-templates', async (c) => {
             <span class="text-xs \${n.is_enabled ? 'text-slate-700' : 'text-slate-400 line-through'} flex-1 min-w-0 truncate" title="\${n.menu_name}">
               \${n.menu_number ? '<span class=\\"text-slate-400\\">' + n.menu_number + '</span> ' : ''}\${n.menu_name}
             </span>
+            \${repeatBadge}
             <span class="text-xs px-1.5 py-0.5 rounded-full font-medium \${badgeColor} flex-shrink-0">\${badge}</span>
           </div>
         </div>
@@ -3269,14 +3276,38 @@ app.get('/ppt-templates', async (c) => {
     const tpl     = templates[0] || null
     const fileName = tpl ? (tpl.pptx_file_path || (tpl.pptx_b64_key ? '업로드됨' : null)) : null
 
+    // 유형 정보 (repeat_per_person 기반)
+    const isRepeat = !!menu.repeat_per_person
+    const typeLabel = isRepeat ? '인력별 반복 서류' : '단순 첨부 서류'
+    const typeDesc  = isRepeat
+      ? (menu.menu_code === 'ATT_CONSENT'
+          ? '비상근 인력 1명당 슬라이드 1장씩 복제됩니다.'
+          : '투입 인력 전원 1명당 슬라이드 세트가 복제됩니다.')
+      : '인원 수와 무관하게 단일 문서로 첨부됩니다.'
+    const typeBgCls  = isRepeat ? 'bg-violet-50 border-violet-200' : 'bg-sky-50 border-sky-200'
+    const typeIconCls = isRepeat ? 'fa-users text-violet-400' : 'fa-file-alt text-sky-400'
+    const typeBadgeCls = isRepeat ? 'bg-violet-100 text-violet-700' : 'bg-sky-100 text-sky-600'
+
     document.getElementById('detailPanel').innerHTML = \`
       <div class="p-6 h-full overflow-y-auto">
 
         <!-- 항목 이름 -->
-        <div class="flex items-center gap-2 mb-5">
+        <div class="flex items-center gap-2 mb-4">
           <i class="fas fa-paperclip text-teal-400 text-lg"></i>
           <h2 class="text-base font-bold text-slate-800">\${menu.menu_name}</h2>
           <code class="text-xs bg-teal-50 text-teal-500 px-2 py-0.5 rounded ml-auto">\${menu.menu_code}</code>
+        </div>
+
+        <!-- 서류 유형 안내 -->
+        <div class="mb-4 p-3 rounded-xl border \${typeBgCls} flex items-start gap-2.5">
+          <i class="fas \${typeIconCls} text-base mt-0.5 flex-shrink-0"></i>
+          <div class="flex-1 min-w-0">
+            <div class="flex items-center gap-2 mb-0.5">
+              <span class="text-xs font-semibold text-slate-700">\${typeLabel}</span>
+              <span class="text-[10px] px-1.5 py-0.5 rounded-full font-medium \${typeBadgeCls}">\${isRepeat ? '인력반복' : '단순첨부'}</span>
+            </div>
+            <p class="text-xs text-slate-500">\${typeDesc}</p>
+          </div>
         </div>
 
         <!-- 현재 템플릿 상태 -->
