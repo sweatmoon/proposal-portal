@@ -230,8 +230,17 @@ const ATTACHMENT_TYPES: Record<
   employmentCert: {
     label: '재직증명서',
     isPersonBased: true,
-    build: async (buf, projectId, _form, titlePrefix) => {
-      const { zip, personCount, skipped } = await buildEmploymentCertificateZip(buf, projectId, titlePrefix)
+    build: async (buf, projectId, form, titlePrefix) => {
+      // 자유 생성(projectId=0)일 때는 personnelNames 에서 이름 목록을 직접 읽는다
+      const freeNames: string[] = projectId === 0
+        ? (() => {
+            try {
+              const parsed = JSON.parse(form.get('personnelNames') as string || '[]')
+              return (parsed as { name: string; domain: string }[]).map(p => p.name).filter(Boolean)
+            } catch { return [] }
+          })()
+        : []
+      const { zip, personCount, skipped } = await buildEmploymentCertificateZip(buf, projectId, titlePrefix, freeNames)
       return { zip, summary: { slideCount: personCount, personCount, skipped, detail: `${personCount}명` + (skipped.length ? ` (${skipped.length}명 제외)` : '') } }
     },
   },
