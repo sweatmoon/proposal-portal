@@ -3196,7 +3196,9 @@ app.get('/ppt-templates', async (c) => {
     const typeDesc  = isRepeat
       ? (menu.menu_code === 'ATT_CONSENT'
           ? '비상근 인력 1명당 슬라이드 1장씩 복제됩니다.'
-          : '투입 인력 전원 1명당 슬라이드 세트가 복제됩니다.')
+          : menu.menu_code === 'ATT_SCHEDULE' || menu.menu_code === 'ATT_STAFFING'
+            ? '인력 데이터를 표 행으로 채우며, 인원이 많으면 슬라이드가 분할됩니다.'
+            : '투입 인력 전원에 대해 슬라이드가 복제됩니다.')
       : '인원 수와 무관하게 단일 문서로 첨부됩니다.'
     const typeBgCls  = isRepeat ? 'bg-violet-50 border-violet-200' : 'bg-sky-50 border-sky-200'
     const typeIconCls = isRepeat ? 'fa-users text-violet-400' : 'fa-file-alt text-sky-400'
