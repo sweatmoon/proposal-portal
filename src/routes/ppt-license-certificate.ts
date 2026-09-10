@@ -97,22 +97,26 @@ async function buildOneSlide(params: {
   // ── 1. 소스 슬라이드 XML / rels 읽기 ─────────────────────────────────────
   const srcXml  = (await srcZip.file(srcSlidePath)!.async('string'))
   const srcRelsPath = srcSlidePath.replace('ppt/slides/', 'ppt/slides/_rels/') + '.rels'
-  const srcRelsXml  = (await srcZip.file(srcRelsPath)!.async('string'))
+  const srcRelsFile = srcZip.file(srcRelsPath)
+  const srcRelsXml  = srcRelsFile ? (await srcRelsFile.async('string')) : ''
+
+  console.log(`[DEBUG][slide${slideNum}] srcSlidePath=${srcSlidePath}`)
+  console.log(`[DEBUG][slide${slideNum}] srcRelsPath=${srcRelsPath} exists=${!!srcRelsFile}`)
+  console.log(`[DEBUG][slide${slideNum}] srcRelsXml=\n${srcRelsXml}`)
 
   // ── 2. 소스 rels에서 미디어 rId → Target 맵 ─────────────────────────────
-  // Type 필터 대신 Target 기반 필터 사용:
-  //   Target이 '../media/' 로 시작하는 rel은 모두 수집
-  // 이유: 소스 pptx에 따라 Type이 표준 '/image'가 아닌 경우가 있고,
-  //       슬라이드 rels에서 미디어는 항상 '../media/' 상대경로를 사용함
+  // Target 기반 필터: '../media/' 로 시작하는 rel은 모두 수집
+  // (Type 필터 제거 — 소스 pptx 제작 도구에 따라 Type 값이 다를 수 있음)
   const srcRidToTarget = new Map<string, string>()
   for (const relM of srcRelsXml.matchAll(/<Relationship\s[^/]*/g)) {
     const attrs = relM[0]
     const idM  = attrs.match(/Id="([^"]+)"/)
     const tgtM = attrs.match(/Target="([^"]+)"/)
     if (idM && tgtM && tgtM[1].startsWith('../media/')) {
-      srcRidToTarget.set(idM[1], tgtM[1]) // e.g. rId3 → ../media/merged_1.png
+      srcRidToTarget.set(idM[1], tgtM[1])
     }
   }
+  console.log(`[DEBUG][slide${slideNum}] srcRidToTarget=`, JSON.stringify([...srcRidToTarget]))
 
   // ── 3. 소스 미디어를 outZip에 복사, rId 리매핑 ───────────────────────────
   // 충돌 방지: 결과 pptx 내 media 파일명을 slide별로 고유하게 만든다
@@ -124,6 +128,12 @@ async function buildOneSlide(params: {
   for (const m of templateRelsXml.matchAll(/Id="([^"]+)"/g)) existingRids.add(m[1])
 
   let ridCounter = 100 + slideNum * 100 // 슬라이드별 고유 시작 번호
+
+  // ── 소스 XML에서 실제 사용 중인 r:embed 목록 수집 (디버그용) ──────────────
+  const usedEmbeds = new Set<string>()
+  for (const m of srcXml.matchAll(/r:embed="([^"]+)"/g)) usedEmbeds.add(m[1])
+  console.log(`[DEBUG][slide${slideNum}] XML에서 사용 중인 r:embed=`, JSON.stringify([...usedEmbeds]))
+  console.log(`[DEBUG][slide${slideNum}] srcZip 전체 파일 목록:`, srcZip.files ? Object.keys(srcZip.files).filter(f => f.includes('media')).join(', ') : 'N/A')
 
   for (const [srcRid, srcTarget] of srcRidToTarget) {
     // '../media/image1.png' → 'ppt/media/image1.png'
